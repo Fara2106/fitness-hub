@@ -4,31 +4,32 @@
  * (le chiamate API richiedono sempre internet)
  */
 
-const CACHE_NAME = "fitness-hub-v1";
+const CACHE_NAME = "fitness-hub-v2";
+const BASE = "/fitness-hub";
 
 const STATIC_ASSETS = [
-  "/",
-  "/index.html",
-  "/styles.css",
-  "/manifest.json",
-  "/icon-192.png",
-  "/icon-512.png",
-  "/api.jsx",
-  "/app.jsx",
-  "/storage.jsx",
-  "/parser.jsx",
-  "/i18n.jsx",
-  "/icons.jsx",
-  "/anatomy.jsx",
-  "/nav.jsx",
-  "/screens/dashboard.jsx",
-  "/screens/scheda.jsx",
-  "/screens/dieta.jsx",
-  "/screens/spesa.jsx",
-  "/screens/coach.jsx",
-  "/screens/storico.jsx",
-  "/screens/impostazioni.jsx",
-  "/screens/onboarding.jsx",
+  BASE + "/",
+  BASE + "/index.html",
+  BASE + "/styles.css",
+  BASE + "/manifest.json",
+  BASE + "/icon-192.png",
+  BASE + "/icon-512.png",
+  BASE + "/api.jsx",
+  BASE + "/app.jsx",
+  BASE + "/storage.jsx",
+  BASE + "/parser.jsx",
+  BASE + "/i18n.jsx",
+  BASE + "/icons.jsx",
+  BASE + "/anatomy.jsx",
+  BASE + "/nav.jsx",
+  BASE + "/screens/dashboard.jsx",
+  BASE + "/screens/scheda.jsx",
+  BASE + "/screens/dieta.jsx",
+  BASE + "/screens/spesa.jsx",
+  BASE + "/screens/coach.jsx",
+  BASE + "/screens/storico.jsx",
+  BASE + "/screens/impostazioni.jsx",
+  BASE + "/screens/onboarding.jsx",
 ];
 
 // ── Install: pre-cacha tutti i file statici ──────────────────────────────────
