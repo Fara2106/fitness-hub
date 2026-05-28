@@ -15,36 +15,76 @@ function _buildSystemPrompt({ activities, checkIn, hydration, weekNum, bodyWeigh
   const sess = window.getTodaySession ? window.getTodaySession() : null;
   const sessLabel = sess ? `${sess.label} (${sess.muscles.join(", ")})` : "Riposo";
 
-  let prompt = `Sei il personal coach di Lorenzo Faraoni: preciso, motivante, conoscenza profonda di allenamento powerbuilding (RPE, mesocicli, progressione) e nutrizione (bulk lento, manipolazione carbo, timing proteine). Rispondi in italiano, conciso (2-5 frasi max), tono diretto come un coach che lo conosce bene da anni.
+  // Ora del giorno e contesto temporale
+  const now = new Date();
+  const h = now.getHours();
+  const timeOfDay = h < 6 ? "notte" : h < 12 ? "mattina" : h < 15 ? "pranzo" : h < 18 ? "pomeriggio" : h < 21 ? "sera" : "sera tardi";
+  const timeStr = now.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+  const dateStr = now.toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" });
 
-Lorenzo: ${bodyWeight || 77.5}kg, 178cm, Settimana ${weekNum || 3} di 8 del mesociclo Upper/Lower 3×. Oggi: ${sessLabel}.
+  // File caricati dall'utente
+  const st = window.storage;
+  const schedaData = st ? st.get("schedaData", null) : null;
+  const dietaData  = st ? st.get("dietaData",  null) : null;
+
+  // Check-in e note sessione di oggi
+  const today = window.todayKey ? window.todayKey() : now.toISOString().slice(0, 10);
+  const sessionNotes = st ? st.get(`notes_${today}`, "") : "";
+
+  // ── Prompt base ────────────────────────────────────────────────────────────
+  let prompt = `Sei il personal coach di Lorenzo Faraoni: preciso, motivante, esperto di powerbuilding (RPE, mesocicli, periodizzazione) e nutrizione (bulk lento, timing proteine, manipolazione carbo). Rispondi in italiano, conciso (2-5 frasi), tono diretto da coach che lo conosce bene da anni.
+
+Lorenzo: ${bodyWeight || 77.5}kg, 178cm.
+Mesociclo: Settimana ${weekNum || 1} / 8 · Upper/Lower 3×/settimana.
+Oggi: ${dateStr} — ${sessLabel}.
+Ora: ${timeStr} (${timeOfDay}).
 Piano: Upper A (Lun), Lower (Mer), Upper B (Ven). Cardio: camminata + ellittica nei giorni di riposo.
-Dieta: bulk lento — ~2700 kcal allenamento, ~2400 riposo. Proteine: ~180g/die. Integratori: MGK pre-WO, Omnia intra, Barretta 45g (quando ore 17/21/22).
 ESCLUDERE SEMPRE dalla dieta: pasta di ceci, lenticchie, piselli, bevanda di mandorla.`;
 
+  // ── Check-in ───────────────────────────────────────────────────────────────
   if (checkIn) {
-    const lvl = (v) => ["","pessimo","basso","medio","buono","ottimo"][Math.max(1, Math.min(5, v || 3))] || "medio";
-    prompt += `\n\nCheck-in oggi: sonno ${lvl(checkIn.sleep)} (${checkIn.sleep}/5), energia ${lvl(checkIn.energy)} (${checkIn.energy}/5)${checkIn.ailments ? `, fastidi segnalati: "${checkIn.ailments}"` : ""}.`;
+    const lvl = (v) => ["","pessimo","basso","medio","buono","ottimo"][Math.max(1, Math.min(5, v || 3))];
+    prompt += `\n\nCheck-in oggi: sonno ${lvl(checkIn.sleep)} (${checkIn.sleep}/5), energia ${lvl(checkIn.energy)} (${checkIn.energy}/5)${checkIn.ailments ? `, fastidi: "${checkIn.ailments}"` : ""}.`;
     if (checkIn.sleep <= 2 || checkIn.energy <= 2) {
       prompt += ` ⚠️ Recupero scarso — suggerisci RPE −1 o taglio ultima serie se rilevante.`;
     }
   }
+
+  // ── Idratazione ────────────────────────────────────────────────────────────
   if (typeof hydration === "number") {
-    const liters = (hydration * 0.25).toFixed(2);
-    prompt += `\nIdratazione attuale: ${hydration}/12 (${liters}L su 3L target).`;
+    prompt += `\nIdratazione: ${hydration}/12 (${(hydration * 0.25).toFixed(2)}L su 3L target).`;
   }
+
+  // ── Cardio recente ─────────────────────────────────────────────────────────
   if (activities && activities.length > 0) {
     const recent = activities.slice(0, 5).map(a =>
-      `• ${a.when}: ${_ACT_LABEL[a.type] || a.type} ${a.min}min${a.km ? " " + a.km + "km" : ""}${a.note ? " ("+a.note+")" : ""}`
+      `• ${a.when}: ${_ACT_LABEL[a.type] || a.type} ${a.min}min${a.km ? " " + a.km + "km" : ""}${a.note ? " (" + a.note + ")" : ""}`
     ).join("\n");
     prompt += `\n\nCardio recente:\n${recent}`;
   }
 
-  // Session notes from today
-  const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0,10);
-  const sessionNotes = window.storage ? window.storage.get(`notes_${today}`, "") : "";
+  // ── Note scheda oggi ───────────────────────────────────────────────────────
   if (sessionNotes) {
     prompt += `\n\nNote scheda di oggi: "${sessionNotes}"`;
+  }
+
+  // ── Scheda allenamento (file caricato) ─────────────────────────────────────
+  if (schedaData) {
+    const txt = schedaData.length > 3000 ? schedaData.slice(0, 3000) + "\n[…troncato]" : schedaData;
+    prompt += `\n\n=== SCHEDA ALLENAMENTO (file caricato) ===\n${txt}`;
+  } else {
+    // Fallback se il file non è stato caricato
+    prompt += `\n\nScheda: Upper/Lower split 3×/settimana. Esercizi principali: squat, panca, stacco, OHP, trazioni, rematore.`;
+  }
+
+  // ── Piano alimentare (file caricato) ──────────────────────────────────────
+  if (dietaData) {
+    const txt = dietaData.length > 3000 ? dietaData.slice(0, 3000) + "\n[…troncato]" : dietaData;
+    prompt += `\n\n=== PIANO ALIMENTARE (file caricato — usa questi dati come riferimento primario) ===\n${txt}`;
+  } else {
+    // Fallback se il file non è stato caricato
+    prompt += `\n\nDieta: bulk lento — ~2700 kcal giorno allenamento, ~2400 riposo. Proteine: ~180g/die.`;
+    prompt += `\nIntegratori: MGK pre-WO, Omnia intra/post, Barretta 4Plus 45g (snack ore 17/21/22).`;
   }
 
   return prompt;

@@ -176,49 +176,54 @@ const CategorySection = ({ cat, checked, onToggle, isDesktop, freq }) => {
   );
 };
 
-const Spesa = ({ device }) => {
+const Spesa = ({ device, spesaChecked, setSpesaChecked, spesaFreq, setSpesaFreq }) => {
   const isDesktop = device === "desktop";
   const t = useT();
-  const STORAGE_KEY = "spesaChecked";
-  const FREQ_KEY    = "spesaFreq";
 
-  const [checked, setChecked] = React.useState(() =>
-    window.storage ? window.storage.get(STORAGE_KEY, {}) : {}
+  // Stato locale di fallback (usato solo se i props non vengono passati)
+  const [_localChecked, _setLocalChecked] = React.useState(() =>
+    window.storage ? window.storage.get("spesaChecked", {}) : {}
   );
-  const [freq, setFreq] = React.useState(() =>
-    window.storage ? window.storage.get(FREQ_KEY, 1) : 1
+  const [_localFreq, _setLocalFreq] = React.useState(() =>
+    window.storage ? window.storage.get("spesaFreq", 1) : 1
   );
 
-  const _syncSpesa = (checkedObj, freqVal) => {
-    if (!window.sheetsAPI) return;
-    window.sheetsAPI.saveSettings({ key: "spesaChecked", value: JSON.stringify(checkedObj) }).catch(() => {});
-    if (freqVal !== undefined)
-      window.sheetsAPI.saveSettings({ key: "spesaFreq", value: String(freqVal) }).catch(() => {});
+  // Usa i props se disponibili (modalità controllata da AppFrame), altrimenti locale
+  const checked = spesaChecked !== undefined ? spesaChecked : _localChecked;
+  const freq    = spesaFreq    !== undefined ? spesaFreq    : _localFreq;
+
+  const setChecked = (next) => {
+    if (setSpesaChecked) {
+      setSpesaChecked(next); // AppFrame gestisce storage + cloud sync
+    } else {
+      _setLocalChecked(next);
+      if (window.storage) window.storage.set("spesaChecked", next);
+      if (window.sheetsAPI) window.sheetsAPI.saveSettings({ key: "spesaChecked", value: JSON.stringify(next) }).catch(() => {});
+    }
+  };
+
+  const setFreq = (f) => {
+    if (setSpesaFreq) {
+      setSpesaFreq(f); // AppFrame gestisce storage + cloud sync
+    } else {
+      _setLocalFreq(f);
+      if (window.storage) window.storage.set("spesaFreq", f);
+      if (window.sheetsAPI) window.sheetsAPI.saveSettings({ key: "spesaFreq", value: String(f) }).catch(() => {});
+    }
   };
 
   const toggle = (k) => {
     if (navigator.vibrate) navigator.vibrate([50]);
-    setChecked(c => {
-      const next = { ...c, [k]: !c[k] };
-      if (window.storage) window.storage.set(STORAGE_KEY, next);
-      _syncSpesa(next);
-      return next;
-    });
+    setChecked({ ...checked, [k]: !checked[k] });
   };
 
   const changeFreq = (f) => {
     setFreq(f);
-    if (window.storage) window.storage.set(FREQ_KEY, f);
-    // Reset checkbox when changing frequency
-    setChecked({});
-    if (window.storage) window.storage.set(STORAGE_KEY, {});
-    _syncSpesa({}, f);
+    setChecked({}); // reset lista quando cambia frequenza
   };
 
   const reset = () => {
     setChecked({});
-    if (window.storage) window.storage.set(STORAGE_KEY, {});
-    _syncSpesa({});
   };
 
   const totalItems = CATEGORIES.reduce((n, c) => n + c.items.length, 0);

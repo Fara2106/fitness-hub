@@ -53,7 +53,12 @@ const Screen = ({ which, device, state, set, globalCtx }) => {
     case "dieta":
       return <Dieta {...pass} />;
     case "spesa":
-      return <Spesa {...pass} />;
+      return <Spesa {...pass}
+        spesaChecked={state.spesaChecked}
+        setSpesaChecked={(v) => setState(st => ({ ...st, spesaChecked: v }))}
+        spesaFreq={state.spesaFreq}
+        setSpesaFreq={(v) => setState(st => ({ ...st, spesaFreq: v }))}
+      />;
     case "coach":
       return <Coach {...pass} activities={state.activities} checkIn={state.checkIn} hydration={state.hydration} weekNum={state.weekNum} bodyWeight={state.bodyWeight} />;
     case "storico":
@@ -98,34 +103,58 @@ async function _cloudSync() {
   try {
     await Promise.race([
       (async () => {
-        // 1. Body weight — prendi l'ultimo dal foglio PesoCorporeo
-        if (!st.get("bodyWeight", "") || parseFloat(st.get("bodyWeight", 0)) <= 0) {
-          try {
-            const pesi = await window.sheetsAPI.getPesoCorporeo();
-            if (Array.isArray(pesi) && pesi.length > 0) {
-              st.set("bodyWeight", pesi[pesi.length - 1].weight);
-            }
-          } catch (_) {}
+        // Chiamate in parallelo per velocità
+        const [pesiResult, settingsResult] = await Promise.allSettled([
+          window.sheetsAPI.getPesoCorporeo(),
+          window.sheetsAPI.getSettings(),
+        ]);
+
+        // 1. Body weight — dall'ultimo entry in PesoCorporeo
+        if (pesiResult.status === "fulfilled") {
+          const pesi = pesiResult.value;
+          if (Array.isArray(pesi) && pesi.length > 0) {
+            st.set("bodyWeight", pesi[pesi.length - 1].weight);
+            console.log("[sync] bodyWeight →", pesi[pesi.length - 1].weight);
+          }
+        } else {
+          console.warn("[sync] getPesoCorporeo fallito:", pesiResult.reason);
         }
-        // 2. Settings — il cloud fa sempre testo (così gli aggiornamenti si propagano)
-        try {
-          const settings = await window.sheetsAPI.getSettings();
+
+        // 2. Settings (groqApiKey, schedaData, dietaData, spesa)
+        if (settingsResult.status === "fulfilled") {
+          const settings = settingsResult.value;
           if (settings && typeof settings === "object") {
-            // scheda/dieta/spesa: sovrascrivi sempre se il cloud ha un valore
             ["schedaData", "dietaData"].forEach(k => {
-              if (settings[k]) st.set(k, settings[k]);
+              if (settings[k]) { st.set(k, settings[k]); console.log("[sync]", k, "✓"); }
             });
             if (settings.spesaChecked) {
               try { st.set("spesaChecked", JSON.parse(settings.spesaChecked)); } catch(_) {}
             }
             if (settings.spesaFreq) st.set("spesaFreq", Number(settings.spesaFreq) || 1);
-            // groqApiKey: sovrascrivi solo se locale è vuoto (evita di perdere chiavi)
-            if (!st.get("groqApiKey", "") && settings.groqApiKey)
+            // groqApiKey: cloud wins sempre (sync anche se locale già presente)
+            if (settings.groqApiKey) {
               st.set("groqApiKey", settings.groqApiKey);
+              console.log("[sync] groqApiKey ✓");
+            }
+            if (settings.weekNum) st.set("weekNum", Number(settings.weekNum) || 1);
+            if (settings.bodyWeight && parseFloat(settings.bodyWeight) > 0) {
+              st.set("bodyWeight", parseFloat(settings.bodyWeight));
+              console.log("[sync] bodyWeight (settings) →", settings.bodyWeight);
+            }
           }
-        } catch (_) {}
+        } else {
+          console.warn("[sync] getSettings fallito:", settingsResult.reason);
+        }
+
+        // 3. Se i campi obbligatori ci sono → salta onboarding automaticamente
+        const hasBW   = parseFloat(st.get("bodyWeight", 0)) > 0;
+        const hasGroq = !!st.get("groqApiKey", "");
+        if (hasBW && hasGroq) {
+          st.set("onboardingDone", true);
+          console.log("[sync] onboardingDone → true");
+        }
       })(),
-      new Promise(resolve => setTimeout(resolve, 2500)), // timeout 2.5s
+      new Promise(resolve => setTimeout(resolve, 4000)), // timeout 4s
     ]);
   } catch (_) {}
 }
@@ -145,19 +174,21 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
   function initState() {
     const st = window.storage || { get: (k, d) => d };
     return {
-      screen:      initialScreen || (st.get("onboardingDone", false) ? "dashboard" : "onboarding"),
-      scheda:      "Upper A",
-      isHome:      false,
-      activities:  st.get("activities", []),
-      checkIn:     st.get(`checkIn_${today}`, { sleep: 4, energy: 4, ailments: "" }),
-      hydration:   st.get(`hydration_${today}`, 3),
-      weekNum:     st.get("weekNum", 1),
-      bodyWeight:  st.get("bodyWeight", 100),
-      theme:       st.get("theme", "dark"),
+      screen:       initialScreen || (st.get("onboardingDone", false) ? "dashboard" : "onboarding"),
+      scheda:       "Upper A",
+      isHome:       false,
+      activities:   st.get("activities", []),
+      checkIn:      st.get(`checkIn_${today}`, { sleep: 4, energy: 4, ailments: "" }),
+      hydration:    st.get(`hydration_${today}`, 3),
+      weekNum:      st.get("weekNum", 1),
+      bodyWeight:   st.get("bodyWeight", 100),
+      theme:        st.get("theme", "dark"),
+      spesaChecked: st.get("spesaChecked", {}),
+      spesaFreq:    st.get("spesaFreq", 1),
     };
   }
 
-  const [state, setStateRaw] = React.useState({ screen: initialScreen, scheda: "Upper A", isHome: false, activities: [], checkIn: { sleep: 4, energy: 4, ailments: "" }, hydration: 3, weekNum: 1, bodyWeight: 100, theme: "dark" });
+  const [state, setStateRaw] = React.useState({ screen: initialScreen, scheda: "Upper A", isHome: false, activities: [], checkIn: { sleep: 4, energy: 4, ailments: "" }, hydration: 3, weekNum: 1, bodyWeight: 100, theme: "dark", spesaChecked: {}, spesaFreq: 1 });
   const [lang, setLang] = React.useState(window.storage ? window.storage.get("lang", "it") : "it");
   const [initialized, setInitialized] = React.useState(false);
 
@@ -184,8 +215,25 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
         if (window.sheetsAPI) window.sheetsAPI.saveCheckIn({ date: t, sleep: next.checkIn.sleep, energy: next.checkIn.energy, ailments: next.checkIn.ailments || "" }).catch(() => {});
       }
       if (next.hydration  !== prev.hydration)  window.storage.set(`hydration_${t}`, next.hydration);
-      if (next.weekNum    !== prev.weekNum)     window.storage.set("weekNum", next.weekNum);
-      if (next.bodyWeight !== prev.bodyWeight)  window.storage.set("bodyWeight", next.bodyWeight);
+      if (next.weekNum    !== prev.weekNum) {
+        window.storage.set("weekNum", next.weekNum);
+        if (window.sheetsAPI) window.sheetsAPI.saveSettings({ key: "weekNum", value: String(next.weekNum) }).catch(() => {});
+      }
+      if (next.bodyWeight !== prev.bodyWeight) {
+        window.storage.set("bodyWeight", next.bodyWeight);
+        if (window.sheetsAPI) {
+          window.sheetsAPI.saveSettings({ key: "bodyWeight", value: String(next.bodyWeight) }).catch(() => {});
+          window.sheetsAPI.savePesoCorporeo({ date: t, weight: next.bodyWeight }).catch(() => {});
+        }
+      }
+      if (next.spesaChecked !== prev.spesaChecked) {
+        window.storage.set("spesaChecked", next.spesaChecked);
+        if (window.sheetsAPI) window.sheetsAPI.saveSettings({ key: "spesaChecked", value: JSON.stringify(next.spesaChecked) }).catch(() => {});
+      }
+      if (next.spesaFreq !== prev.spesaFreq) {
+        window.storage.set("spesaFreq", next.spesaFreq);
+        if (window.sheetsAPI) window.sheetsAPI.saveSettings({ key: "spesaFreq", value: String(next.spesaFreq) }).catch(() => {});
+      }
       if (next.theme      !== prev.theme)       { window.storage.set("theme", next.theme); _applyTheme(next.theme); }
       return next;
     });
@@ -193,6 +241,29 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
 
   // Apply theme on mount + when theme changes
   React.useEffect(() => { _applyTheme(state.theme); }, [state.theme]);
+
+  // Re-sync when app comes to foreground (Page Visibility API)
+  React.useEffect(() => {
+    if (!initialized) return;
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        _cloudSync().finally(() => {
+          const s = initState();
+          setStateRaw(prev => ({
+            ...prev,
+            bodyWeight:   s.bodyWeight,
+            weekNum:      s.weekNum,
+            checkIn:      s.checkIn,
+            hydration:    s.hydration,
+            spesaChecked: s.spesaChecked,
+            spesaFreq:    s.spesaFreq,
+          }));
+        });
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [initialized]);
 
   const globalCtx = { lang, setLang: (l) => { setLang(l); window.storage && window.storage.set("lang", l); } };
 
