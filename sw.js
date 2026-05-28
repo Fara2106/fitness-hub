@@ -4,7 +4,7 @@
  * (le chiamate API richiedono sempre internet)
  */
 
-const CACHE_NAME = "fitness-hub-v4-20260528b";
+const CACHE_NAME = "fitness-hub-v5-20260528c";
 const BASE = "/fitness-hub";
 
 const STATIC_ASSETS = [
@@ -63,7 +63,24 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // File statici locali → cache-first, aggiorna in background
+  // Navigazione (HTML) → network-first: serve sempre la versione più fresca
+  // Questo assicura che index.html con il codice di auto-reload venga scaricato
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response && response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request)) // fallback offline
+    );
+    return;
+  }
+
+  // File statici (JS, CSS, immagini) → stale-while-revalidate
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const networkFetch = fetch(event.request).then((response) => {
@@ -73,7 +90,6 @@ self.addEventListener("fetch", (event) => {
         }
         return response;
       });
-      // Restituisce subito la cache se disponibile, altrimenti aspetta la rete
       return cached || networkFetch;
     })
   );

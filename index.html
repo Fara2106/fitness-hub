@@ -95,9 +95,23 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 <!-- Service Worker (PWA offline support) -->
 <script>
 if ('serviceWorker' in navigator) {
+  // Rileva quando un nuovo SW prende il controllo → ricarica per avere codice aggiornato
+  let _refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (_refreshing) return;
+    _refreshing = true;
+    console.log('[SW] Nuovo SW attivo, ricarico...');
+    window.location.reload();
+  });
+
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js')
-      .then(reg => console.log('[SW] Registrato:', reg.scope))
+      .then(reg => {
+        console.log('[SW] Registrato:', reg.scope);
+        // Controlla aggiornamenti subito e poi ogni 60s
+        reg.update().catch(() => {});
+        setInterval(() => reg.update().catch(() => {}), 60000);
+      })
       .catch(err => console.warn('[SW] Errore registrazione:', err));
   });
 }
