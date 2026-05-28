@@ -101,22 +101,18 @@ function _applyTheme(theme) {
 // ARCHITETTURA: ogni chiamata ha il suo timeout individuale via _safe().
 // Promise.all aspetta entrambe, ma ognuna risolve a {ok,value/err} senza
 // mai rigettare → nessun blocco se una delle due è lenta.
-// Questo evita il bug precedente: Promise.allSettled dentro un race globale
-// da 4s faceva sì che se getSettings impiegava >4s (cold start Apps Script)
-// NULLA veniva scritto in storage prima di initState().
+function _safe(p, ms) {
+  return Promise.race([
+    p.then(v  => ({ ok: true,  value: v    }))
+     .catch(e => ({ ok: false, err: String(e) })),
+    new Promise(resolve => setTimeout(() => resolve({ ok: false, err: "timeout" }), ms)),
+  ]);
+}
+
 async function _cloudSync(opts) {
   if (!window.sheetsAPI || !window.storage) return;
   const st = window.storage;
   const { pesiMs = 8000, settingsMs = 15000 } = opts || {};
-
-  // Wrappa una promise con timeout individuale; non rigetta mai
-  function _safe(p, ms) {
-    return Promise.race([
-      p.then(v  => ({ ok: true,  value: v    }))
-       .catch(e => ({ ok: false, err: String(e) })),
-      new Promise(resolve => setTimeout(() => resolve({ ok: false, err: "timeout" }), ms)),
-    ]);
-  }
 
   try {
     const [pesiRes, settingsRes] = await Promise.all([
@@ -135,45 +131,117 @@ async function _cloudSync(opts) {
       console.warn("[sync] getPesoCorporeo:", pesiRes.err);
     }
 
-    // 2. Settings cross-device
+    // 2. Settings cross-device (cloud → local)
+    let cloudKeys = {};
     if (settingsRes.ok && settingsRes.value && typeof settingsRes.value === "object") {
       const s = settingsRes.value;
+      cloudKeys = s;
       ["schedaData", "dietaData"].forEach(k => {
-        if (s[k]) { st.set(k, s[k]); console.log("[sync]", k, "✓"); }
+        if (s[k]) { st.set(k, s[k]); console.log("[sync pull]", k, "✓"); }
       });
       if (s.spesaChecked) {
-        try { st.set("spesaChecked", JSON.parse(s.spesaChecked)); console.log("[sync] spesaChecked ✓"); } catch(_) {}
+        try { st.set("spesaChecked", JSON.parse(s.spesaChecked)); console.log("[sync pull] spesaChecked ✓"); } catch(_) {}
       }
       if (s.spesaFreq)  st.set("spesaFreq", Number(s.spesaFreq) || 1);
       // groqApiKey: cloud wins sempre
-      if (s.groqApiKey) { st.set("groqApiKey", s.groqApiKey); console.log("[sync] groqApiKey ✓"); }
+      if (s.groqApiKey) { st.set("groqApiKey", s.groqApiKey); console.log("[sync pull] groqApiKey ✓"); }
       if (s.weekNum)    st.set("weekNum", Number(s.weekNum) || 1);
       if (s.bodyWeight && parseFloat(s.bodyWeight) > 0) {
         st.set("bodyWeight", parseFloat(s.bodyWeight));
-        console.log("[sync] bodyWeight (settings) →", s.bodyWeight);
+        console.log("[sync pull] bodyWeight (settings) →", s.bodyWeight);
       }
-      // onboardingDone persiste nel cloud → sopravvive alla pulizia IndexedDB di iOS
       if (s.onboardingDone === "true") st.set("onboardingDone", true);
     } else {
       console.warn("[sync] getSettings:", settingsRes.err);
     }
 
-    // 3. Auto-skip onboarding: basta groqApiKey OPPURE bodyWeight (OR, non AND)
-    //    Poi pusha onboardingDone al cloud una volta sola
+    // 3. Auto-skip onboarding
     const hasBW   = parseFloat(st.get("bodyWeight", 0)) > 0;
     const hasGroq = !!st.get("groqApiKey", "");
     if (hasGroq || hasBW) {
-      const wasDone = st.get("onboardingDone", false);
       st.set("onboardingDone", true);
-      if (!wasDone) {
-        // Prima volta che lo impostiamo → persistiamo nel cloud
+      if (cloudKeys.onboardingDone !== "true") {
         window.sheetsAPI.saveSettings({ key: "onboardingDone", value: "true" }).catch(() => {});
       }
       console.log("[sync] onboardingDone → true");
     }
 
-  } catch (_) {}
+    // 4. Push locale → cloud per chiavi mancanti nel cloud
+    //    Questo risolve il caso in cui dati esistono localmente ma non sono
+    //    mai stati pushati (codice precedente, errore silenzioso, ecc.)
+    _cloudPushMissing(cloudKeys);
+
+  } catch (e) { console.warn("[sync] error:", e); }
 }
+
+// ── Cloud push: pusha al cloud tutto ciò che manca ────────────────────────
+function _cloudPushMissing(cloudKeys) {
+  if (!window.sheetsAPI || !window.storage) return;
+  const st = window.storage;
+  const save = (key, value) => {
+    if (value !== undefined && value !== null && value !== "") {
+      console.log("[sync push]", key, "→ cloud");
+      window.sheetsAPI.saveSettings({ key, value: String(value) }).catch(e => console.warn("[sync push err]", key, e));
+    }
+  };
+
+  // Chiavi semplici (string/number)
+  const KEYS = ["groqApiKey", "bodyWeight", "weekNum", "onboardingDone", "spesaFreq"];
+  KEYS.forEach(k => {
+    const local = st.get(k, "");
+    if (local && !cloudKeys[k]) {
+      save(k, k === "onboardingDone" ? "true" : local);
+    }
+  });
+
+  // Chiavi grandi (text files)
+  ["schedaData", "dietaData"].forEach(k => {
+    const local = st.get(k, null);
+    if (local && !cloudKeys[k]) {
+      save(k, local);
+    }
+  });
+
+  // spesaChecked (JSON)
+  const sc = st.get("spesaChecked", null);
+  if (sc && Object.keys(sc).length > 0 && !cloudKeys.spesaChecked) {
+    save("spesaChecked", JSON.stringify(sc));
+  }
+}
+
+// ── Push forzato di TUTTO al cloud (per bottone "Sincronizza ora") ────────
+window._cloudPushAll = function() {
+  if (!window.sheetsAPI || !window.storage) return Promise.resolve();
+  const st = window.storage;
+  const saves = [];
+  const push = (key, value) => {
+    if (value !== undefined && value !== null && value !== "") {
+      saves.push(
+        window.sheetsAPI.saveSettings({ key, value: String(value) })
+          .then(() => console.log("[push all]", key, "✓"))
+          .catch(e => console.warn("[push all err]", key, e))
+      );
+    }
+  };
+
+  // Tutte le chiavi sincronizzabili
+  push("groqApiKey",    st.get("groqApiKey", ""));
+  push("bodyWeight",    st.get("bodyWeight", ""));
+  push("weekNum",       st.get("weekNum", ""));
+  push("spesaFreq",     st.get("spesaFreq", ""));
+  push("onboardingDone", st.get("onboardingDone", false) ? "true" : "");
+
+  const sc = st.get("spesaChecked", null);
+  if (sc && Object.keys(sc).length > 0) push("spesaChecked", JSON.stringify(sc));
+
+  const scheda = st.get("schedaData", null);
+  if (scheda) push("schedaData", scheda);
+
+  const dieta = st.get("dietaData", null);
+  if (dieta) push("dietaData", dieta);
+
+  return Promise.all(saves);
+};
 
 // ── AppFrame ───────────────────────────────────────────────────────────────
 const AppFrame = ({ device, initialScreen, chromeless }) => {

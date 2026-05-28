@@ -506,8 +506,48 @@ const Impostazioni = ({ device, theme, setTheme, weekNum, setWeekNum, bodyWeight
         </IRow>
       </ISection>
 
-      {/* — Dati & Privacy — */}
-      <ISection title={t("Dati & Privacy")}>
+      {/* — Sync & Dati — */}
+      <ISection title={t("Sincronizzazione & Dati")}>
+        {(() => {
+          const [syncing, setSyncing] = React.useState(false);
+          const [syncResult, setSyncResult] = React.useState(null);
+          const handleSync = async () => {
+            setSyncing(true);
+            setSyncResult(null);
+            try {
+              await window._cloudPushAll();
+              setSyncResult({ ok: true });
+            } catch (e) {
+              setSyncResult({ ok: false, msg: e.message });
+            } finally {
+              setSyncing(false);
+              setTimeout(() => setSyncResult(null), 4000);
+            }
+          };
+          return (
+            <IRow
+              icon="refresh"
+              iconBg="#0A84FF"
+              title={t("Sincronizza ora")}
+              sub={t("Pusha tutti i dati locali al cloud")}
+              onClick={!syncing ? handleSync : undefined}
+            >
+              {syncing ? (
+                <span className="spinner" style={{ width: 18, height: 18 }} />
+              ) : syncResult ? (
+                <span className="pill" style={{
+                  fontSize: 10,
+                  background: syncResult.ok ? "rgba(48,209,88,0.18)" : "rgba(255,69,58,0.14)",
+                  color: syncResult.ok ? "var(--success)" : "var(--danger)",
+                }}>
+                  {syncResult.ok ? "✓ Sincronizzato" : "✗ Errore"}
+                </span>
+              ) : (
+                <Icon name="chevron" size={13} color="var(--accent)" />
+              )}
+            </IRow>
+          );
+        })()}
         <IRow icon="lock" iconBg="#636366" title={t("Dati locali")} sub={t("Tutti i dati sono sul dispositivo")} trailing={
           <span className="pill" style={{ fontSize: 10 }}>🔒 {t("Solo locale")}</span>
         } />
