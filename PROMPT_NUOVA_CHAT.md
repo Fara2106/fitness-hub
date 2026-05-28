@@ -1,114 +1,180 @@
-# Prompt per nuova chat — Lorenzo Fitness Hub
+# Contesto progetto: Lorenzo Fitness Hub
 
-## Progetto
-App fitness React single-page per uso personale (Lorenzo Faraoni). Gira in locale su `http://localhost:8080/launch.html` lanciata da uno script `.command` sul Desktop.
+Sono Lorenzo Faraoni (lorefara97@gmail.com). Sto sviluppando una PWA fitness personale chiamata **Lorenzo Fitness Hub**, hostata su GitHub Pages all'indirizzo `https://fara2106.github.io/fitness-hub`. Il repository è `https://github.com/fara2106/fitness-hub`. La cartella locale è `~/Documents/Web Apps/Fitness App/`.
 
-## Stack tecnico
-- React 18 via unpkg CDN + Babel standalone (tutti i file `.jsx` caricati come `<script type="text/babel">`)
-- **NESSUN bundler** — i file vengono serviti da `python3 -m http.server 8080`
-- Tutti i componenti esposti come `window.ComponentName = ComponentName`
-- **ATTENZIONE Babel**: le `const` NON vengono hoistate — i componenti devono essere definiti in ordine (dipendenze prima di chi le usa)
+---
 
-## Regole INDEROGABILI
-- `window.storage` per la persistenza locale (MAI `localStorage`/`sessionStorage`)
-- Tutte le API key da `window.storage`, MAI nel codice sorgente
-- Nessun tag HTML `<form>` — solo `onClick`/`onChange`
-- ESCLUDERE SEMPRE dalla dieta: pasta di ceci, pasta di lenticchie, pasta di piselli, bevanda di mandorla
+## Stack tecnico — VINCOLI CRITICI (non modificare mai)
 
-## Cartella progetto
-`/Users/lorenzofaraoni/Documents/Web Apps/Fitness App/`
+- **React 18 via CDN + Babel standalone** — tutti i componenti sono esposti come `window.ComponentName` (es. `window.AppFrame`, `window.Dashboard`, ecc.). MAI usare import/export ES module.
+- **`window.storage`** (IndexedDB-backed, asincrono) — MAI usare `localStorage` o `sessionStorage`.
+- **Nessun tag HTML `<form>`** — solo `onClick`/`onChange`.
+- **Nessun bundler** — i file JSX vengono caricati direttamente nell'index.html tramite `<script type="text/babel">`.
+- I file JSX vengono caricati in ordine nell'index.html; ogni componente deve essere definito prima di essere usato.
 
-## File principali
-| File | Ruolo |
-|------|-------|
-| `launch.html` | Entry point desktop — carica tutti gli script, monta `<AppFrame device="desktop" />` |
-| `index.html` | Canvas di design (tutti gli artboard) — NON è il launcher |
-| `app.jsx` | Shell: routing, stato globale, persistenza, tema |
-| `styles.css` | Design system: variabili CSS, dark/light theme, componenti base |
-| `storage.jsx` | IndexedDB-backed sync cache — `window.storage` |
-| `api.jsx` | `window.sheetsAPI`, `window.groqAPI`, `window.playBeep`, `window.todayKey`, `window.getTodaySession` |
-| `parser.jsx` | `window.parseScheda(text)`, `window.parseDieta(text)` |
-| `nav.jsx` | `TabBar` (mobile), `Sidebar` (desktop), `LangContext`, `useT()`, `useLang()` |
-| `icons.jsx` | `window.Icon` — set SVG icons |
-| `anatomy.jsx` | `window.Anatomy` — figura corpo umano muscoli |
-| `screens/dashboard.jsx` | Home con anelli attività, check-in, peso, palestra tracker, cardio |
-| `screens/scheda.jsx` | Allenamento: serie, pesi, RPE, timer recupero auto, storico |
-| `screens/dieta.jsx` | Piano alimentare: timeline cronologica pasti + integratori + slider orario |
-| `screens/spesa.jsx` | Lista spesa settimanale con checkbox |
-| `screens/coach.jsx` | Coach AI via Groq API |
-| `screens/storico.jsx` | Grafici storici pesi con Recharts |
-| `screens/impostazioni.jsx` | Impostazioni, tema, reset |
-| `screens/onboarding.jsx` | Schermata iniziale prima configurazione |
-| `dieta.txt` | Piano nutrizionale di Lorenzo (testo) |
-| `scheda.txt` | Scheda allenamento di Lorenzo (testo) |
-| `google-apps-script.gs` | Google Apps Script per sync Sheets |
+---
 
-## Globals da `api.jsx`
-```js
-window.sheetsAPI       // GET/POST verso Google Sheets Apps Script
-window.groqAPI.complete({messages, systemPrompt, model, maxTokens})
+## Architettura backend
+
+### Google Apps Script (backend REST)
+- **URL deployment attivo**: `https://script.google.com/macros/s/AKfycbz7dHQg8Q3HOZ37vx-QLRT8jqHCSHXFPODKhU1uyoS8wyezgFV292MlnH8gRcOdRhQN/exec`
+- Versione deployata: **v5** (include `getSettings`/`saveSettings`)
+- Fogli Google Sheets:
+  - `PesoCorporeo` — Data | Peso
+  - `SerieAllenamento` — Data | Esercizio | SetN | Peso | Rip | RPE | Sessione | Settimana
+  - `Sessioni` — Data | Tipo | Settimana | SerieCompletate | SerieTotal | Note | OraInizio
+  - `Movimenti` — Data | Tipo | Minuti | Km | Note
+  - `CheckIn` — Data | Sonno | Energia | Fastidi
+  - `Settings` — Key | Value (sync cross-device)
+
+### Cloudflare Worker (proxy CORS)
+- **URL proxy**: `https://fitness-hub-proxy.lorefara97.workers.dev`
+- Tutte le chiamate a Apps Script passano per questo proxy
+
+### api.jsx — window.sheetsAPI e window.groqAPI
+```javascript
+// Endpoints disponibili:
+window.sheetsAPI.getPesi()
+window.sheetsAPI.getPesoCorporeo()
+window.sheetsAPI.getUltimiPesi()
+window.sheetsAPI.getCheckIn(date?)
+window.sheetsAPI.savePeso(d)           // { date, esercizio, setN, peso, rip, rpe, sessione, weekNum }
+window.sheetsAPI.savePesoCorporeo(d)   // { date, weight }
+window.sheetsAPI.saveSessione(d)       // { date, type, weekNum, setsCompleted, totalSets, notes }
+window.sheetsAPI.saveMovimento(d)      // { date, type, min, km, note }
+window.sheetsAPI.saveCheckIn(d)        // { date, sleep, energy, ailments }
+window.sheetsAPI.getSettings()         // → { key: value, ... }
+window.sheetsAPI.saveSettings(d)       // { key, value }
+window.sheetsAPI.testConnection()
+
+window.groqAPI.complete({ messages, systemPrompt, model, maxTokens })
 window.playBeep(freq, duration, gain)
-window.todayKey()      // → "YYYY-MM-DD"
-window.getTodaySession() // → {id, label, muscles} per Lun/Mer/Ven, null altrimenti
-window.parseScheda(text)
-window.parseDieta(text)
+window.todayKey()   // → "YYYY-MM-DD"
+window.getTodaySession()  // → { id, label, muscles, muscleKeys } oppure null (giorno riposo)
+// Upper A = lunedì, Lower = mercoledì, Upper B = venerdì
 ```
 
-## Stato attuale delle schermate
-- **Dashboard**: anelli attività (palestra giorni/settimana, cardio minuti, attività), check-in sonno/energia, peso corporeo + sparkline, GymCard toggle "sono andato in palestra", MovimentoCard log cardio
-- **Scheda**: esercizi con serie/pesi/RPE, timer recupero automatico (parte quando checkki un set), storico pesi da Sheets, sostituisci esercizio, note sessione, salva su Sheets
-- **Dieta**: toggle allenamento/riposo + orario, timeline cronologica con pasti E integratori mescolati in ordine orario, slider orario 06-24 con indicatore ora attuale, cardio con slider durata libero
-- **Spesa**: lista settimanale con checkbox, frequenza ~1 settimana, tutti gli integratori presenti
-- **Coach**: chat AI con Groq (richiede API key in impostazioni)
-- **Storico**: grafici pesi con Recharts
-- **Impostazioni**: tema dark/light/sistema, settimana programma, reset
+---
 
-## Storage keys importanti
-```
-onboardingDone          → bool
-activities              → array log cardio
-checkIn_YYYY-MM-DD      → {sleep, energy, ailments}
-hydration_YYYY-MM-DD    → number
-integ_YYYY-MM-DD        → {tipo: bool} — integratori assunti
-gym_YYYY-MM-DD          → bool — andato in palestra
-weekNum                 → 1-8
-bodyWeight              → number
-weightLog               → [{date, weight}]
-weekSessions            → number
-weekMuscleSets          → {Petto, Schiena, ...}
-notes_YYYY-MM-DD        → string
-theme                   → "dark"|"light"|"system"
-lang                    → "it"|"en"
-schedaData              → testo scheda.txt
-dietaData               → testo dieta.txt
-sheetsUrl               → URL Apps Script
-groqKey                 → API key Groq
-spesaChecked            → {cat-idx: bool}
+## Sync cross-device (completamente implementato)
+
+Il foglio **Settings** (key-value) su Google Sheets è il backend di sync.
+
+### Cosa viene sincronizzato:
+| Chiave | Push automatico | Pull automatico |
+|---|---|---|
+| `groqApiKey` | Quando salvata in Impostazioni | Avvio + foreground |
+| `schedaData` | Quando file .txt caricato | Avvio + foreground |
+| `dietaData` | Quando file .txt caricato | Avvio + foreground |
+| `spesaChecked` | Ogni toggle checkbox spesa | Avvio + foreground |
+| `spesaFreq` | Quando cambia frequenza spesa | Avvio + foreground |
+| `bodyWeight` | Ogni modifica peso | Avvio + foreground |
+| `weekNum` | Ogni modifica settimana | Avvio + foreground |
+
+### Logica in app.jsx:
+- `_cloudSync()` gira all'avvio e ogni volta che l'app torna in primo piano (Page Visibility API), con timeout 4s
+- Se `bodyWeight > 0` e `groqApiKey` presenti in cloud → `onboardingDone = true` automaticamente (salta onboarding su nuovi device)
+- `setState` in AppFrame pusha ogni cambio di `bodyWeight`, `weekNum`, `checkIn` al cloud
+
+---
+
+## PWA
+
+- `manifest.json`: `start_url: "/fitness-hub/"`, `scope: "/fitness-hub/"`, `display: "standalone"`
+- `sw.js`: tutti i path asset prefissati con `/fitness-hub`
+- `index.html`: `navigator.serviceWorker.register('./sw.js')` (path relativo, non assoluto)
+- **StatusBar** (barra fake "9:41"): nascosta se installata come PWA:
+```javascript
+const _isStandalone = window.navigator.standalone === true
+  || window.matchMedia("(display-mode: standalone)").matches;
+const StatusBar = () => _isStandalone ? null : <div className="lfh-status">...</div>;
 ```
 
-## Come lanciare
+---
+
+## Struttura file
+
+```
+~/Documents/Web Apps/Fitness App/
+├── index.html              # Entry point, carica tutti i JSX in ordine
+├── styles.css              # CSS globale con variabili tema dark/light
+├── app.jsx                 # AppFrame, routing, stato globale, cloud sync
+├── api.jsx                 # sheetsAPI, groqAPI, playBeep, todayKey
+├── storage.jsx             # window.storage (IndexedDB wrapper)
+├── i18n.jsx                # LangContext, useT(), traduzioni it/en
+├── icons.jsx               # window.Icon component (SVG icons)
+├── nav.jsx                 # TabBar (mobile), Sidebar (desktop)
+├── parser.jsx              # Parser scheda.txt e dieta.txt
+├── anatomy.jsx             # Componente anatomia muscolare
+├── design-canvas.jsx       # Canvas per design tweaks
+├── tweaks-panel.jsx        # Pannello tweaks UI
+├── google-apps-script.gs   # Codice Apps Script (v5, già deployato)
+├── manifest.json           # PWA manifest
+├── sw.js                   # Service Worker
+└── screens/
+    ├── dashboard.jsx       # Home con check-in, attività, peso
+    ├── scheda.jsx          # Scheda allenamento (legge schedaData da storage)
+    ├── dieta.jsx           # Piano alimentare (legge dietaData da storage)
+    ├── spesa.jsx           # Lista spesa con categorie e frequenza
+    ├── coach.jsx           # AI Coach (usa groqAPI)
+    ├── storico.jsx         # Storico allenamenti
+    ├── impostazioni.jsx    # Impostazioni (API key, file upload, tema, reset)
+    └── onboarding.jsx      # Onboarding prima apertura
+```
+
+---
+
+## window.storage — API
+
+```javascript
+window.storage.get(key, defaultValue)   // legge (sincrono dopo init)
+window.storage.set(key, value)          // scrive
+window.storage.clear()                  // resetta tutto
+window.storage.isReady()               // boolean
+window.storage.onReady(callback)        // callback quando pronto
+```
+
+## Schemi dati in storage
+
+```javascript
+storage.get(`checkIn_${YYYY-MM-DD}`, { sleep: 4, energy: 4, ailments: "" })
+storage.get(`hydration_${YYYY-MM-DD}`, 3)
+storage.get("activities", [])        // array { id, type, when, ... }
+storage.get("schedaData", null)      // testo grezzo scheda.txt
+storage.get("dietaData", null)       // testo grezzo dieta.txt
+storage.get("spesaChecked", {})      // es. { "proteine-0": true }
+storage.get("spesaFreq", 1)          // 1 o 2 volte/settimana
+storage.get("bodyWeight", 100)
+storage.get("weekNum", 1)            // settimana corrente 1-4
+storage.get("theme", "dark")         // "dark" | "light" | "system"
+storage.get("lang", "it")            // "it" | "en"
+storage.get("groqApiKey", "")
+storage.get("onboardingDone", false)
+```
+
+---
+
+## Tema e CSS
+
+- Dark mode di default, light mode tramite classe `theme-light` su `<html>`
+- Classi utility: `.card`, `.card.lift`, `.btn`, `.btn.ghost`, `.pill`, `.num`, `.muted`, `.bar`, `.fade-up`, `.spinner`, `.input`, `.input-mono`, `.ios-list`, `.row`, `.check`, `.check.on`
+- Variabili: `--bg`, `--card`, `--card-2`, `--card-3`, `--text`, `--text-2`, `--text-3`, `--border`, `--accent`, `--success`, `--danger`
+- Layout root: `.lfh` (root flex column), `.lfh-scroll` (scroll area), `.lfh-status` (status bar)
+- Prop `device` su tutti i componenti: `"mobile"` | `"desktop"`
+
+---
+
+## Stato attuale ✅
+
+- PWA installabile e funzionante su iPhone e desktop
+- Sync cross-device implementato e testato (getSettings risponde correttamente)
+- Apps Script v5 deployato sul deployment corretto (`AKfycbz7...`)
+- Push/pull automatico di tutti i dati principali
+- Re-sync automatico quando l'app torna in primo piano
+
+## Pending ⚠️
+
+**git push** — app.jsx ha modifiche staged non ancora pushate (re-sync foreground + auto-push bodyWeight/weekNum). Per applicare:
 ```bash
-# Script .command sul Desktop
-PORT=8080
-APP_DIR="/Users/lorenzofaraoni/Documents/Web Apps/Fitness App"
-lsof -ti:$PORT | xargs kill -9 2>/dev/null
-nohup python3 -m http.server $PORT --directory "$APP_DIR" > /dev/null 2>&1 &
-open "http://localhost:8080/launch.html"
+cd ~/Documents/Web\ Apps/Fitness\ App && rm -f .git/index.lock && git config user.email "lorefara97@gmail.com" && git config user.name "Lorenzo Faraoni" && git commit -m "sync: auto-push bodyWeight/weekNum, re-sync on foreground" && git push origin main
 ```
-
-## Problemi noti / da verificare
-- Il **timer di recupero** (scheda) ora usa `position: fixed` — dovrebbe apparire correttamente
-- La **dieta** usa il fallback interno se non c'è `dietaData` in storage (caricare dieta.txt serve un loader)
-- Il **coach** richiede Groq API key (va inserita in Impostazioni → Groq API Key)
-- Il **sync Sheets** richiede URL Apps Script (va inserito in Impostazioni → Google Sheets URL)
-
-## Dieta di Lorenzo (sintesi)
-- Nutrizione personalizzata da dietista (Dr.ssa Mazzotta Manuela)
-- 4 varianti giornata: riposo / allenamento mattina / ore 17 / ore 21 / ore 22
-- Integratori fissi ogni giorno: Vita C+ Slow Release, Vita B+, Extra Omega+ x2, PS+, Gluta+
-- Integratori solo allenamento: MGK+ Liquid, Fuel+, Barretta 4Plus 45g (pre-WO) + OMNIA+ (intra-WO)
-
-## Programma allenamento
-- 3 sessioni/settimana: Lunedì Upper A · Mercoledì Lower · Venerdì Upper B
-- 8 settimane poi cambio scheda
-- RPE = Rate of Perceived Exertion (1-10, sforzo percepito)
