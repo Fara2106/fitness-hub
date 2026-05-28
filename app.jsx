@@ -111,10 +111,14 @@ async function _cloudSync() {
         try {
           const settings = await window.sheetsAPI.getSettings();
           if (settings && typeof settings === "object") {
-            // scheda/dieta: sovrascrivi sempre se il cloud ha un valore
+            // scheda/dieta/spesa: sovrascrivi sempre se il cloud ha un valore
             ["schedaData", "dietaData"].forEach(k => {
               if (settings[k]) st.set(k, settings[k]);
             });
+            if (settings.spesaChecked) {
+              try { st.set("spesaChecked", JSON.parse(settings.spesaChecked)); } catch(_) {}
+            }
+            if (settings.spesaFreq) st.set("spesaFreq", Number(settings.spesaFreq) || 1);
             // groqApiKey: sovrascrivi solo se locale è vuoto (evita di perdere chiavi)
             if (!st.get("groqApiKey", "") && settings.groqApiKey)
               st.set("groqApiKey", settings.groqApiKey);

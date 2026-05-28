@@ -189,11 +189,19 @@ const Spesa = ({ device }) => {
     window.storage ? window.storage.get(FREQ_KEY, 1) : 1
   );
 
+  const _syncSpesa = (checkedObj, freqVal) => {
+    if (!window.sheetsAPI) return;
+    window.sheetsAPI.saveSettings({ key: "spesaChecked", value: JSON.stringify(checkedObj) }).catch(() => {});
+    if (freqVal !== undefined)
+      window.sheetsAPI.saveSettings({ key: "spesaFreq", value: String(freqVal) }).catch(() => {});
+  };
+
   const toggle = (k) => {
     if (navigator.vibrate) navigator.vibrate([50]);
     setChecked(c => {
       const next = { ...c, [k]: !c[k] };
       if (window.storage) window.storage.set(STORAGE_KEY, next);
+      _syncSpesa(next);
       return next;
     });
   };
@@ -204,11 +212,13 @@ const Spesa = ({ device }) => {
     // Reset checkbox when changing frequency
     setChecked({});
     if (window.storage) window.storage.set(STORAGE_KEY, {});
+    _syncSpesa({}, f);
   };
 
   const reset = () => {
     setChecked({});
     if (window.storage) window.storage.set(STORAGE_KEY, {});
+    _syncSpesa({});
   };
 
   const totalItems = CATEGORIES.reduce((n, c) => n + c.items.length, 0);
