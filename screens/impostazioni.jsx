@@ -42,7 +42,12 @@ const ApiKeyRow = ({ icon, iconBg, title, sub, storageKey, testFn, placeholder }
 
   const save = (v) => {
     setVal(v);
-    if (window.storage) window.storage.set(storageKey, v.trim());
+    const trimmed = v.trim();
+    if (window.storage) window.storage.set(storageKey, trimmed);
+    // Sync groqApiKey al cloud
+    if (storageKey === "groqApiKey" && trimmed && window.sheetsAPI) {
+      window.sheetsAPI.saveSettings({ key: "groqApiKey", value: trimmed }).catch(() => {});
+    }
   };
 
   const test = async () => {
@@ -145,6 +150,10 @@ const FileImporter = ({ label, icon, storageKey, accept = ".txt" }) => {
       }
       setLoaded(true);
       setFileName(file.name);
+      // Sync al cloud (scheda/dieta disponibili su tutti i device)
+      if (window.sheetsAPI) {
+        window.sheetsAPI.saveSettings({ key: storageKey, value: text }).catch(() => {});
+      }
     };
     reader.readAsText(file, "UTF-8");
   };

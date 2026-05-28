@@ -91,6 +91,37 @@ function _applyTheme(theme) {
   }
 }
 
+// ── Cloud sync (pull settings + peso from Sheets on startup) ─────────────
+async function _cloudSync() {
+  if (!window.sheetsAPI || !window.storage) return;
+  const st = window.storage;
+  try {
+    await Promise.race([
+      (async () => {
+        // 1. Body weight — prendi l'ultimo dal foglio PesoCorporeo
+        if (!st.get("bodyWeight", "") || parseFloat(st.get("bodyWeight", 0)) <= 0) {
+          try {
+            const pesi = await window.sheetsAPI.getPesoCorporeo();
+            if (Array.isArray(pesi) && pesi.length > 0) {
+              st.set("bodyWeight", pesi[pesi.length - 1].weight);
+            }
+          } catch (_) {}
+        }
+        // 2. Settings (groqApiKey, schedaData, dietaData)
+        try {
+          const settings = await window.sheetsAPI.getSettings();
+          if (settings && typeof settings === "object") {
+            ["groqApiKey", "schedaData", "dietaData"].forEach(k => {
+              if (!st.get(k, "") && settings[k]) st.set(k, settings[k]);
+            });
+          }
+        } catch (_) {}
+      })(),
+      new Promise(resolve => setTimeout(resolve, 2500)), // timeout 2.5s
+    ]);
+  } catch (_) {}
+}
+
 // ── AppFrame ───────────────────────────────────────────────────────────────
 const AppFrame = ({ device, initialScreen, chromeless }) => {
   const [storageReady, setStorageReady] = React.useState(window.storage ? window.storage.isReady() : false);
@@ -124,10 +155,12 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
 
   React.useEffect(() => {
     if (!storageReady || initialized) return;
-    const s = initState();
-    setStateRaw(s);
-    setLang(window.storage ? window.storage.get("lang", "it") : "it");
-    setInitialized(true);
+    _cloudSync().finally(() => {
+      const s = initState();
+      setStateRaw(s);
+      setLang(window.storage ? window.storage.get("lang", "it") : "it");
+      setInitialized(true);
+    });
   }, [storageReady]);
 
   // Persist state changes to storage

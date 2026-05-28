@@ -41,8 +41,9 @@ function doGet(e) {
       case "getPesi":          return _getPesi();
       case "getUltimiPesi":    return _getUltimiPesi();
       case "getCheckIn":       return _getCheckIn(p.date);
+      case "getSettings":      return _getSettings();
       default:
-        return _json({ success: true, message: "Lorenzo Fitness Hub API v2", endpoints: ["getPesoCorporeo","getPesi","getUltimiPesi","getCheckIn","savePeso","savePesoCorporeo","saveSessione","saveMovimento","saveCheckIn"] });
+        return _json({ success: true, message: "Lorenzo Fitness Hub API v2", endpoints: ["getPesoCorporeo","getPesi","getUltimiPesi","getCheckIn","getSettings","savePeso","savePesoCorporeo","saveSessione","saveMovimento","saveCheckIn","saveSettings"] });
     }
   } catch (err) {
     return _err(err.message || "Errore GET");
@@ -64,6 +65,7 @@ function doPost(e) {
       case "saveSessione":      return _saveSessione(body);
       case "saveMovimento":     return _saveMovimento(body);
       case "saveCheckIn":       return _saveCheckIn(body);
+      case "saveSettings":      return _saveSettings(body);
       default:
         return _err("Azione sconosciuta: " + body.action);
     }
@@ -85,6 +87,7 @@ function _getSheet(name) {
       Sessioni:          ["Data", "Tipo", "Settimana", "SerieCompletate", "SerieTotal", "Note", "OraInizio"],
       Movimenti:         ["Data", "Tipo", "Minuti", "Km", "Note"],
       CheckIn:           ["Data", "Sonno", "Energia", "Fastidi"],
+      Settings:          ["Key", "Value"],
     };
     if (headers[name]) {
       sh.getRange(1, 1, 1, headers[name].length).setValues([headers[name]]);
@@ -289,4 +292,34 @@ function _saveCheckIn(body) {
   }
   sh.appendRow([date, Number(body.sleep) || 0, Number(body.energy) || 0, body.ailments || ""]);
   return _json({ success: true, action: "inserted", date });
+}
+
+// ── GET: settings (cross-device sync) ─────────────────────────────────────
+function _getSettings() {
+  const sh = _getSheet("Settings");
+  const data = sh.getDataRange().getValues();
+  const result = {};
+  data.slice(1).forEach(function(r) {
+    if (r[0]) result[String(r[0])] = String(r[1] || "");
+  });
+  return _json(result);
+}
+
+// ── POST: save setting ─────────────────────────────────────────────────────
+function _saveSettings(body) {
+  // body: { key, value }
+  const key   = String(body.key   || "");
+  const value = String(body.value || "");
+  if (!key) return _err("key mancante");
+
+  const sh   = _getSheet("Settings");
+  const data = sh.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === key) {
+      sh.getRange(i + 1, 2).setValue(value);
+      return _json({ success: true, action: "updated", key: key });
+    }
+  }
+  sh.appendRow([key, value]);
+  return _json({ success: true, action: "inserted", key: key });
 }

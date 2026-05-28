@@ -53,6 +53,10 @@ window.sheetsAPI = {
   async saveMovimento(d)   { return this.post({ action: "saveMovimento",   ...d }); },
   async saveCheckIn(d)     { return this.post({ action: "saveCheckIn",     ...d }); },
 
+  // ── Settings sync (cross-device) ──
+  async getSettings()    { return this.get({ action: "getSettings" }); },
+  async saveSettings(d)  { return this.post({ action: "saveSettings", ...d }); },
+
   // Test connessione
   async testConnection() {
     const data = await this.get({ action: "getPesoCorporeo" });
