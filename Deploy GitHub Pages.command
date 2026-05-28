@@ -55,6 +55,13 @@ node_modules/
 EOF
 fi
 
+# ── Auto-bump Service Worker cache (cache busting) ─
+echo "🔄 Aggiorno cache SW..."
+SW_HASH=$(date '+%Y%m%d%H%M%S')
+sed -i '' "s/const CACHE_NAME = \"fitness-hub-[^\"]*\"/const CACHE_NAME = \"fitness-hub-v3-${SW_HASH}\"/" sw.js
+echo "   CACHE_NAME → fitness-hub-v3-${SW_HASH}"
+echo ""
+
 # ── Commit e push ────────────────────────────────
 echo "📦 Aggiungo i file..."
 git add -A

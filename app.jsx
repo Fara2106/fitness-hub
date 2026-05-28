@@ -55,9 +55,9 @@ const Screen = ({ which, device, state, set, globalCtx }) => {
     case "spesa":
       return <Spesa {...pass}
         spesaChecked={state.spesaChecked}
-        setSpesaChecked={(v) => setState(st => ({ ...st, spesaChecked: v }))}
+        setSpesaChecked={(v) => set(st => ({ ...st, spesaChecked: v }))}
         spesaFreq={state.spesaFreq}
-        setSpesaFreq={(v) => setState(st => ({ ...st, spesaFreq: v }))}
+        setSpesaFreq={(v) => set(st => ({ ...st, spesaFreq: v }))}
       />;
     case "coach":
       return <Coach {...pass} activities={state.activities} checkIn={state.checkIn} hydration={state.hydration} weekNum={state.weekNum} bodyWeight={state.bodyWeight} />;
