@@ -107,13 +107,17 @@ async function _cloudSync() {
             }
           } catch (_) {}
         }
-        // 2. Settings (groqApiKey, schedaData, dietaData)
+        // 2. Settings — il cloud fa sempre testo (così gli aggiornamenti si propagano)
         try {
           const settings = await window.sheetsAPI.getSettings();
           if (settings && typeof settings === "object") {
-            ["groqApiKey", "schedaData", "dietaData"].forEach(k => {
-              if (!st.get(k, "") && settings[k]) st.set(k, settings[k]);
+            // scheda/dieta: sovrascrivi sempre se il cloud ha un valore
+            ["schedaData", "dietaData"].forEach(k => {
+              if (settings[k]) st.set(k, settings[k]);
             });
+            // groqApiKey: sovrascrivi solo se locale è vuoto (evita di perdere chiavi)
+            if (!st.get("groqApiKey", "") && settings.groqApiKey)
+              st.set("groqApiKey", settings.groqApiKey);
           }
         } catch (_) {}
       })(),
