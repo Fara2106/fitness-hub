@@ -1,7 +1,11 @@
 // app.jsx — AppFrame: shell con routing, storage, theme, stato globale
 
-// ── Status bar (mobile only) ──────────────────────────────────────────────
-const StatusBar = () => (
+// ── Detect PWA standalone mode ────────────────────────────────────────────
+const _isStandalone = window.navigator.standalone === true
+  || window.matchMedia("(display-mode: standalone)").matches;
+
+// ── Status bar (mobile only, nascosta se PWA installata) ──────────────────
+const StatusBar = () => _isStandalone ? null : (
   <div className="lfh-status">
     <span className="num">9:41</span>
     <span className="sig">
