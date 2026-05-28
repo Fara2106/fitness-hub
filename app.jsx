@@ -97,65 +97,81 @@ function _applyTheme(theme) {
 }
 
 // ── Cloud sync (pull settings + peso from Sheets on startup) ─────────────
-async function _cloudSync() {
+//
+// ARCHITETTURA: ogni chiamata ha il suo timeout individuale via _safe().
+// Promise.all aspetta entrambe, ma ognuna risolve a {ok,value/err} senza
+// mai rigettare → nessun blocco se una delle due è lenta.
+// Questo evita il bug precedente: Promise.allSettled dentro un race globale
+// da 4s faceva sì che se getSettings impiegava >4s (cold start Apps Script)
+// NULLA veniva scritto in storage prima di initState().
+async function _cloudSync(opts) {
   if (!window.sheetsAPI || !window.storage) return;
   const st = window.storage;
-  try {
-    await Promise.race([
-      (async () => {
-        // Chiamate in parallelo per velocità
-        const [pesiResult, settingsResult] = await Promise.allSettled([
-          window.sheetsAPI.getPesoCorporeo(),
-          window.sheetsAPI.getSettings(),
-        ]);
+  const { pesiMs = 8000, settingsMs = 15000 } = opts || {};
 
-        // 1. Body weight — dall'ultimo entry in PesoCorporeo
-        if (pesiResult.status === "fulfilled") {
-          const pesi = pesiResult.value;
-          if (Array.isArray(pesi) && pesi.length > 0) {
-            st.set("bodyWeight", pesi[pesi.length - 1].weight);
-            console.log("[sync] bodyWeight →", pesi[pesi.length - 1].weight);
-          }
-        } else {
-          console.warn("[sync] getPesoCorporeo fallito:", pesiResult.reason);
-        }
-
-        // 2. Settings (groqApiKey, schedaData, dietaData, spesa)
-        if (settingsResult.status === "fulfilled") {
-          const settings = settingsResult.value;
-          if (settings && typeof settings === "object") {
-            ["schedaData", "dietaData"].forEach(k => {
-              if (settings[k]) { st.set(k, settings[k]); console.log("[sync]", k, "✓"); }
-            });
-            if (settings.spesaChecked) {
-              try { st.set("spesaChecked", JSON.parse(settings.spesaChecked)); } catch(_) {}
-            }
-            if (settings.spesaFreq) st.set("spesaFreq", Number(settings.spesaFreq) || 1);
-            // groqApiKey: cloud wins sempre (sync anche se locale già presente)
-            if (settings.groqApiKey) {
-              st.set("groqApiKey", settings.groqApiKey);
-              console.log("[sync] groqApiKey ✓");
-            }
-            if (settings.weekNum) st.set("weekNum", Number(settings.weekNum) || 1);
-            if (settings.bodyWeight && parseFloat(settings.bodyWeight) > 0) {
-              st.set("bodyWeight", parseFloat(settings.bodyWeight));
-              console.log("[sync] bodyWeight (settings) →", settings.bodyWeight);
-            }
-          }
-        } else {
-          console.warn("[sync] getSettings fallito:", settingsResult.reason);
-        }
-
-        // 3. Se i campi obbligatori ci sono → salta onboarding automaticamente
-        const hasBW   = parseFloat(st.get("bodyWeight", 0)) > 0;
-        const hasGroq = !!st.get("groqApiKey", "");
-        if (hasBW && hasGroq) {
-          st.set("onboardingDone", true);
-          console.log("[sync] onboardingDone → true");
-        }
-      })(),
-      new Promise(resolve => setTimeout(resolve, 4000)), // timeout 4s
+  // Wrappa una promise con timeout individuale; non rigetta mai
+  function _safe(p, ms) {
+    return Promise.race([
+      p.then(v  => ({ ok: true,  value: v    }))
+       .catch(e => ({ ok: false, err: String(e) })),
+      new Promise(resolve => setTimeout(() => resolve({ ok: false, err: "timeout" }), ms)),
     ]);
+  }
+
+  try {
+    const [pesiRes, settingsRes] = await Promise.all([
+      _safe(window.sheetsAPI.getPesoCorporeo(), pesiMs),
+      _safe(window.sheetsAPI.getSettings(),     settingsMs),
+    ]);
+
+    // 1. Peso corporeo (foglio PesoCorporeo)
+    if (pesiRes.ok) {
+      const pesi = pesiRes.value;
+      if (Array.isArray(pesi) && pesi.length > 0) {
+        st.set("bodyWeight", pesi[pesi.length - 1].weight);
+        console.log("[sync] bodyWeight →", pesi[pesi.length - 1].weight);
+      }
+    } else {
+      console.warn("[sync] getPesoCorporeo:", pesiRes.err);
+    }
+
+    // 2. Settings cross-device
+    if (settingsRes.ok && settingsRes.value && typeof settingsRes.value === "object") {
+      const s = settingsRes.value;
+      ["schedaData", "dietaData"].forEach(k => {
+        if (s[k]) { st.set(k, s[k]); console.log("[sync]", k, "✓"); }
+      });
+      if (s.spesaChecked) {
+        try { st.set("spesaChecked", JSON.parse(s.spesaChecked)); console.log("[sync] spesaChecked ✓"); } catch(_) {}
+      }
+      if (s.spesaFreq)  st.set("spesaFreq", Number(s.spesaFreq) || 1);
+      // groqApiKey: cloud wins sempre
+      if (s.groqApiKey) { st.set("groqApiKey", s.groqApiKey); console.log("[sync] groqApiKey ✓"); }
+      if (s.weekNum)    st.set("weekNum", Number(s.weekNum) || 1);
+      if (s.bodyWeight && parseFloat(s.bodyWeight) > 0) {
+        st.set("bodyWeight", parseFloat(s.bodyWeight));
+        console.log("[sync] bodyWeight (settings) →", s.bodyWeight);
+      }
+      // onboardingDone persiste nel cloud → sopravvive alla pulizia IndexedDB di iOS
+      if (s.onboardingDone === "true") st.set("onboardingDone", true);
+    } else {
+      console.warn("[sync] getSettings:", settingsRes.err);
+    }
+
+    // 3. Auto-skip onboarding: basta groqApiKey OPPURE bodyWeight (OR, non AND)
+    //    Poi pusha onboardingDone al cloud una volta sola
+    const hasBW   = parseFloat(st.get("bodyWeight", 0)) > 0;
+    const hasGroq = !!st.get("groqApiKey", "");
+    if (hasGroq || hasBW) {
+      const wasDone = st.get("onboardingDone", false);
+      st.set("onboardingDone", true);
+      if (!wasDone) {
+        // Prima volta che lo impostiamo → persistiamo nel cloud
+        window.sheetsAPI.saveSettings({ key: "onboardingDone", value: "true" }).catch(() => {});
+      }
+      console.log("[sync] onboardingDone → true");
+    }
+
   } catch (_) {}
 }
 
@@ -247,7 +263,8 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
     if (!initialized) return;
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
-        _cloudSync().finally(() => {
+        // Foreground re-sync: timeout più corti (UI già visibile)
+        _cloudSync({ pesiMs: 6000, settingsMs: 8000 }).finally(() => {
           const s = initState();
           setStateRaw(prev => ({
             ...prev,
