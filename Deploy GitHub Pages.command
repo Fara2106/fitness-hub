@@ -60,6 +60,9 @@ echo "🔄 Aggiorno cache SW..."
 SW_HASH=$(date '+%Y%m%d%H%M%S')
 sed -i '' "s/const CACHE_NAME = \"fitness-hub-[^\"]*\"/const CACHE_NAME = \"fitness-hub-v3-${SW_HASH}\"/" sw.js
 echo "   CACHE_NAME → fitness-hub-v3-${SW_HASH}"
+# Bump versione asset in index.html (?v=...) → batte la cache HTTP degli <script>
+sed -i '' "s/?v=[A-Za-z0-9]*/?v=${SW_HASH}/g" index.html
+echo "   asset ?v= → ${SW_HASH}"
 echo ""
 
 # ── Commit e push ────────────────────────────────
