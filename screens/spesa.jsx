@@ -198,7 +198,7 @@ const Spesa = ({ device, spesaChecked, setSpesaChecked, spesaFreq, setSpesaFreq 
     } else {
       _setLocalChecked(next);
       if (window.storage) window.storage.set("spesaChecked", next);
-      if (window.sheetsAPI) window.sheetsAPI.saveSettings({ key: "spesaChecked", value: JSON.stringify(next) }).catch(() => {});
+      if (window.sheetsAPI) window.sheetsAPI.saveSettings({ key: "spesaChecked2", value: JSON.stringify(next) }).catch(() => {});
     }
   };
 

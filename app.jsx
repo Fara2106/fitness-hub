@@ -164,8 +164,11 @@ async function _cloudSync(opts) {
       ["schedaData", "dietaData"].forEach(k => {
         if (s[k]) { st.set(k, s[k]); console.log("[sync pull]", k, "✓"); }
       });
-      if (s.spesaChecked) {
-        try { st.set("spesaChecked", JSON.parse(s.spesaChecked)); console.log("[sync pull] spesaChecked ✓"); } catch(_) {}
+      // spesaChecked2: chiave cloud "pulita" (la vecchia "spesaChecked" aveva
+      // righe duplicate nel foglio → lettura sempre stale). Pull retro-compatibile.
+      const spesaCloud = s.spesaChecked2 || s.spesaChecked;
+      if (spesaCloud) {
+        try { st.set("spesaChecked", JSON.parse(spesaCloud)); console.log("[sync pull] spesaChecked ✓"); } catch(_) {}
       }
       if (s.spesaFreq)  st.set("spesaFreq", Number(s.spesaFreq) || 1);
       // groqApiKey: cloud wins sempre
@@ -230,8 +233,8 @@ function _cloudPushMissing(cloudKeys) {
 
   // spesaChecked (JSON)
   const sc = st.get("spesaChecked", null);
-  if (sc && Object.keys(sc).length > 0 && !cloudKeys.spesaChecked) {
-    save("spesaChecked", JSON.stringify(sc));
+  if (sc && Object.keys(sc).length > 0 && !cloudKeys.spesaChecked2) {
+    save("spesaChecked2", JSON.stringify(sc));
   }
 }
 
@@ -254,7 +257,7 @@ window._cloudPushAll = function() {
   push("onboardingDone", st.get("onboardingDone", false) ? "true" : "");
 
   const sc = st.get("spesaChecked", null);
-  if (sc && Object.keys(sc).length > 0) push("spesaChecked", JSON.stringify(sc));
+  if (sc && Object.keys(sc).length > 0) push("spesaChecked2", JSON.stringify(sc));
 
   const scheda = st.get("schedaData", null);
   if (scheda) push("schedaData", scheda);
@@ -334,7 +337,7 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
       }
       if (next.spesaChecked !== prev.spesaChecked) {
         window.storage.set("spesaChecked", next.spesaChecked);
-        if (window.sheetsAPI) window.sheetsAPI.saveSettings({ key: "spesaChecked", value: JSON.stringify(next.spesaChecked) }).catch(() => {});
+        if (window.sheetsAPI) window.sheetsAPI.saveSettings({ key: "spesaChecked2", value: JSON.stringify(next.spesaChecked) }).catch(() => {});
       }
       if (next.spesaFreq !== prev.spesaFreq) {
         window.storage.set("spesaFreq", next.spesaFreq);
