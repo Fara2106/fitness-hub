@@ -154,7 +154,10 @@ async function _cloudSync(opts) {
     }
 
     // 2. Settings cross-device (cloud → local)
-    let cloudKeys = {};
+    // cloudKeys = null finché NON abbiamo letto con successo dal cloud.
+    // Fondamentale: se il pull fallisce non dobbiamo pushare nulla, altrimenti
+    // i dati locali (magari stale) sovrascriverebbero quelli buoni nel cloud.
+    let cloudKeys = null;
     if (settingsRes.ok && settingsRes.value && typeof settingsRes.value === "object") {
       const s = settingsRes.value;
       cloudKeys = s;
@@ -182,16 +185,18 @@ async function _cloudSync(opts) {
     const hasGroq = !!st.get("groqApiKey", "");
     if (hasGroq || hasBW) {
       st.set("onboardingDone", true);
-      if (cloudKeys.onboardingDone !== "true") {
+      // pusha onboardingDone solo se il pull è riuscito e il cloud non l'ha
+      if (cloudKeys && cloudKeys.onboardingDone !== "true") {
         window.sheetsAPI.saveSettings({ key: "onboardingDone", value: "true" }).catch(() => {});
       }
       console.log("[sync] onboardingDone → true");
     }
 
-    // 4. Push locale → cloud per chiavi mancanti nel cloud
-    //    Questo risolve il caso in cui dati esistono localmente ma non sono
-    //    mai stati pushati (codice precedente, errore silenzioso, ecc.)
-    _cloudPushMissing(cloudKeys);
+    // 4. Push locale → cloud SOLO per chiavi mancanti, e SOLO se il pull è
+    //    riuscito (cloudKeys != null). Se il pull è fallito non sappiamo cosa
+    //    c'è nel cloud → non pushare, per non sovrascrivere dati buoni.
+    if (cloudKeys) _cloudPushMissing(cloudKeys);
+    else console.warn("[sync] pull settings fallito → push saltato (anti-clobber)");
 
   } catch (e) { console.warn("[sync] error:", e); }
 }
