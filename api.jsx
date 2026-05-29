@@ -8,8 +8,15 @@
   const DEFAULT_SHEETS_URL = "https://script.google.com/macros/s/AKfycbz7dHQg8Q3HOZ37vx-QLRT8jqHCSHXFPODKhU1uyoS8wyezgFV292MlnH8gRcOdRhQN/exec";
   const DEFAULT_GROQ_KEY   = ""; // Inserisci la chiave in Impostazioni → AI Coach
 
-  if (!window.storage.get("sheetsUrl",  "")) window.storage.set("sheetsUrl",  DEFAULT_SHEETS_URL);
-  if (!window.storage.get("groqApiKey", "")) window.storage.set("groqApiKey", DEFAULT_GROQ_KEY);
+  // IMPORTANTE: eseguire DOPO che IndexedDB ha caricato i valori salvati.
+  // Se girasse subito (db non ancora pronto) get() tornerebbe sempre vuoto e
+  // sovrascriverebbe la chiave Groq / l'URL già salvati dall'utente con i default.
+  const apply = () => {
+    if (!window.storage.get("sheetsUrl",  "")) window.storage.set("sheetsUrl",  DEFAULT_SHEETS_URL);
+    if (!window.storage.get("groqApiKey", "")) window.storage.set("groqApiKey", DEFAULT_GROQ_KEY);
+  };
+  if (window.storage.onReady) window.storage.onReady(apply);
+  else apply();
 })();
 
 // ── Google Sheets — chiamate tramite Cloudflare Worker proxy ─────────────

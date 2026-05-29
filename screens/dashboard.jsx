@@ -6,6 +6,7 @@ const ACTIVITY_META = {
   bike:      { label: "Bike",      emoji: "🚴", c: "#FF9F0A" },
   hiit:      { label: "HIIT",      emoji: "⚡", c: "#BF5AF2" },
   camminata: { label: "Camminata", emoji: "🚶", c: "#30D158" },
+  ellittica: { label: "Ellittica", emoji: "🔄", c: "#5AC8FA" },
 };
 
 // ── Mini sparkline chart ───────────────────────────────────────────────────
@@ -206,7 +207,7 @@ const GymCard = ({ isDesktop }) => {
           </div>
           <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
             {weekCount > 0
-              ? <><span className="num" style={{ color: "var(--accent)", fontWeight: 700 }}>{weekCount}</span> volta{weekCount !== 1 ? "e" : ""} questa settimana</>
+              ? <><span className="num" style={{ color: "var(--accent)", fontWeight: 700 }}>{weekCount}</span> {weekCount === 1 ? "volta" : "volte"} questa settimana</>
               : "Nessuna sessione ancora questa settimana"}
           </div>
         </div>

@@ -662,7 +662,13 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
             <button
               key={k}
               className={k === scheda ? "on" : ""}
-              onClick={() => { setScheda(k); setCompletion({}); prevDoneRef.current = false; }}
+              onClick={() => {
+                setScheda(k);
+                setCompletion({});
+                setSubstitutions({});   // gli indici esercizio cambiano col giorno
+                setOccupied({});         // → azzera stati per-indice per evitare bleed
+                prevDoneRef.current = false;
+              }}
             >
               {k}
             </button>

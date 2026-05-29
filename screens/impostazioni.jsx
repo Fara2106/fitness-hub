@@ -335,7 +335,7 @@ const ProfileEditor = ({ profile, onSave, onClose, isDesktop }) => {
 };
 
 // ── Main Impostazioni screen ───────────────────────────────────────────────
-const Impostazioni = ({ device, theme, setTheme, weekNum, setWeekNum, bodyWeight, setBodyWeight, onResetAll }) => {
+const Impostazioni = ({ device, onNav, theme, setTheme, weekNum, setWeekNum, bodyWeight, setBodyWeight, onResetAll }) => {
   const isDesktop = device === "desktop";
   const t = useT();
   const { lang, setLang } = useLang();
@@ -418,6 +418,20 @@ const Impostazioni = ({ device, theme, setTheme, weekNum, setWeekNum, bodyWeight
           onSave={handleProfileSave}
           onClose={() => setEditing(false)}
         />
+      )}
+
+      {/* — Progressi — (su mobile lo Storico non è nella tab bar: unico accesso) */}
+      {onNav && (
+        <ISection title={t("Progressi")}>
+          <IRow
+            icon="trend-up"
+            iconBg="#30D158"
+            title={t("Storico")}
+            sub={t("Peso, cardio e check-in")}
+            onClick={() => onNav("storico")}
+            trailing={<Icon name="chevron" size={13} color="var(--text-3)" />}
+          />
+        </ISection>
       )}
 
       {/* — Aspetto — */}

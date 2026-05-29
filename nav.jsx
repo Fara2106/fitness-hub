@@ -13,7 +13,8 @@ const NAV_ITEMS = [
 // — Mobile bottom tab bar —
 const TabBar = ({ screen, onNav }) => {
   const t = useT();
-  // Show only first 6 items on mobile (storico accessible from sidebar or impostazioni)
+  // Mobile: 6 voci nella tab bar. Lo Storico è raggiungibile da Impostazioni → Progressi
+  // (su desktop è nella Sidebar).
   const mobileItems = NAV_ITEMS.filter(it => it.id !== "storico");
   return (
     <nav
