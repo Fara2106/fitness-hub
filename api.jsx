@@ -21,7 +21,11 @@ window.sheetsAPI = {
   async get(params) {
     const url = new URL(_PROXY, location.origin);
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-    const res = await fetch(url.toString());
+    // Cache-buster + no-store: senza questo il browser serve risposte GET
+    // vecchie dalla cache HTTP (stessa URL ogni volta) → il sync cross-device
+    // leggeva dati stale. Fondamentale per far propagare le modifiche tra device.
+    url.searchParams.set("_cb", Date.now());
+    const res = await fetch(url.toString(), { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     if (json && json.success === false) throw new Error(json.error || "Sheets error");
