@@ -63,6 +63,11 @@ echo "   CACHE_NAME → fitness-hub-v3-${SW_HASH}"
 echo ""
 
 # ── Commit e push ────────────────────────────────
+# Rimuove eventuali lock rimasti da un processo git interrotto
+echo "🔓 Rimuovo eventuali lock git residui..."
+rm -f .git/index.lock .git/HEAD.lock .git/config.lock 2>/dev/null
+rm -f .git/refs/heads/*.lock 2>/dev/null
+
 echo "📦 Aggiungo i file..."
 git add -A
 

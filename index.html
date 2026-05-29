@@ -17,10 +17,10 @@
   #root { display: flex; align-items: stretch; }
   /* Desktop: no rounded corners */
   .lfh.desktop { border-radius: 0 !important; box-shadow: none !important; }
-  /* iOS safe areas */
+  /* iOS safe areas: solo laterali sul contenitore.
+     Gli inset top/bottom sono assorbiti da StatusBar (top) e TabBar (bottom),
+     così non restano bande vuote di --bg (le "barre nere"). */
   .lfh.mobile {
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
     padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
   }

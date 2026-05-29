@@ -8,6 +8,7 @@
   const _m = {};           // memory cache — accesso sincrono
   let _rdy = false;
   const _q = [];           // callback queue
+  const _pending = {};      // scritture in attesa che _db sia pronto (key→value)
 
   function _open() {
     return new Promise((res, rej) => {
@@ -16,6 +17,24 @@
         e.target.result.createObjectStore(STORE, { keyPath: "k" });
       req.onsuccess  = (e) => res(e.target.result);
       req.onerror    = (e) => rej(e.target.error);
+    });
+  }
+
+  // Persiste una coppia su IndexedDB (se il db è pronto). Non lancia mai.
+  function _persist(key, value) {
+    try {
+      _db.transaction(STORE, "readwrite")
+         .objectStore(STORE)
+         .put({ k: key, v: value });
+    } catch (_) {}
+  }
+
+  // Svuota le scritture accumulate prima dell'apertura del db.
+  function _drainPending() {
+    if (!_db) return;
+    Object.keys(_pending).forEach(k => {
+      _persist(k, _pending[k]);
+      delete _pending[k];
     });
   }
 
@@ -32,17 +51,13 @@
     // sync write + async persist
     set(key, value) {
       _m[key] = value;
-      if (_db) {
-        try {
-          _db.transaction(STORE, "readwrite")
-             .objectStore(STORE)
-             .put({ k: key, v: value });
-        } catch (_) {}
-      }
+      if (_db) _persist(key, value);
+      else     _pending[key] = value;   // verrà scritto al drain quando _db è pronto
     },
 
     remove(key) {
       delete _m[key];
+      delete _pending[key];
       if (_db) {
         try {
           _db.transaction(STORE, "readwrite")
@@ -54,6 +69,7 @@
 
     clear() {
       Object.keys(_m).forEach(k => delete _m[k]);
+      Object.keys(_pending).forEach(k => delete _pending[k]);
       if (_db) {
         try {
           _db.transaction(STORE, "readwrite")
@@ -75,10 +91,15 @@
                      .objectStore(STORE)
                      .getAll();
       req.onsuccess = (e) => {
-        (e.target.result || []).forEach(({ k, v }) => { _m[k] = v; });
+        // Carica i valori persistiti, ma NON sovrascrive scritture recenti in attesa
+        (e.target.result || []).forEach(({ k, v }) => {
+          if (!(k in _pending)) _m[k] = v;
+        });
+        // Le scritture avvenute prima dell'apertura del db ora vengono persistite
+        _drainPending();
         _flush();
       };
-      req.onerror = _flush;
+      req.onerror = (e) => { _drainPending(); _flush(); };
     })
     .catch(_flush);
 })();

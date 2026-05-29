@@ -4,9 +4,15 @@
 const _isStandalone = window.navigator.standalone === true
   || window.matchMedia("(display-mode: standalone)").matches;
 
-// ── Status bar (mobile only, nascosta se PWA installata) ──────────────────
-const StatusBar = () => _isStandalone ? null : (
-  <div className="lfh-status">
+// ── Status bar (mobile) ───────────────────────────────────────────────────
+// In PWA installata non mostriamo il finto orario, ma riempiamo comunque
+// l'area del notch (safe-area-inset-top) con lo sfondo dell'app, così non
+// resta una banda scura sopra il contenuto.
+const StatusBar = () => _isStandalone ? (
+  <div style={{ height: "env(safe-area-inset-top)", flexShrink: 0, background: "var(--bg)" }} />
+) : (
+  <div className="lfh-status" style={{ paddingTop: "env(safe-area-inset-top)", boxSizing: "content-box" }}>
+
     <span className="num">9:41</span>
     <span className="sig">
       <svg width="17" height="11" viewBox="0 0 17 11" fill="none">
@@ -109,6 +115,22 @@ function _safe(p, ms) {
   ]);
 }
 
+// Salva una setting con un retry (le push erano fire-and-forget: un singolo
+// errore di rete faceva sparire per sempre il dato dal cloud).
+function _saveSettingRetry(key, value, tries = 2) {
+  if (!window.sheetsAPI) return Promise.resolve(false);
+  const attempt = (n) =>
+    window.sheetsAPI.saveSettings({ key, value: String(value) })
+      .then(() => { console.log("[sync push]", key, "✓"); return true; })
+      .catch(e => {
+        if (n > 0) return new Promise(r => setTimeout(r, 800)).then(() => attempt(n - 1));
+        console.warn("[sync push err]", key, e);
+        return false;
+      });
+  return attempt(tries);
+}
+window._saveSettingRetry = _saveSettingRetry;
+
 async function _cloudSync(opts) {
   if (!window.sheetsAPI || !window.storage) return;
   const st = window.storage;
@@ -180,8 +202,7 @@ function _cloudPushMissing(cloudKeys) {
   const st = window.storage;
   const save = (key, value) => {
     if (value !== undefined && value !== null && value !== "") {
-      console.log("[sync push]", key, "→ cloud");
-      window.sheetsAPI.saveSettings({ key, value: String(value) }).catch(e => console.warn("[sync push err]", key, e));
+      _saveSettingRetry(key, value);
     }
   };
 
@@ -216,11 +237,7 @@ window._cloudPushAll = function() {
   const saves = [];
   const push = (key, value) => {
     if (value !== undefined && value !== null && value !== "") {
-      saves.push(
-        window.sheetsAPI.saveSettings({ key, value: String(value) })
-          .then(() => console.log("[push all]", key, "✓"))
-          .catch(e => console.warn("[push all err]", key, e))
-      );
+      saves.push(_saveSettingRetry(key, value));
     }
   };
 
@@ -326,28 +343,39 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
   // Apply theme on mount + when theme changes
   React.useEffect(() => { _applyTheme(state.theme); }, [state.theme]);
 
-  // Re-sync when app comes to foreground (Page Visibility API)
+  // Re-sync: foreground (Page Visibility) + polling periodico mentre l'app è
+  // aperta, così le modifiche fatte su un altro device compaiono da sole.
   React.useEffect(() => {
     if (!initialized) return;
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
-        // Foreground re-sync: timeout più corti (UI già visibile)
-        _cloudSync({ pesiMs: 6000, settingsMs: 8000 }).finally(() => {
-          const s = initState();
-          setStateRaw(prev => ({
-            ...prev,
-            bodyWeight:   s.bodyWeight,
-            weekNum:      s.weekNum,
-            checkIn:      s.checkIn,
-            hydration:    s.hydration,
-            spesaChecked: s.spesaChecked,
-            spesaFreq:    s.spesaFreq,
-          }));
-        });
-      }
+
+    // Pull dal cloud + riallinea lo stato React condiviso
+    const pullAndApply = () => {
+      if (document.visibilityState !== "visible") return;
+      _cloudSync({ pesiMs: 6000, settingsMs: 8000 }).finally(() => {
+        const s = initState();
+        setStateRaw(prev => ({
+          ...prev,
+          bodyWeight:   s.bodyWeight,
+          weekNum:      s.weekNum,
+          checkIn:      s.checkIn,
+          hydration:    s.hydration,
+          spesaChecked: s.spesaChecked,
+          spesaFreq:    s.spesaFreq,
+        }));
+      });
     };
+
+    const handleVisibility = () => { if (document.visibilityState === "visible") pullAndApply(); };
     document.addEventListener("visibilitychange", handleVisibility);
-    return () => document.removeEventListener("visibilitychange", handleVisibility);
+
+    // Polling ogni 45s (solo quando visibile, per non sprecare quota Apps Script)
+    const POLL_MS = 45000;
+    const interval = setInterval(pullAndApply, POLL_MS);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      clearInterval(interval);
+    };
   }, [initialized]);
 
   const globalCtx = { lang, setLang: (l) => { setLang(l); window.storage && window.storage.set("lang", l); } };
