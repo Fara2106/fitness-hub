@@ -154,7 +154,7 @@ const Onboarding = ({ device, onDone }) => {
         {activeSteps.map((_, i) => (
           <div key={i} style={{
             flex: 1, height: 3, borderRadius: 2,
-            background: i <= step ? "var(--accent)" : "rgba(255,255,255,0.1)",
+            background: i <= step ? "var(--accent)" : "var(--track)",
             transition: "background 0.3s",
           }} />
         ))}

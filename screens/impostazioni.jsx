@@ -58,9 +58,9 @@ const ApiKeyRow = ({ icon, iconBg, title, sub, storageKey, testFn, placeholder }
     setTestResult(null);
     try {
       const r = await testFn();
-      setTestResult({ ok: true, msg: r.reply ? `✓ OK — "${r.reply}"` : `✓ Connesso (${r.rows} righe)` });
+      setTestResult({ ok: true, msg: r.reply ? `✓ OK — "${r.reply}"` : `✓ ${t("Connesso")} (${r.rows} ${t("righe")})` });
     } catch (e) {
-      setTestResult({ ok: false, msg: "✗ " + (e.message || "Errore") });
+      setTestResult({ ok: false, msg: "✗ " + (e.message || t("Errore")) });
     } finally {
       setTesting(false);
     }
@@ -101,7 +101,7 @@ const ApiKeyRow = ({ icon, iconBg, title, sub, storageKey, testFn, placeholder }
               type={show ? "text" : "password"}
               value={val}
               onChange={(e) => save(e.target.value)}
-              placeholder={placeholder || "Inserisci…"}
+              placeholder={placeholder || t("Inserisci…")}
               className="input input-mono"
               style={{ flex: 1, fontSize: 13, padding: "10px 12px" }}
             />
@@ -219,6 +219,52 @@ const WeekStepper = ({ value, onChange }) => {
         >+</button>
       </div>
     </div>
+  );
+};
+
+// ── Sync now row (componente dedicato: gli hook NON possono stare in una
+//    IIFE dentro al render — ordine fragile e contrario alle Rules of Hooks) ─
+const SyncNowRow = () => {
+  const t = useT();
+  const [syncing, setSyncing] = React.useState(false);
+  const [syncResult, setSyncResult] = React.useState(null);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      await window._cloudPushAll();
+      setSyncResult({ ok: true });
+    } catch (e) {
+      setSyncResult({ ok: false, msg: e.message });
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncResult(null), 4000);
+    }
+  };
+
+  return (
+    <IRow
+      icon="refresh"
+      iconBg="#0A84FF"
+      title={t("Sincronizza ora")}
+      sub={t("Pusha tutti i dati locali al cloud")}
+      onClick={!syncing ? handleSync : undefined}
+    >
+      {syncing ? (
+        <span className="spinner" style={{ width: 18, height: 18 }} />
+      ) : syncResult ? (
+        <span className="pill" style={{
+          fontSize: 10,
+          background: syncResult.ok ? "rgba(48,209,88,0.18)" : "rgba(255,69,58,0.14)",
+          color: syncResult.ok ? "var(--success)" : "var(--danger)",
+        }}>
+          {syncResult.ok ? "✓ " + t("Sincronizzato") : "✗ " + t("Errore")}
+        </span>
+      ) : (
+        <Icon name="chevron" size={13} color="var(--accent)" />
+      )}
+    </IRow>
   );
 };
 
@@ -520,52 +566,13 @@ const Impostazioni = ({ device, onNav, theme, setTheme, weekNum, setWeekNum, bod
           accept=".txt"
         />
         <IRow icon="info" iconBg="#8E8E93" title={t("Cibi esclusi")} sub="Pasta di ceci · lenticchie · piselli · bevanda di mandorla">
-          <span className="pill" style={{ fontSize: 10, background: "rgba(255,69,58,0.14)", color: "var(--danger)" }}>🚫 Sempre</span>
+          <span className="pill" style={{ fontSize: 10, background: "rgba(255,69,58,0.14)", color: "var(--danger)" }}>🚫 {t("Sempre")}</span>
         </IRow>
       </ISection>
 
       {/* — Sync & Dati — */}
       <ISection title={t("Sincronizzazione & Dati")}>
-        {(() => {
-          const [syncing, setSyncing] = React.useState(false);
-          const [syncResult, setSyncResult] = React.useState(null);
-          const handleSync = async () => {
-            setSyncing(true);
-            setSyncResult(null);
-            try {
-              await window._cloudPushAll();
-              setSyncResult({ ok: true });
-            } catch (e) {
-              setSyncResult({ ok: false, msg: e.message });
-            } finally {
-              setSyncing(false);
-              setTimeout(() => setSyncResult(null), 4000);
-            }
-          };
-          return (
-            <IRow
-              icon="refresh"
-              iconBg="#0A84FF"
-              title={t("Sincronizza ora")}
-              sub={t("Pusha tutti i dati locali al cloud")}
-              onClick={!syncing ? handleSync : undefined}
-            >
-              {syncing ? (
-                <span className="spinner" style={{ width: 18, height: 18 }} />
-              ) : syncResult ? (
-                <span className="pill" style={{
-                  fontSize: 10,
-                  background: syncResult.ok ? "rgba(48,209,88,0.18)" : "rgba(255,69,58,0.14)",
-                  color: syncResult.ok ? "var(--success)" : "var(--danger)",
-                }}>
-                  {syncResult.ok ? "✓ Sincronizzato" : "✗ Errore"}
-                </span>
-              ) : (
-                <Icon name="chevron" size={13} color="var(--accent)" />
-              )}
-            </IRow>
-          );
-        })()}
+        <SyncNowRow />
         <IRow icon="lock" iconBg="#636366" title={t("Dati locali")} sub={t("Tutti i dati sono sul dispositivo")} trailing={
           <span className="pill" style={{ fontSize: 10 }}>🔒 {t("Solo locale")}</span>
         } />
@@ -580,7 +587,7 @@ const Impostazioni = ({ device, onNav, theme, setTheme, weekNum, setWeekNum, bod
       </ISection>
 
       <div style={{ textAlign: "center", color: "var(--text-3)", fontSize: 11.5, padding: "8px 0 24px" }}>
-        Lorenzo Fitness Hub · v2.5.0 · build 2026.05
+        Lorenzo Fitness Hub · v2.6.0 · build 2026.06
       </div>
 
       {showReset && (

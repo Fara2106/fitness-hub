@@ -98,6 +98,7 @@ const CATEGORIES = [
 
 // SpesaItem must be defined BEFORE CategorySection (no hoisting for const)
 const SpesaItem = ({ item, checked, onToggle, freq }) => {
+  const t = useT();
   const qty = freq === 2 ? item.qty2 : item.qty1;
   return (
     <div
@@ -131,7 +132,7 @@ const SpesaItem = ({ item, checked, onToggle, freq }) => {
           background: qty === "se esaurito" ? "rgba(191,90,242,0.12)" : "var(--card-2)",
           color: qty === "se esaurito" ? "#BF5AF2" : "var(--text-2)",
           fontWeight: 600, whiteSpace: "nowrap",
-        }}>{qty}</span>
+        }}>{qty === "se esaurito" ? t("se esaurito") : qty}</span>
       )}
       {qty === "—" && (
         <span style={{ fontSize: 11.5, color: "var(--text-3)", fontStyle: "italic" }}>—</span>
@@ -159,7 +160,7 @@ const CategorySection = ({ cat, checked, onToggle, isDesktop, freq }) => {
           <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: -0.01 }}>{t(cat.title)}</div>
           <div className="num muted" style={{ fontSize: 11.5 }}>{done} / {total}</div>
         </div>
-        <div style={{ width: 60, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+        <div style={{ width: 60, height: 4, borderRadius: 2, background: "var(--track)", overflow: "hidden" }}>
           <div style={{ width: `${(done / total) * 100}%`, height: "100%", background: cat.color, transition: "width 0.3s" }} />
         </div>
       </div>
@@ -245,7 +246,7 @@ const Spesa = ({ device, spesaChecked, setSpesaChecked, spesaFreq, setSpesaFreq 
       {/* Frequency picker */}
       <div className="card" style={{ padding: isDesktop ? 16 : 14 }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-2)", marginBottom: 10 }}>
-          🛒 Quante volte fai la spesa a settimana?
+          🛒 {t("Quante volte fai la spesa a settimana?")}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           {[
@@ -265,10 +266,10 @@ const Spesa = ({ device, spesaChecked, setSpesaChecked, spesaFreq, setSpesaFreq 
                 }}
               >
                 <div style={{ fontSize: 14, fontWeight: 700, color: on ? "#fff" : "var(--text)", marginBottom: 2 }}>
-                  {opt.label}
+                  {t(opt.label)}
                 </div>
                 <div style={{ fontSize: 11, color: on ? "rgba(255,255,255,0.75)" : "var(--text-3)" }}>
-                  {opt.sub}
+                  {t(opt.sub)}
                 </div>
               </button>
             );
@@ -276,7 +277,7 @@ const Spesa = ({ device, spesaChecked, setSpesaChecked, spesaFreq, setSpesaFreq 
         </div>
         {freq === 2 && (
           <div className="fade-up" style={{ marginTop: 10, fontSize: 12, color: "var(--text-3)", padding: "7px 10px", background: "rgba(10,132,255,0.06)", borderRadius: 9 }}>
-            💡 Le quantità mostrate sono per <strong style={{ color: "var(--text-2)" }}>una singola uscita</strong> (metà settimana). Ripeti all'altra metà.
+            💡 {t("Le quantità mostrate sono per")} <strong style={{ color: "var(--text-2)" }}>{t("una singola uscita")}</strong> {t("(metà settimana). Ripeti all'altra metà.")}
           </div>
         )}
       </div>

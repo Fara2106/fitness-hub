@@ -11,7 +11,7 @@ const _QUICK_PROMPTS = [
   "Recupero ottimale",
 ];
 
-function _buildSystemPrompt({ activities, checkIn, hydration, weekNum, bodyWeight }) {
+function _buildSystemPrompt({ activities, checkIn, hydration, weekNum, bodyWeight, lang }) {
   const sess = window.getTodaySession ? window.getTodaySession() : null;
   const sessLabel = sess ? `${sess.label} (${sess.muscles.join(", ")})` : "Riposo";
 
@@ -32,7 +32,9 @@ function _buildSystemPrompt({ activities, checkIn, hydration, weekNum, bodyWeigh
   const sessionNotes = st ? st.get(`notes_${today}`, "") : "";
 
   // ── Prompt base ────────────────────────────────────────────────────────────
-  let prompt = `Sei il personal coach di Lorenzo Faraoni: preciso, motivante, esperto di powerbuilding (RPE, mesocicli, periodizzazione) e nutrizione (bulk lento, timing proteine, manipolazione carbo). Rispondi in italiano, conciso (2-5 frasi), tono diretto da coach che lo conosce bene da anni.
+  // Lingua di risposta del coach: segue la lingua dell'app
+  const replyLang = lang === "en" ? "inglese" : "italiano";
+  let prompt = `Sei il personal coach di Lorenzo Faraoni: preciso, motivante, esperto di powerbuilding (RPE, mesocicli, periodizzazione) e nutrizione (bulk lento, timing proteine, manipolazione carbo). Rispondi in ${replyLang}, conciso (2-5 frasi), tono diretto da coach che lo conosce bene da anni.
 
 Lorenzo: ${bodyWeight || 77.5}kg, 178cm.
 Mesociclo: Settimana ${weekNum || 1} / 8 · Upper/Lower 3×/settimana.
@@ -162,11 +164,12 @@ const Bubble = ({ m }) => {
 const Coach = ({ device, activities = [], checkIn, hydration, weekNum, bodyWeight }) => {
   const isDesktop = device === "desktop";
   const t = useT();
+  const { lang } = useLang();
 
   const sess = window.getTodaySession ? window.getTodaySession() : null;
   const greeting = sess
-    ? `Ciao Lorenzo! Oggi tocca ${sess.label}. Sono pronto — chiedimi su scheda, dieta o recupero.`
-    : "Ciao Lorenzo! Oggi è un giorno di riposo. Parliamo di recupero, nutrizione o programmazione?";
+    ? `${t("Ciao Lorenzo! Oggi tocca")} ${sess.label}. ${t("Sono pronto — chiedimi su scheda, dieta o recupero.")}`
+    : t("Ciao Lorenzo! Oggi è un giorno di riposo. Parliamo di recupero, nutrizione o programmazione?");
 
   const [messages, setMessages] = React.useState([{ role: "assistant", text: greeting }]);
   const [input, setInput]       = React.useState("");
@@ -195,19 +198,19 @@ const Coach = ({ device, activities = [], checkIn, hydration, weekNum, bodyWeigh
 
       const reply = await window.groqAPI.complete({
         messages: history,
-        systemPrompt: _buildSystemPrompt({ activities, checkIn, hydration, weekNum, bodyWeight }),
+        systemPrompt: _buildSystemPrompt({ activities, checkIn, hydration, weekNum, bodyWeight, lang }),
         model: "llama-3.3-70b-versatile",
         maxTokens: 512,
       });
 
       setMessages(ms => [...ms, { role: "assistant", text: reply }]);
     } catch (err) {
-      const errText = err.message || "Errore sconosciuto";
+      const errText = err.message || t("Errore sconosciuto");
       const isNoKey = errText.toLowerCase().includes("api key") || errText.toLowerCase().includes("configurata");
       setMessages(ms => [...ms, {
         role: "error",
         text: isNoKey
-          ? "⚙️ API key Groq non configurata. Vai in Impostazioni → Coach per inserirla. È gratuita su console.groq.com"
+          ? "⚙️ " + t("API key Groq non configurata. Vai in Impostazioni → Coach per inserirla. È gratuita su console.groq.com")
           : `⚠️ ${errText}`,
       }]);
     } finally {
@@ -308,7 +311,7 @@ const Coach = ({ device, activities = [], checkIn, hydration, weekNum, bodyWeigh
         padding: isDesktop ? "12px 40px 24px" : "10px 16px 20px",
         display: "flex", gap: 8, alignItems: "center",
         borderTop: "1px solid var(--border)",
-        background: "rgba(20,20,22,0.72)",
+        background: "var(--nav-bg)", // theme-aware: si adatta a dark/light
         backdropFilter: "blur(20px)",
         WebkitBackdropFilter: "blur(20px)",
         flexShrink: 0,

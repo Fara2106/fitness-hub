@@ -393,7 +393,7 @@ const ExerciseCard = ({
           </button>
           <button
             className="btn ghost"
-            title={occupied ? "Macchina libera — clicca per sbloccare" : "Macchina occupata — clicca per segnalare"}
+            title={occupied ? t("Macchina libera — clicca per sbloccare") : t("Macchina occupata — clicca per segnalare")}
             style={{
               padding: "6px 8px",
               background: occupied ? "rgba(255,159,10,0.22)" : "var(--card-2)",
@@ -433,7 +433,7 @@ const ExerciseCard = ({
         <div style={{ textAlign: "center" }}>{t("Rip")}</div>
         <div style={{ textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center", gap: 3 }}>
           RPE
-          <span title="Rate of Perceived Exertion: quanto hai lavorato duramente su scala 1-10. 7 = moderato · 8 = faticoso · 9 = quasi al limite · 10 = massimale" style={{ cursor: "help", fontSize: 9, background: "var(--card-3)", color: "var(--text-3)", borderRadius: 999, width: 13, height: 13, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>?</span>
+          <span title={t("Rate of Perceived Exertion: quanto hai lavorato duramente su scala 1-10. 7 = moderato · 8 = faticoso · 9 = quasi al limite · 10 = massimale")} style={{ cursor: "help", fontSize: 9, background: "var(--card-3)", color: "var(--text-3)", borderRadius: 999, width: 13, height: 13, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>?</span>
         </div>
         <div />
       </div>
@@ -606,9 +606,9 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
         // Fire-and-forget le serie (non bloccare UI se fallisce una)
         await Promise.allSettled(savePromises);
       }
-      setSaveMsg("✓ Sessione salvata");
+      setSaveMsg("✓ " + t("Sessione salvata"));
     } catch (err) {
-      setSaveMsg("⚠️ " + (err.message || "Errore salvataggio"));
+      setSaveMsg("⚠️ " + (err.message || t("Errore salvataggio")));
     } finally {
       setSaving(false);
       setTimeout(() => setSaveMsg(""), 3000);

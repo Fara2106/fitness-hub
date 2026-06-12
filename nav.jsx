@@ -24,7 +24,7 @@ const TabBar = ({ screen, onNav }) => {
         gap: 0,
         padding: "8px 4px 10px",
         paddingBottom: "calc(10px + env(safe-area-inset-bottom))",
-        background: "rgba(20, 20, 22, 0.92)",
+        background: "var(--nav-bg)", // theme-aware: si adatta a dark/light
         backdropFilter: "blur(20px)",
         WebkitBackdropFilter: "blur(20px)",
         borderTop: "1px solid var(--border)",
@@ -73,7 +73,7 @@ const Sidebar = ({ screen, onNav }) => {
     dieta:        t("Dieta"),
     spesa:        t("Lista spesa"),
     coach:        t("AI Coach"),
-    storico:      "Storico",
+    storico:      t("Storico"),
     impostazioni: t("Impostazioni"),
   };
 
@@ -151,7 +151,7 @@ const Sidebar = ({ screen, onNav }) => {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 600 }}>Lorenzo</div>
             <div style={{ fontSize: 11, color: "var(--text-2)" }}>
-              {t("Settimana")} {weekNum} · {todaySess ? todaySess.label : "Riposo"}
+              {t("Settimana")} {weekNum} · {todaySess ? todaySess.label : t("Riposo")}
             </div>
           </div>
         </div>

@@ -156,6 +156,8 @@ const HydrationCard = ({ hydration, setHydration, isDesktop }) => {
 // ── Gym attendance card ────────────────────────────────────────────────────
 const GymCard = ({ isDesktop }) => {
   const t = useT();
+  const { lang } = useLang();
+  const locale = lang === "en" ? "en-US" : "it-IT";
   const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
   const storageKey = `gym_${today}`;
 
@@ -207,8 +209,8 @@ const GymCard = ({ isDesktop }) => {
           </div>
           <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
             {weekCount > 0
-              ? <><span className="num" style={{ color: "var(--accent)", fontWeight: 700 }}>{weekCount}</span> {weekCount === 1 ? "volta" : "volte"} questa settimana</>
-              : "Nessuna sessione ancora questa settimana"}
+              ? <><span className="num" style={{ color: "var(--accent)", fontWeight: 700 }}>{weekCount}</span> {weekCount === 1 ? t("volta") : t("volte")} {t("questa settimana")}</>
+              : t("Nessuna sessione ancora questa settimana")}
           </div>
         </div>
         <div className={`ios-toggle blue ${wentToday ? "on" : ""}`} onClick={toggle} />
@@ -224,7 +226,7 @@ const GymCard = ({ isDesktop }) => {
             const k = `gym_${d.toISOString().slice(0, 10)}`;
             const went = window.storage ? window.storage.get(k, false) : false;
             const isToday = i === 0;
-            const dayName = d.toLocaleDateString("it-IT", { weekday: "short" }).slice(0, 2);
+            const dayName = d.toLocaleDateString(locale, { weekday: "short" }).slice(0, 2);
             dots.push(
               <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
                 <div style={{
@@ -301,7 +303,7 @@ const MovimentoCard = ({ activities, addActivity, isDesktop }) => {
                     {t(meta.label)}
                     {a.note && <span className="muted" style={{ fontWeight: 500, fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>· {a.note}</span>}
                   </div>
-                  <div className="muted" style={{ fontSize: 11, marginTop: 1 }}>{a.when}</div>
+                  <div className="muted" style={{ fontSize: 11, marginTop: 1 }}>{t(a.when)}</div>
                 </div>
                 <div style={{ textAlign: "right" }}>
                   <div className="num" style={{ fontSize: 13, fontWeight: 600 }}>{a.min}<span style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 500 }}>min</span></div>
@@ -415,6 +417,10 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
   const now       = new Date();
   const dateStr   = now.toLocaleDateString(lang === "en" ? "en-US" : "it-IT", { weekday: "long", day: "numeric", month: "long" });
 
+  // Saluto in base all'ora del giorno
+  const _h = now.getHours();
+  const greetKey = _h < 13 ? "Buongiorno Lorenzo" : _h < 18 ? "Buon pomeriggio Lorenzo" : "Buonasera Lorenzo";
+
   // Detect today's session
   const todaySession = window.getTodaySession ? window.getTodaySession() : null;
 
@@ -490,7 +496,7 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
       <header style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: isDesktop ? 4 : 2 }}>
         <div>
           <h1 style={{ fontSize: isDesktop ? 32 : 26, fontWeight: 600 }}>
-            {t("Buongiorno Lorenzo")} <span style={{ display: "inline-block", transformOrigin: "70% 70%" }}>👋</span>
+            {t(greetKey)} <span style={{ display: "inline-block", transformOrigin: "70% 70%" }}>👋</span>
           </h1>
           <div style={{ marginTop: 4, color: "var(--text-2)", fontSize: 13, textTransform: "capitalize" }}>{dateStr}</div>
         </div>
@@ -522,7 +528,7 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
                 {todaySession.muscles.map(m => <span key={m} className="pill tinted-blue">{t(m)}</span>)}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--accent)", fontWeight: 600 }}>
-                <Icon name="chevron" size={14} strokeWidth={2} /> Vai alla scheda
+                <Icon name="chevron" size={14} strokeWidth={2} /> {t("Vai alla scheda")}
               </div>
             </div>
           ) : (
@@ -531,8 +537,8 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <span style={{ fontSize: 28 }}>😴</span>
                 <div>
-                  <h2 style={{ fontSize: 22, fontWeight: 600 }}>Giorno di riposo</h2>
-                  <div className="muted" style={{ fontSize: 13 }}>Recupero attivo, mobilità e idratazione.</div>
+                  <h2 style={{ fontSize: 22, fontWeight: 600 }}>{t("Giorno di riposo")}</h2>
+                  <div className="muted" style={{ fontSize: 13 }}>{t("Recupero attivo, mobilità e idratazione.")}</div>
                 </div>
               </div>
             </div>
@@ -543,7 +549,7 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
               <h3>{t("Programma")}</h3>
               {isWeek7Plus && (
-                <span className="pill tinted-orange" style={{ fontSize: 11 }}>⚠ Cambia scheda</span>
+                <span className="pill tinted-orange" style={{ fontSize: 11 }}>⚠ {t("Cambia scheda")}</span>
               )}
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
@@ -557,7 +563,7 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
             </div>
             <div style={{ display: "flex", gap: 6, marginTop: 14 }}>
               {Array.from({ length: 8 }).map((_, i) => (
-                <div key={i} style={{ flex: 1, height: 6, borderRadius: 3, background: i < safeWeek - 1 ? "var(--accent)" : i === safeWeek - 1 ? "var(--accent-2)" : "rgba(255,255,255,0.08)" }} />
+                <div key={i} style={{ flex: 1, height: 6, borderRadius: 3, background: i < safeWeek - 1 ? "var(--accent)" : i === safeWeek - 1 ? "var(--accent-2)" : "var(--track)" }} />
               ))}
             </div>
           </div>
@@ -587,7 +593,7 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
             <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
               <input
                 type="number"
-                placeholder="Aggiorna…"
+                placeholder={t("Aggiorna…")}
                 value={newWeight}
                 onChange={(e) => setNewWeight(e.target.value)}
                 className="input input-mono"
@@ -625,7 +631,7 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
                       <span className="muted">{t(m.k)}</span>
                       <span className="num" style={{ fontWeight: 600 }}>{m.v}</span>
                     </div>
-                    <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
+                    <div style={{ height: 4, borderRadius: 2, background: "var(--track)", overflow: "hidden" }}>
                       <div style={{ width: `${Math.min(100, m.v * 6)}%`, height: "100%", background: m.c, borderRadius: 2 }} />
                     </div>
                   </div>

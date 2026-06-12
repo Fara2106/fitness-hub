@@ -90,16 +90,17 @@ const Screen = ({ which, device, state, set, globalCtx }) => {
 // ── Apply theme to document ────────────────────────────────────────────────
 function _applyTheme(theme) {
   const root = document.documentElement;
-  if (theme === "light") {
-    root.classList.add("theme-light");
-  } else if (theme === "dark") {
-    root.classList.remove("theme-light");
-  } else {
-    // system
-    const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-    if (prefersDark) root.classList.remove("theme-light");
-    else             root.classList.add("theme-light");
+  let light;
+  if      (theme === "light") light = true;
+  else if (theme === "dark")  light = false;
+  else {
+    // "system" (Auto): segue prefers-color-scheme di macOS / iOS / Windows
+    light = !(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   }
+  root.classList.toggle("theme-light", light);
+  // theme-color dinamico: colora la UI del browser / barra di stato PWA
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", light ? "#f2f2f7" : "#0a0a0a");
 }
 
 // ── Cloud sync (pull settings + peso from Sheets on startup) ─────────────
@@ -291,13 +292,13 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
       hydration:    st.get(`hydration_${today}`, 3),
       weekNum:      st.get("weekNum", 1),
       bodyWeight:   st.get("bodyWeight", 100),
-      theme:        st.get("theme", "dark"),
+      theme:        st.get("theme", "system"), // default: segue il sistema (Mac/iOS)
       spesaChecked: st.get("spesaChecked", {}),
       spesaFreq:    st.get("spesaFreq", 1),
     };
   }
 
-  const [state, setStateRaw] = React.useState({ screen: initialScreen, scheda: "Upper A", isHome: false, activities: [], checkIn: { sleep: 4, energy: 4, ailments: "" }, hydration: 3, weekNum: 1, bodyWeight: 100, theme: "dark", spesaChecked: {}, spesaFreq: 1 });
+  const [state, setStateRaw] = React.useState({ screen: initialScreen, scheda: "Upper A", isHome: false, activities: [], checkIn: { sleep: 4, energy: 4, ailments: "" }, hydration: 3, weekNum: 1, bodyWeight: 100, theme: "system", spesaChecked: {}, spesaFreq: 1 });
   const [lang, setLang] = React.useState(window.storage ? window.storage.get("lang", "it") : "it");
   const [initialized, setInitialized] = React.useState(false);
 
@@ -348,8 +349,22 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
     });
   }, [today]);
 
-  // Apply theme on mount + when theme changes
-  React.useEffect(() => { _applyTheme(state.theme); }, [state.theme]);
+  // Apply theme on mount + when theme changes.
+  // In modalità "system" resta in ascolto dei cambi di tema del sistema
+  // operativo (es. macOS/iOS che passano a scuro la sera) e si riallinea live.
+  React.useEffect(() => {
+    _applyTheme(state.theme);
+    if (state.theme === "light" || state.theme === "dark") return;
+    const mq = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+    if (!mq) return;
+    const onChange = () => _applyTheme("system");
+    if (mq.addEventListener) mq.addEventListener("change", onChange);
+    else if (mq.addListener) mq.addListener(onChange); // Safari < 14
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", onChange);
+      else if (mq.removeListener) mq.removeListener(onChange);
+    };
+  }, [state.theme]);
 
   // Re-sync: foreground (Page Visibility) + polling periodico mentre l'app è
   // aperta, così le modifiche fatte su un altro device compaiono da sole.

@@ -87,7 +87,7 @@ const WeightChart = ({ data, isDesktop }) => {
       </div>
       <ResponsiveContainer width="100%" height={isDesktop ? 200 : 160}>
         <LineChart data={formatted} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
           <XAxis
             dataKey="label"
             tick={{ fill: "var(--text-3)", fontSize: 10 }}
@@ -243,7 +243,7 @@ const ActivityRow = ({ act, isDesktop }) => {
       }}>{icon}</div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 14, fontWeight: 600, letterSpacing: -0.01 }}>
-          {act.type ? (act.type.charAt(0).toUpperCase() + act.type.slice(1)) : "Attività"}
+          {act.type ? t(act.type.charAt(0).toUpperCase() + act.type.slice(1)) : t("Attività")}
         </div>
         <div className="muted" style={{ fontSize: 12, marginTop: 1 }}>
           <span className="num">{act.min}</span> min
@@ -252,7 +252,7 @@ const ActivityRow = ({ act, isDesktop }) => {
         </div>
       </div>
       <div style={{ textAlign: "right" }}>
-        <div className="num muted" style={{ fontSize: 12 }}>{act.when}</div>
+        <div className="num muted" style={{ fontSize: 12 }}>{t(act.when)}</div>
         {act.km && (
           <div className="num" style={{ fontSize: 11, color, fontWeight: 600, marginTop: 2 }}>
             {(act.km / act.min * 60).toFixed(1)} km/h

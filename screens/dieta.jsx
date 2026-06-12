@@ -222,6 +222,7 @@ function _buildTimeline(meals, integratori) {
 
 // ── Day Time Slider ────────────────────────────────────────────────────────
 const DayTimeSlider = ({ timeline }) => {
+  const t = useT();
   const [nowMins, setNowMins] = React.useState(() => {
     const d = new Date();
     return d.getHours() * 60 + d.getMinutes();
@@ -262,14 +263,14 @@ const DayTimeSlider = ({ timeline }) => {
       border: "1px solid var(--border)",
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-2)" }}>Orario della giornata</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-2)" }}>{t("Orario della giornata")}</div>
         <div className="num" style={{
           fontSize: 12, fontWeight: 700,
           color: isAllDone ? "var(--success)" : "var(--accent)",
           background: isAllDone ? "rgba(48,209,88,0.12)" : "rgba(10,132,255,0.12)",
           padding: "3px 9px", borderRadius: 999,
         }}>
-          {isAllDone ? "✓ Giornata completata" : fmt(nowMins)}
+          {isAllDone ? "✓ " + t("Giornata completata") : fmt(nowMins)}
         </div>
       </div>
 
@@ -313,17 +314,17 @@ const DayTimeSlider = ({ timeline }) => {
           );
         })}
 
-        {/* Current time needle */}
+        {/* Current time needle (theme-aware: bianco su dark, nero su light) */}
         <div style={{
           position: "absolute",
           left: `${nowP}%`,
           top: 0, bottom: 0,
           width: 2,
-          background: "#fff",
+          background: "var(--text)",
           transform: "translateX(-50%)",
           borderRadius: 1,
           zIndex: 4,
-          boxShadow: "0 0 5px rgba(255,255,255,0.7)",
+          boxShadow: "0 0 5px rgba(127,127,127,0.6)",
         }} />
       </div>
 
@@ -339,17 +340,17 @@ const DayTimeSlider = ({ timeline }) => {
         const prev = [...dots].reverse().find(d => d._mins <= nowMins);
         const next = dots.find(d => d._mins > nowMins);
         const prevLabel = prev
-          ? (prev.kind === "meal" ? (prev.emoji || "🍽️") + " " + prev.title : "💊 " + prev.name)
+          ? (prev.kind === "meal" ? (prev.emoji || "🍽️") + " " + t(prev.title) : "💊 " + prev.name)
           : null;
         const nextLabel = next
-          ? (next.kind === "meal" ? (next.emoji || "🍽️") + " " + next.title : "💊 " + next.name)
+          ? (next.kind === "meal" ? (next.emoji || "🍽️") + " " + t(next.title) : "💊 " + next.name)
           : null;
 
         if (isAllDone) {
           return (
             <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: "rgba(48,209,88,0.08)", borderRadius: 10, fontSize: 12 }}>
               <span>✅</span>
-              <span style={{ color: "var(--success)", fontWeight: 600 }}>Tutti i pasti completati per oggi!</span>
+              <span style={{ color: "var(--success)", fontWeight: 600 }}>{t("Tutti i pasti completati per oggi!")}</span>
             </div>
           );
         }
@@ -361,7 +362,7 @@ const DayTimeSlider = ({ timeline }) => {
               <span style={{ fontSize: 13 }}>📍</span>
               <span style={{ color: "var(--text-2)" }}>
                 {!prevLabel && nextLabel && (
-                  <>Prima di <strong style={{ color: "var(--text)" }}>{nextLabel}</strong></>
+                  <>{t("Prima di")} <strong style={{ color: "var(--text)" }}>{nextLabel}</strong></>
                 )}
                 {prevLabel && nextLabel && (
                   <><strong style={{ color: "var(--text-2)" }}>{prevLabel}</strong>
@@ -369,7 +370,7 @@ const DayTimeSlider = ({ timeline }) => {
                   <strong style={{ color: "var(--accent)" }}>{nextLabel}</strong></>
                 )}
                 {prevLabel && !nextLabel && (
-                  <>Dopo <strong style={{ color: "var(--text)" }}>{prevLabel}</strong></>
+                  <>{t("Dopo")} <strong style={{ color: "var(--text)" }}>{prevLabel}</strong></>
                 )}
               </span>
             </div>
@@ -386,7 +387,7 @@ const DayTimeSlider = ({ timeline }) => {
                     <strong style={{ color: "var(--text)" }}>{nextLabel}</strong>
                   </span>
                   <span className="num" style={{ fontSize: 11.5, color: "var(--accent)", fontWeight: 600 }}>
-                    {fmt(next._mins)} · tra {diffStr}
+                    {fmt(next._mins)} · {t("tra")} {diffStr}
                   </span>
                 </div>
               );
@@ -400,6 +401,7 @@ const DayTimeSlider = ({ timeline }) => {
 
 // ── Supplement row (inline in timeline) ───────────────────────────────────
 const SupplementRow = ({ supp, checked, onToggle }) => {
+  const t = useT();
   const done = !!checked[supp.type];
   return (
     <button
@@ -424,7 +426,7 @@ const SupplementRow = ({ supp, checked, onToggle }) => {
           color: done ? "var(--text-2)" : "var(--text)",
           textDecoration: done ? "line-through" : "none",
         }}>💊 {supp.name}</div>
-        <div className="num" style={{ fontSize: 11, color: "var(--text-3)", marginTop: 2 }}>{supp.time}</div>
+        <div className="num" style={{ fontSize: 11, color: "var(--text-3)", marginTop: 2 }}>{t(supp.time)}</div>
       </div>
       <div style={{
         width: 22, height: 22, borderRadius: 999, flexShrink: 0,
@@ -701,7 +703,7 @@ const Dieta = ({ device }) => {
           }}>
             <Icon name="pill" size={16} color={allSuppsDone ? "var(--success)" : "#FF9F0A"} />
             <div style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>
-              {allSuppsDone ? "✓ Tutti gli integratori assunti" : "Integratori oggi"}
+              {allSuppsDone ? "✓ " + t("Tutti gli integratori assunti") : t("Integratori oggi")}
             </div>
             <span className="num" style={{
               fontSize: 12.5, fontWeight: 700,
