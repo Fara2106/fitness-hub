@@ -11,15 +11,17 @@
 <meta name="apple-mobile-web-app-title" content="Fitness Hub" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <link rel="manifest" href="manifest.json" />
-<link rel="stylesheet" href="styles.css?v=20260618103354" />
+<link rel="stylesheet" href="styles.css?v=20260618103807" />
 <style>
   /* iOS PWA standalone: nella safe-area della home-indicator gli elementi
      position:fixed (#root, TabBar) NON arrivano fino al bordo fisico → in quella
      striscia traspare lo sfondo dell'elemento radice <html>. Se <html> è --bg si
      vede una banda diversa dalla TabBar (nera in dark, bianca in light).
-     Fix: <html> = --nav-bg (colore TabBar) così la striscia in basso si fonde con
-     la barra; <body> resta --bg e copre tutto il resto (inclusa la safe-area top). */
-  html { height: 100%; margin: 0; background: var(--nav-bg, #141416); }
+     Fix: <html> = --safe-bg (colore OPACO che imita la TabBar) così la striscia in
+     basso si fonde con la barra; <body> resta --bg e copre il resto (safe-area top).
+     NB: deve essere OPACO — un colore rgba semi-trasparente sopra il fondo nero/bianco
+     di iOS resta otticamente nero/bianco e la banda continua a vedersi. */
+  html { height: 100%; margin: 0; background: var(--safe-bg, #141416); }
   body { height: 100%; margin: 0; background: var(--bg, #0a0a0a); }
   #root {
     position: fixed;
@@ -86,29 +88,29 @@
 <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js" crossorigin="anonymous"></script>
 <script>if (typeof Recharts !== 'undefined') window.Recharts = Recharts;</script>
 
-<!-- Core utilities (?v=20260618103354: versionato, bumpato a ogni deploy → niente cache stale) -->
-<script type="text/babel" src="storage.jsx?v=20260618103354"></script>
-<script type="text/babel" src="api.jsx?v=20260618103354"></script>
-<script type="text/babel" src="parser.jsx?v=20260618103354"></script>
+<!-- Core utilities (?v=20260618103807: versionato, bumpato a ogni deploy → niente cache stale) -->
+<script type="text/babel" src="storage.jsx?v=20260618103807"></script>
+<script type="text/babel" src="api.jsx?v=20260618103807"></script>
+<script type="text/babel" src="parser.jsx?v=20260618103807"></script>
 
 <!-- Components -->
-<script type="text/babel" src="i18n.jsx?v=20260618103354"></script>
-<script type="text/babel" src="icons.jsx?v=20260618103354"></script>
-<script type="text/babel" src="anatomy.jsx?v=20260618103354"></script>
-<script type="text/babel" src="nav.jsx?v=20260618103354"></script>
+<script type="text/babel" src="i18n.jsx?v=20260618103807"></script>
+<script type="text/babel" src="icons.jsx?v=20260618103807"></script>
+<script type="text/babel" src="anatomy.jsx?v=20260618103807"></script>
+<script type="text/babel" src="nav.jsx?v=20260618103807"></script>
 
 <!-- Screens -->
-<script type="text/babel" src="screens/onboarding.jsx?v=20260618103354"></script>
-<script type="text/babel" src="screens/dashboard.jsx?v=20260618103354"></script>
-<script type="text/babel" src="screens/scheda.jsx?v=20260618103354"></script>
-<script type="text/babel" src="screens/dieta.jsx?v=20260618103354"></script>
-<script type="text/babel" src="screens/spesa.jsx?v=20260618103354"></script>
-<script type="text/babel" src="screens/coach.jsx?v=20260618103354"></script>
-<script type="text/babel" src="screens/storico.jsx?v=20260618103354"></script>
-<script type="text/babel" src="screens/impostazioni.jsx?v=20260618103354"></script>
+<script type="text/babel" src="screens/onboarding.jsx?v=20260618103807"></script>
+<script type="text/babel" src="screens/dashboard.jsx?v=20260618103807"></script>
+<script type="text/babel" src="screens/scheda.jsx?v=20260618103807"></script>
+<script type="text/babel" src="screens/dieta.jsx?v=20260618103807"></script>
+<script type="text/babel" src="screens/spesa.jsx?v=20260618103807"></script>
+<script type="text/babel" src="screens/coach.jsx?v=20260618103807"></script>
+<script type="text/babel" src="screens/storico.jsx?v=20260618103807"></script>
+<script type="text/babel" src="screens/impostazioni.jsx?v=20260618103807"></script>
 
 <!-- App frame -->
-<script type="text/babel" src="app.jsx?v=20260618103354"></script>
+<script type="text/babel" src="app.jsx?v=20260618103807"></script>
 
 <!-- Mount: auto-detect device -->
 <script type="text/babel" data-presets="env,react">
