@@ -253,7 +253,7 @@ const ActivityRow = ({ act, isDesktop }) => {
       </div>
       <div style={{ textAlign: "right" }}>
         <div className="num muted" style={{ fontSize: 12 }}>{t(act.when)}</div>
-        {act.km && (
+        {act.km > 0 && act.min > 0 && (
           <div className="num" style={{ fontSize: 11, color, fontWeight: 600, marginTop: 2 }}>
             {(act.km / act.min * 60).toFixed(1)} km/h
           </div>

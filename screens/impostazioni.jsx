@@ -106,7 +106,7 @@ const ApiKeyRow = ({ icon, iconBg, title, sub, storageKey, testFn, placeholder }
               style={{ flex: 1, fontSize: 13, padding: "10px 12px" }}
             />
             <button className="btn ghost" style={{ padding: "8px 10px", flexShrink: 0 }} onClick={() => setShow(s => !s)}>
-              <Icon name={show ? "lock" : "lock"} size={14} />
+              <Icon name={show ? "eye-off" : "eye"} size={14} />
               <span style={{ fontSize: 12, marginLeft: 4 }}>{show ? t("Nascondi") : t("Mostra")}</span>
             </button>
           </div>

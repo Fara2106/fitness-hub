@@ -667,6 +667,8 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
                 setCompletion({});
                 setSubstitutions({});   // gli indici esercizio cambiano col giorno
                 setOccupied({});         // → azzera stati per-indice per evitare bleed
+                pesosRef.current = {};   // anche i pesi sono indicizzati per posizione:
+                                         // senza reset salveresti su Sheets i kg del giorno sbagliato
                 prevDoneRef.current = false;
               }}
             >
