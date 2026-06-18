@@ -24,7 +24,7 @@ const TabBar = ({ screen, onNav }) => {
         gap: 0,
         padding: "8px 4px 10px",
         paddingBottom: "calc(10px + env(safe-area-inset-bottom))",
-        background: "var(--nav-bg)", // theme-aware: si adatta a dark/light
+        background: "#ff0000", // DIAGNOSTICA TEMP — ripristinare "var(--nav-bg)"
         backdropFilter: "blur(20px)",
         WebkitBackdropFilter: "blur(20px)",
         borderTop: "1px solid var(--border)",
