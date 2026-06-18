@@ -5,21 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Lorenzo Fitness Hub</title>
 <meta name="description" content="Piano alimentare, allenamento e tracking personale" />
-<meta name="theme-color" content="#0a0a0a" />
+<meta name="theme-color" content="#141416" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Fitness Hub" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <link rel="manifest" href="manifest.json" />
-<link rel="stylesheet" href="styles.css?v=20260618105236" />
+<link rel="stylesheet" href="styles.css?v=20260618105737" />
 <style>
-  /* iOS PWA standalone: i position:fixed con bottom:0 vengono BLOCCATI alla
-     safe-area (non arrivano al bordo fisico), quindi la zona home-indicator resta
-     scoperta e iOS la riempie col proprio sfondo di sistema (banda nera/bianca).
-     Fix: niente bottom:0 ma height ESPLICITA in dvh (dynamic viewport), che SOTTO
-     viewport-fit=cover INCLUDE le safe-area → il contenuto (e la TabBar con il suo
-     padding-bottom = env(safe-area-inset-bottom)) arriva davvero fino in fondo e
-     copre la striscia. Fallback 100vh / -webkit-fill-available per iOS più vecchi. */
+  /* iOS PWA standalone: la striscia della home-indicator NON è dipingibile dalla
+     pagina (verificato: né #root/html/body né TabBar la raggiungono, neanche con
+     100dvh) — iOS la colora da sé col <meta name="theme-color">. Il fix della banda
+     è quindi su theme-color (= tono TabBar #141416/#f9f9fb), non qui.
+     #root usa height in dvh (con fallback 100vh / -webkit-fill-available) solo per
+     riempire correttamente l'altezza utile; body overflow:hidden blocca lo scroll. */
   html { height: 100%; margin: 0; background: var(--safe-bg, #141416); }
   body { height: 100%; margin: 0; overflow: hidden; background: var(--bg, #0a0a0a); }
   #root {
@@ -53,7 +52,9 @@
     var light = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches;
     if (light) document.documentElement.classList.add("theme-light");
     var meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", light ? "#f2f2f7" : "#0a0a0a");
+    /* tono TabBar (non --bg): iOS usa theme-color per la striscia della
+       home-indicator, che la pagina NON può dipingere → così si fonde con la barra */
+    if (meta) meta.setAttribute("content", light ? "#f9f9fb" : "#141416");
   } catch (_) {}
 })();
 </script>
@@ -89,29 +90,29 @@
 <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js" crossorigin="anonymous"></script>
 <script>if (typeof Recharts !== 'undefined') window.Recharts = Recharts;</script>
 
-<!-- Core utilities (?v=20260618105236: versionato, bumpato a ogni deploy → niente cache stale) -->
-<script type="text/babel" src="storage.jsx?v=20260618105236"></script>
-<script type="text/babel" src="api.jsx?v=20260618105236"></script>
-<script type="text/babel" src="parser.jsx?v=20260618105236"></script>
+<!-- Core utilities (?v=20260618105737: versionato, bumpato a ogni deploy → niente cache stale) -->
+<script type="text/babel" src="storage.jsx?v=20260618105737"></script>
+<script type="text/babel" src="api.jsx?v=20260618105737"></script>
+<script type="text/babel" src="parser.jsx?v=20260618105737"></script>
 
 <!-- Components -->
-<script type="text/babel" src="i18n.jsx?v=20260618105236"></script>
-<script type="text/babel" src="icons.jsx?v=20260618105236"></script>
-<script type="text/babel" src="anatomy.jsx?v=20260618105236"></script>
-<script type="text/babel" src="nav.jsx?v=20260618105236"></script>
+<script type="text/babel" src="i18n.jsx?v=20260618105737"></script>
+<script type="text/babel" src="icons.jsx?v=20260618105737"></script>
+<script type="text/babel" src="anatomy.jsx?v=20260618105737"></script>
+<script type="text/babel" src="nav.jsx?v=20260618105737"></script>
 
 <!-- Screens -->
-<script type="text/babel" src="screens/onboarding.jsx?v=20260618105236"></script>
-<script type="text/babel" src="screens/dashboard.jsx?v=20260618105236"></script>
-<script type="text/babel" src="screens/scheda.jsx?v=20260618105236"></script>
-<script type="text/babel" src="screens/dieta.jsx?v=20260618105236"></script>
-<script type="text/babel" src="screens/spesa.jsx?v=20260618105236"></script>
-<script type="text/babel" src="screens/coach.jsx?v=20260618105236"></script>
-<script type="text/babel" src="screens/storico.jsx?v=20260618105236"></script>
-<script type="text/babel" src="screens/impostazioni.jsx?v=20260618105236"></script>
+<script type="text/babel" src="screens/onboarding.jsx?v=20260618105737"></script>
+<script type="text/babel" src="screens/dashboard.jsx?v=20260618105737"></script>
+<script type="text/babel" src="screens/scheda.jsx?v=20260618105737"></script>
+<script type="text/babel" src="screens/dieta.jsx?v=20260618105737"></script>
+<script type="text/babel" src="screens/spesa.jsx?v=20260618105737"></script>
+<script type="text/babel" src="screens/coach.jsx?v=20260618105737"></script>
+<script type="text/babel" src="screens/storico.jsx?v=20260618105737"></script>
+<script type="text/babel" src="screens/impostazioni.jsx?v=20260618105737"></script>
 
 <!-- App frame -->
-<script type="text/babel" src="app.jsx?v=20260618105236"></script>
+<script type="text/babel" src="app.jsx?v=20260618105737"></script>
 
 <!-- Mount: auto-detect device -->
 <script type="text/babel" data-presets="env,react">

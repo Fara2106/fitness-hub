@@ -98,9 +98,10 @@ function _applyTheme(theme) {
     light = !(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   }
   root.classList.toggle("theme-light", light);
-  // theme-color dinamico: colora la UI del browser / barra di stato PWA
+  // theme-color dinamico: iOS lo usa per la striscia della home-indicator (che la
+  // pagina non può dipingere) → tono TabBar (--nav-bg ≈ #141416 / #f9f9fb) così si fonde
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute("content", light ? "#f2f2f7" : "#0a0a0a");
+  if (meta) meta.setAttribute("content", light ? "#f9f9fb" : "#141416");
 }
 
 // ── Cloud sync (pull settings + peso from Sheets on startup) ─────────────
