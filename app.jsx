@@ -146,6 +146,49 @@ function _saveSettingRetry(key, value, tries = 2) {
 }
 window._saveSettingRetry = _saveSettingRetry;
 
+// ── Sorgente di verità: i file scheda.txt / dieta.txt del repo ────────────
+// L'app leggeva schedaData/dietaData SOLO da storage (import manuale o cloud):
+// modificare i .txt del repo e ridistribuire non aggiornava mai la scheda/dieta.
+// Ora, all'avvio, si confronta il .txt del repo con l'ultima versione applicata
+// (schedaData_src): se è cambiato, il .txt VINCE → sovrascrive lo storage locale
+// e viene pushato al cloud (Settings sheet). _repoOverride segna le chiavi che il
+// repo ha già vinto in questa sessione, così il pull cloud (che è cloud-wins e
+// avrebbe ancora il valore vecchio finché il push non propaga) non le riscrive.
+const _repoOverride = {};
+
+async function _reconcileRepoFiles() {
+  if (!window.storage) return;
+  const st = window.storage;
+  const files = [
+    { file: "scheda.txt", key: "schedaData", parse: window.parseScheda, valid: (p) =>
+        !!p && ["Upper A", "Lower", "Upper B"].some(k => p[k] && Array.isArray(p[k].exercises) && p[k].exercises.length) },
+    { file: "dieta.txt",  key: "dietaData",  parse: window.parseDieta,  valid: (p) =>
+        !!p && Object.keys(p || {}).some(k => p[k] && Array.isArray(p[k].meals) && p[k].meals.length) },
+  ];
+  await Promise.all(files.map(async ({ file, key, parse, valid }) => {
+    try {
+      // cache-bust + no-store: prendi sempre la versione fresca del repo
+      // (il service worker è comunque network-first sui file same-origin).
+      const url = new URL(file, document.baseURI).href + "?_cb=" + Date.now();
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) return;                     // offline / 404 → non toccare nulla
+      const text = await res.text();
+      if (!text || !text.trim()) return;
+      // Non applicare un file rotto: deve almeno parsare in modo valido.
+      if (parse) { try { if (!valid(parse(text))) return; } catch (_) { return; } }
+      if (text === st.get(key + "_src", null)) return;  // invariato dall'ultima volta
+      st.set(key, text);
+      st.set(key + "_src", text);
+      st.set(key + "_name", file);             // mostrato in Impostazioni → File di testo
+      st.set(key + "_at", new Date().toISOString());
+      _repoOverride[key] = true;               // il repo vince per tutta la sessione
+      _saveSettingRetry(key, text);            // → cloud (Settings sheet)
+      console.log("[repo-file] " + key + " aggiornato da " + file + " → storage + cloud");
+    } catch (e) { console.warn("[repo-file]", file, e); }
+  }));
+}
+window._reconcileRepoFiles = _reconcileRepoFiles;
+
 async function _cloudSync(opts) {
   if (!window.sheetsAPI || !window.storage) return;
   const st = window.storage;
@@ -183,6 +226,9 @@ async function _cloudSync(opts) {
       const s = settingsRes.value;
       cloudKeys = s;
       ["schedaData", "dietaData"].forEach(k => {
+        // Se il .txt del repo ha già vinto in questa sessione, non lasciare che
+        // il valore (ancora vecchio) del cloud lo riscriva prima che il push propaghi.
+        if (_repoOverride[k]) return;
         if (s[k]) { st.set(k, s[k]); console.log("[sync pull]", k, "✓"); }
       });
       // spesaChecked2: chiave cloud "pulita" (la vecchia "spesaChecked" aveva
@@ -345,7 +391,7 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
   React.useEffect(() => {
     if (!storageReady || initialized) return;
     _cleanupOldDailyKeys();
-    _cloudSync().finally(() => {
+    _reconcileRepoFiles().finally(() => _cloudSync()).finally(() => {
       const s = initState();
       setStateRaw(s);
       setLang(window.storage ? window.storage.get("lang", "it") : "it");
