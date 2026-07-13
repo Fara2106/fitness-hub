@@ -1,0 +1,11 @@
+# GitHub Pages is in legacy build mode, so it runs Jekyll even with a .nojekyll file.
+# The jekyll-optional-front-matter plugin renders Liquid on ALL .md files, and the
+# internal design docs under docs/ contain JSX ({{ ... }} inline styles) that Liquid
+# cannot parse — this crashed the Pages build (site was frozen at 2026-06-18).
+# App files (index.html, launch.html, *.jsx, *.css) have no front matter, so Jekyll
+# copies them verbatim and they are unaffected. We just keep Jekyll away from docs/.
+exclude:
+  - docs/
+  - node_modules/
+  - "*.command"
+  - Deploy GitHub Pages.command
