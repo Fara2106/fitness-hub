@@ -6,10 +6,11 @@ const _isStandalone = window.navigator.standalone === true
 
 // ── Status bar (mobile) ───────────────────────────────────────────────────
 // In PWA installata non mostriamo il finto orario, ma riempiamo comunque
-// l'area del notch (safe-area-inset-top) con lo sfondo dell'app, così non
-// resta una banda scura sopra il contenuto.
+// l'area del notch (safe-area-inset-top) con --statusbar-bg: in dark = --bg,
+// in light = tono scuro (l'orologio iOS con black-translucent è SEMPRE bianco
+// e non è cambiabile a runtime → serve uno sfondo scuro per leggerlo).
 const StatusBar = () => _isStandalone ? (
-  <div style={{ height: "env(safe-area-inset-top)", flexShrink: 0, background: "var(--bg)" }} />
+  <div style={{ height: "env(safe-area-inset-top)", flexShrink: 0, background: "var(--statusbar-bg, var(--bg))" }} />
 ) : (
   <div className="lfh-status" style={{ paddingTop: "env(safe-area-inset-top)", boxSizing: "content-box" }}>
 
@@ -44,6 +45,7 @@ const Screen = ({ which, device, state, set, globalCtx }) => {
         {...pass}
         activities={state.activities} addActivity={(a) => set(st => ({ ...st, activities: [{ ...a, id: Date.now(), when: "Oggi" }, ...st.activities] }))}
         checkIn={state.checkIn} setCheckIn={(v) => set(st => ({ ...st, checkIn: v }))}
+        hydration={state.hydration} setHydration={(v) => set(st => ({ ...st, hydration: v }))}
         weekNum={state.weekNum}
         setWeekNum={(v) => set(st => ({ ...st, weekNum: v }))}
         bodyWeight={state.bodyWeight}
@@ -99,9 +101,20 @@ function _applyTheme(theme) {
   }
   root.classList.toggle("theme-light", light);
   // theme-color dinamico: iOS lo usa per la striscia della home-indicator (che la
-  // pagina non può dipingere) → tono TabBar (--nav-bg ≈ #141416 / #f9f9fb) così si fonde
+  // pagina non può dipingere) → tono TabBar (--nav-bg ≈ #0b0b0f / #f7f7fa) così si fonde
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute("content", light ? "#f9f9fb" : "#141416");
+  if (meta) meta.setAttribute("content", light ? "#f7f7fa" : "#0b0b0f");
+}
+
+// ── Sync state (osservabile dalla UI: SyncBadge in nav.jsx, riga in Impostazioni) ──
+window._syncState = { status: "idle", last: null };
+function _setSyncState(status) {
+  const prev = window._syncState || {};
+  window._syncState = {
+    status,
+    last: status === "ok" ? Date.now() : prev.last || null,
+  };
+  try { window.dispatchEvent(new Event("lfh-sync")); } catch (_) {}
 }
 
 // ── Cloud sync (pull settings + peso from Sheets on startup) ─────────────
@@ -137,6 +150,12 @@ async function _cloudSync(opts) {
   if (!window.sheetsAPI || !window.storage) return;
   const st = window.storage;
   const { pesiMs = 8000, settingsMs = 15000 } = opts || {};
+
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    _setSyncState("offline");
+    return;
+  }
+  _setSyncState("syncing");
 
   try {
     const [pesiRes, settingsRes] = await Promise.all([
@@ -175,7 +194,8 @@ async function _cloudSync(opts) {
       if (s.spesaFreq)  st.set("spesaFreq", Number(s.spesaFreq) || 1);
       // groqApiKey: cloud wins sempre
       if (s.groqApiKey) { st.set("groqApiKey", s.groqApiKey); console.log("[sync pull] groqApiKey ✓"); }
-      if (s.weekNum)    st.set("weekNum", Number(s.weekNum) || 1);
+      // clamp 1..8: un valore corrotto nel foglio non deve rompere la UI
+      if (s.weekNum)    st.set("weekNum", Math.max(1, Math.min(8, Number(s.weekNum) || 1)));
       if (s.bodyWeight && parseFloat(s.bodyWeight) > 0) {
         st.set("bodyWeight", parseFloat(s.bodyWeight));
         console.log("[sync pull] bodyWeight (settings) →", s.bodyWeight);
@@ -203,7 +223,9 @@ async function _cloudSync(opts) {
     if (cloudKeys) _cloudPushMissing(cloudKeys);
     else console.warn("[sync] pull settings fallito → push saltato (anti-clobber)");
 
-  } catch (e) { console.warn("[sync] error:", e); }
+    _setSyncState(settingsRes.ok || pesiRes.ok ? "ok" : "error");
+
+  } catch (e) { console.warn("[sync] error:", e); _setSyncState("error"); }
 }
 
 // ── Cloud push: pusha al cloud tutto ciò che manca ────────────────────────
@@ -270,6 +292,23 @@ window._cloudPushAll = function() {
   return Promise.all(saves);
 };
 
+// ── Pulizia chiavi giornaliere vecchie (>90 giorni) ────────────────────────
+// checkIn_/hydration_/notes_/gym_/integ_/coachChat_/schedaProg_ si accumulano
+// una per giorno: senza sweep IndexedDB cresce per sempre.
+function _cleanupOldDailyKeys() {
+  if (!window.storage || !window.storage.keys) return;
+  try {
+    const cut = new Date();
+    cut.setDate(cut.getDate() - 90);
+    const cutKey = `${cut.getFullYear()}-${String(cut.getMonth() + 1).padStart(2, "0")}-${String(cut.getDate()).padStart(2, "0")}`;
+    const re = /^(checkIn_|hydration_|notes_|gym_|integ_|coachChat_|schedaProg_|muscleSets_)(\d{4}-\d{2}-\d{2})$/;
+    window.storage.keys().forEach(k => {
+      const m = k.match(re);
+      if (m && m[2] < cutKey) window.storage.remove(k);
+    });
+  } catch (_) {}
+}
+
 // ── AppFrame ───────────────────────────────────────────────────────────────
 const AppFrame = ({ device, initialScreen, chromeless }) => {
   const [storageReady, setStorageReady] = React.useState(window.storage ? window.storage.isReady() : false);
@@ -305,6 +344,7 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
 
   React.useEffect(() => {
     if (!storageReady || initialized) return;
+    _cleanupOldDailyKeys();
     _cloudSync().finally(() => {
       const s = initState();
       setStateRaw(s);
@@ -326,24 +366,25 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
         if (window.sheetsAPI) window.sheetsAPI.saveCheckIn({ date: t, sleep: next.checkIn.sleep, energy: next.checkIn.energy, ailments: next.checkIn.ailments || "" }).catch(() => {});
       }
       if (next.hydration  !== prev.hydration)  window.storage.set(`hydration_${t}`, next.hydration);
+      // Push settings con retry (_saveSettingRetry): il fire-and-forget singolo
+      // perdeva il dato al primo errore di rete (stessa ragione per cui esiste
+      // _saveSettingRetry — ora usato coerentemente anche qui).
       if (next.weekNum    !== prev.weekNum) {
         window.storage.set("weekNum", next.weekNum);
-        if (window.sheetsAPI) window.sheetsAPI.saveSettings({ key: "weekNum", value: String(next.weekNum) }).catch(() => {});
+        _saveSettingRetry("weekNum", next.weekNum);
       }
       if (next.bodyWeight !== prev.bodyWeight) {
         window.storage.set("bodyWeight", next.bodyWeight);
-        if (window.sheetsAPI) {
-          window.sheetsAPI.saveSettings({ key: "bodyWeight", value: String(next.bodyWeight) }).catch(() => {});
-          window.sheetsAPI.savePesoCorporeo({ date: t, weight: next.bodyWeight }).catch(() => {});
-        }
+        _saveSettingRetry("bodyWeight", next.bodyWeight);
+        if (window.sheetsAPI) window.sheetsAPI.savePesoCorporeo({ date: t, weight: next.bodyWeight }).catch(() => {});
       }
       if (next.spesaChecked !== prev.spesaChecked) {
         window.storage.set("spesaChecked", next.spesaChecked);
-        if (window.sheetsAPI) window.sheetsAPI.saveSettings({ key: "spesaChecked2", value: JSON.stringify(next.spesaChecked) }).catch(() => {});
+        _saveSettingRetry("spesaChecked2", JSON.stringify(next.spesaChecked));
       }
       if (next.spesaFreq !== prev.spesaFreq) {
         window.storage.set("spesaFreq", next.spesaFreq);
-        if (window.sheetsAPI) window.sheetsAPI.saveSettings({ key: "spesaFreq", value: String(next.spesaFreq) }).catch(() => {});
+        _saveSettingRetry("spesaFreq", next.spesaFreq);
       }
       if (next.theme      !== prev.theme)       { window.storage.set("theme", next.theme); _applyTheme(next.theme); }
       return next;

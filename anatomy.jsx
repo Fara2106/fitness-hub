@@ -97,7 +97,7 @@ const Anatomy = ({ active = [], view = "both", height = 260, color = "var(--acce
   return (
     <svg
       viewBox={`0 0 ${w} 220`}
-      width="auto"
+      width={Math.round((height * w) / 220)}
       height={height}
       style={{ display: "block" }}
     >

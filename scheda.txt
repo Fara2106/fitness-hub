@@ -1,120 +1,103 @@
-# UPPER A - Lunedì
-# Focus: Petto (prevalente) · Schiena · Bicipiti · Spalle (laterale)
-# Riscaldamento: Rotazioni spalle avanti/indietro 2×15 | Wall slides 2×10 | Facepull elastico 2×12
-# Ramp-up ogni esercizio principale: 50%×12 → 70%×8 → 90%×3 → poi serie vere
+# PUSH - Giorno 1
+# Focus: Petto · Spalle · Tricipiti
+# Riscaldamento: Rotazioni spalle 2x15 | Band pull-apart leggero 2x15 | Arm circles 1x20
 
 Esercizio | Serie | Rip | Recupero | Note tecniche
-Panca piana con bilanciere | 4 | 8-10 | 90 | Busto stabile, piedi a terra. Fase negativa 2s. Espi in spinta. Muscoli: grande pettorale, deltoide ant., tricipite.
-Panca inclinata con manubri (30°) | 4 | 10-12 | 90 | 30° inclinazione. Arco verso il centro in cima. Controlla la discesa. Muscoli: pettorale superiore, deltoide anteriore.
-Croci ai cavi bassi (chest fly) | 3 | 12-15 | 75 | Busto leggermente avanti. Gomito con angolo fisso. Senti l'allungamento al centro. Muscoli: pettorale medio.
-Dips alle parallele | 3 | 8-12 | 90 | Busto inclinato avanti per enfatizzare il petto. Scendi fino a 90° al gomito. Espi in spinta. Muscoli: pettorale inferiore, tricipite.
-Lat machine presa larga (pull-down) | 4 | 10-12 | 90 | Tira verso il petto. Scapole che scendono prima delle braccia. Busto leggermente indietro. Muscoli: gran dorsale, bicipite, romboidi.
-Rematore con manubrio su panca (1 braccio) | 3 | 10-12 | 75 | Schiena parallela. Tira il gomito verso il soffitto. Nessuna rotazione. Muscoli: dorsale, teres major, bicipite.
-Alzate laterali con manubri | 3 | 12-15 | 75 | Gomiti leggermente flessi. Solleva lateralmente fino all'altezza delle spalle, NON oltre. Movimento lento. Muscoli: deltoide mediale.
-Curl con bilanciere EZ | 3 | 10-12 | 75 | Gomiti fissi ai fianchi. Solleva espirando, abbassa in 3s. No momentum. Muscoli: bicipite brachiale.
-Curl con manubri alternati (martello) | 3 | 10-12 | 75 | Presa neutrale. Curla alternando. Muscoli: bicipite, brachioradiale.
+Push-up (bodyweight) | 3 | 8-12 | 60 | Corpo in linea, gomiti a 45°. Petto sfiora terra. Espira in spinta. Muscoli: petto, tricipiti, deltoide ant.
+Band chest press | 3 | 12-15 | 60 | Banda dietro la schiena, sotto le ascelle. Spingi in avanti mani unite. No slancio del busto. Muscoli: petto, tricipiti.
+Band shoulder press | 3 | 10-12 | 60 | In piedi su banda, maniglie alle spalle. Spingi sopra la testa senza inarcare la lombare. Muscoli: deltoide, trapezio.
+Band lateral raise | 3 | 12-15 | 45 | In piedi su banda. Solleva fino a spalle, gomiti morbidi. No slancio. Muscoli: deltoide mediale.
+Band tricep kickback | 3 | 12-15 | 45 | Busto inclinato ~45°, banda sotto un piede. Estendi il gomito indietro, fermo ai fianchi. Muscoli: tricipite.
+Band pull-apart | 2 | 15 | 45 | Braccia tese avanti, apri fino al petto. Contrai le scapole. Muscoli: deltoide post., postura.
 
-# Alternative a casa per UPPER A
-# Panca piana → Push-up zavorrati / Push-up con piedi rialzati
-# Panca inclinata → Push-up con piedi su sedia
-# Croci cavi → Croci con elastico / Chest squeeze con cuscino
-# Dips → Dips su sedia
-# Lat machine → Trazioni / Inverted row su tavolo
-# Rematore → Row con zaino zavorrato / Elastico
-# Alzate laterali → Alzate con bottiglie d'acqua / elastico
-# Curl EZ → Curl con bottiglie / elastico
-# Curl martello → Curl neutrale con bottiglie
-
-# Stretching finale (8-10 min)
-# PETTO: Chest opener sdraiato 60" · Cobra passivo prono 40" · Mani intrecciate dietro schiena 30"
-# SPALLE: Cross-body stretch a terra 30"/lato · Inclinazione laterale collo 30"/lato
-# SCHIENA: Child's pose 45" · Twisting supino 30"/lato
-# BRACCIA: Stretch bicipite supino 30" · Stretch avambraccio 25"/lato
-# ADDOME: Cobra passivo prolungato 40" · Stretch laterale sdraiato 30"/lato
-# GAMBE: Hip flexor in affondo 40"/lato · Hamstring supino 35"/lato · Piriforme figura 4 35"/lato
+# Stretching finale (4 min)
+# PETTO: Chest opener a terra 45"
+# BRACCIA: Stretch tricipite overhead 25"/lato
+# CERVICALE: Rotazione cervicale 30"/lato
 
 ---
 
-# LOWER - Mercoledì
-# Focus: Gambe · Glutei · Core · Lombare
-# Ramp-up ogni esercizio principale: 50%×12 → 70%×8 → 90%×3 → poi serie vere
+# PULL - Giorno 2
+# Focus: Schiena · Bicipiti
+# Riscaldamento: Cat-cow 2x8 | Face pull leggero 2x15 | Shoulder rolls 2x15
 
 Esercizio | Serie | Rip | Recupero | Note tecniche
-Squat con bilanciere (back squat) | 4 | 8-10 | 120 | Barra sulle trappezi. Scendi fino a parallelismo. Ginocchia in linea con le dita, no valgo. Schiena neutra. Espi in salita. Muscoli: quadricipiti, glutei, ischiocrurali.
-Leg press 45° | 3 | 12-15 | 90 | Piedi a metà pedana. Non bloccare le ginocchia. Piedi più alti = più glutei. Muscoli: quadricipiti, glutei, adduttori.
-Romanian Deadlift (RDL) con bilanciere | 4 | 10-12 | 90 | Schiena neutra, barra vicina alle gambe. Inclinati fino a sentire lo stretch. Spingi i fianchi in avanti per tornare. Muscoli: ischiocrurali, gluteo grande, erettori.
-Affondi con manubri (camminata) | 3 | 10/gamba | 90 | Passo lungo, ginocchio posteriore sfiora terra. Busto eretto. No ginocchio oltre il piede. Muscoli: quadricipite, gluteo, adduttori.
-Leg curl sdraiato (macchina) | 3 | 12-15 | 75 | Cuscinetto sopra i talloni. Curla espirando, ritorno 3s. Non sollevare i fianchi. Muscoli: ischiocrurali.
-Calf raise in piedi (macchina o scalino) | 4 | 15-20 | 60 | Salita esplosiva, discesa lenta 3s. Estensione completa in cima. Muscoli: gastrocnemio, soleo.
-Crunch inverso a terra | 3 | 15-20 | 60 | Gambe a 90°. Porta il bacino verso il petto con gli addominali. Schiena a contatto col suolo. Muscoli: retto addominale basso, obliqui.
-Plank isometrico | 3 | 45-60 sec | 60 | Avambracci a terra, corpo in linea. Addome contratto, non alzare i glutei. Muscoli: core, trasverso addominale.
-Back extension (macchina o panca lombare) | 3 | 12-15 | 60 | Busto neutro in partenza. Estendi fino alla linea del corpo, NON iperestendere. Contrai i glutei in cima. Movimento lento. Muscoli: erettori spinali, gluteo grande, ischiocrurali.
+Band bent-over row | 4 | 10-12 | 60 | Piedi sulla banda, busto inclinato 45°, schiena neutra. Tira verso l'ombelico, gomiti vicini. Muscoli: dorsale, romboidi, bicipite.
+Superman | 3 | 12-15 | 45 | Prono, solleva braccia e gambe insieme. Contrai i glutei. No slancio. Muscoli: erettori spinali, lombare, glutei.
+Band face pull | 3 | 15 | 45 | Banda tesa davanti al petto, tira verso il viso aprendo i gomiti. Muscoli: deltoide post., cervicale/salute spalla.
+Y-T-W a terra | 3 | 10 (per lettera) | 45 | Prono su tappetino, braccia a Y poi T poi W, solleva leggermente. Muscoli: scapole, deltoide post.
+Band bicep curl | 3 | 10-12 | 45 | In piedi su banda, gomiti fissi ai fianchi. Curla espirando, scendi in 3s. No momentum. Muscoli: bicipite.
+Band hammer curl | 3 | 10-12 | 45 | Presa neutra, stesso movimento del curl. Muscoli: bicipite, brachioradiale.
 
-# Alternative a casa per LOWER
-# Squat bilanciere → Squat corpo libero / Squat con zaino zavorrato / Bulgarian split squat
-# Leg press → Squat sumo / Wall sit
-# RDL → Stacco a una gamba corpo libero / RDL con bottiglie
-# Affondi → Affondi statici / Reverse lunge
-# Leg curl → Nordic curl / Leg curl con elastico
-# Calf raise → Calf raise su scalino / Saltelli
-# Crunch inverso → Leg raise sdraiato
-# Plank → Plank su ginocchia se troppo difficile
-# Back extension → Superman prono / Bird-dog
-
-# Stretching finale (10 min)
-# GAMBE: Quadricipite prono 45"/lato · Hamstring supino 45"/lato · Hip flexor affondo profondo 45"/lato
-#         Piriforme figura 4 sdraiato 45"/lato · Stretch rana 40" · IT Band sdraiato 30"/lato
-# SCHIENA/LOMBARE: Child's pose 45" · Cobra passivo 40" · Twisting supino 30"/lato
-# ADDOME: Cobra passivo prolungato 40" · Stretch laterale sdraiato 30"/lato
-# PETTO/BRACCIA: Chest opener a terra 30" · Stretch tricipite overhead sdraiato 25"/lato
+# Stretching finale (4 min)
+# SCHIENA: Child's pose 45"
+# BRACCIA: Stretch bicipite supino 30"
+# CERVICALE: Inclinazione laterale collo 30"/lato
 
 ---
 
-# UPPER B - Venerdì
-# Focus: Schiena (prevalente) · Petto · Tricipiti · Spalle (ant./med.)
-# Riscaldamento: Facepull elastico 2×15 | Shoulder retraction elastico 2×12 | Cat-cow 4 zampe 2×8
-# Ramp-up ogni esercizio principale: 50%×12 → 70%×8 → 90%×3 → poi serie vere
+# LEGS (mantenimento) + UPPER EXTRA - Giorno 3
+# Focus: Gambe (mantenimento) · Core · Extra Petto/Schiena/Bicipiti
+# Riscaldamento: Air squat leggeri 1x15 | Rotazioni spalle 1x15
 
 Esercizio | Serie | Rip | Recupero | Note tecniche
-Rematore con bilanciere (Bent-over row) | 4 | 8-10 | 90 | Busto 45°, schiena neutra. Tira verso l'ombelico. Gomiti vicini. Contrai le scapole in cima. Muscoli: dorsale, romboidi, trapezio medio, bicipite.
-Lat machine presa stretta supina | 4 | 10-12 | 90 | Presa supina alla larghezza spalle. Porta la barra al petto. Gomiti verso i fianchi. Muscoli: gran dorsale (capo interno), bicipite.
-Pullover con manubrio su panca | 3 | 12-15 | 75 | Sdraiato di traverso. Braccia tese, abbassa il manubrio verso il suolo. Senti lo stretch dorsale. Muscoli: gran dorsale, pettorale basso, serrante.
-Reverse fly con manubri (busto inclinato) | 3 | 12-15 | 60 | Busto inclinato 80° avanti, schiena neutra. Solleva manubri lateralmente fino all'altezza delle spalle. No slancio. Muscoli: deltoide posteriore, romboidi, trapezio.
-Face pull ai cavi (corda) | 3 | 15 | 60 | Cavo all'altezza degli occhi. Tira verso il viso aprendo i gomiti verso l'esterno. Muscoli: deltoide posteriore, rotatori, trapezio medio.
-Lento avanti con manubri (Shoulder Press) | 4 | 8-10 | 90 | Seduto, schiena neutra. Spingi i manubri sopra la testa. Scapole depresse durante la spinta. Espi in su. Muscoli: deltoide anteriore e mediale, trapezio.
-Panca piana con manubri | 3 | 10-12 | 90 | Range maggiore rispetto al bilanciere. Porta i manubri a toccarsi in cima, allungamento completo in basso. Muscoli: pettorale, deltoide ant.
-Croci su panca inclinata con manubri | 3 | 12-15 | 75 | 30° di inclinazione. Arco ampio, gomito con angolo fisso. Focus sull'allungamento. Muscoli: pettorale superiore.
-Push-down ai cavi (corda) | 3 | 12-15 | 75 | Presa a corda, spingi aprendo le mani in basso. Gomiti fissi. Controlla il ritorno. Muscoli: tricipite (tutti e 3 i capi).
-French press con manubri su panca | 3 | 10-12 | 75 | Sdraiato, abbassa i manubri verso le tempie con gomiti fermi. Estendi espirando. Muscoli: tricipite (capo lungo).
-Crunch con rotazione (obliqui) | 3 | 15/lato | 60 | Mano dietro la testa. Porta il gomito verso il ginocchio opposto. Controlla la discesa. Muscoli: retto addominale, obliqui.
+Band squat | 3 | 12-15 | 45 | Banda sopra ginocchia o sotto piedi fino alle spalle. Scendi a parallelo, ginocchia in linea con le dita. Muscoli: quadricipiti, glutei.
+Band RDL (hip hinge) | 3 | 12-15 | 45 | Banda sotto i piedi, in mano. Spingi i fianchi indietro, schiena neutra. Muscoli: ischiocrurali, glutei.
+Band glute bridge | 2 | 15 | 45 | Banda sopra le ginocchia, supino. Spingi i fianchi in alto, contrai in cima. Muscoli: glutei.
+Plank | 2 | 45-60 sec | 45 | Avambracci a terra, corpo in linea. Addome contratto. Muscoli: core, trasverso addominale.
+Band chest press | 3 | 12-15 | 60 | Banda dietro la schiena, sotto le ascelle. Spingi avanti mani unite. Muscoli: petto, tricipiti.
+Band bent-over row | 3 | 12-15 | 60 | Piedi sulla banda, busto inclinato 45°. Tira verso l'ombelico. Muscoli: dorsale, bicipite.
+Band bicep curl | 2 | 12-15 | 45 | Gomiti fissi ai fianchi, curla espirando. Muscoli: bicipite.
 
-# Alternative a casa per UPPER B
-# Rematore bilanciere → Row con zaino / Elastico
-# Lat machine supina → Trazioni supine / Inverted row
-# Pullover → Pullover con bottiglia / elastico
-# Reverse fly → Reverse fly con elastico / bottiglie
-# Face pull → Face pull con elastico
-# Shoulder press → Pike push-up / Shoulder press con bottiglie
-# Panca manubri → Push-up
-# Croci inclinate → Croci con elastico
-# Push-down → Dips su sedia / tricipiti con elastico
-# French press → French press con bottiglia
+# Stretching finale (4 min, misto)
+# GAMBE: Hamstring supino 30"/lato
+# PETTO: Chest opener 30"
+# BRACCIA: Stretch bicipite 25"
 
-# Stretching finale (8-10 min)
-# SCHIENA: Child's pose 60" · Cat-cow da sdraiato 10 oscillazioni · Twisting supino 40"/lato · Cobra passivo 35"
-# SPALLE: Cross-body stretch a terra 30"/lato · Stretch trapezio da seduto 30"/lato
-# BRACCIA/TRICIPITI: Stretch tricipite overhead sdraiato 30"/lato · Stretch avambraccio estensori 25"/lato
-# PETTO: Chest opener a terra 45" · Cobra passivo prolungato 40"
-# ADDOME: Stretch laterale sdraiato 30"/lato
-# GAMBE: Hip flexor in affondo 40"/lato · Hamstring supino 35"/lato · Piriforme figura 4 35"/lato
+---
+
+# PUSH 2 - Giorno 4
+# Focus: Petto · Spalle · Tricipiti (variante)
+# Riscaldamento: Rotazioni spalle 2x15 | Band pull-apart leggero 2x15 | Arm circles 1x20
+
+Esercizio | Serie | Rip | Recupero | Note tecniche
+Push-up piedi rialzati (su gradino/divano) | 3 | 8-12 | 60 | Enfatizza il petto alto. Stessa esecuzione del push-up standard. Muscoli: petto superiore.
+Band chest fly | 3 | 12-15 | 60 | Banda dietro la schiena, braccia aperte, chiudi davanti al petto con angolo fisso al gomito. Muscoli: petto medio.
+Band Arnold press | 3 | 10-12 | 60 | In piedi su banda, parti con palmi verso di te, ruota spingendo sopra la testa. Muscoli: deltoide completo.
+Band front raise | 3 | 12-15 | 45 | In piedi su banda, solleva le braccia davanti fino a altezza spalle. Muscoli: deltoide anteriore.
+Band overhead tricep extension | 3 | 12-15 | 45 | Banda sotto un piede, dietro la testa, estendi verso l'alto senza aprire i gomiti. Muscoli: tricipite capo lungo.
+Diamond push-up | 3 | 6-10 | 60 | Mani a rombo sotto il petto. Se troppo difficile, esegui sulle ginocchia. Muscoli: tricipite, petto interno.
+
+# Stretching finale (4 min)
+# PETTO: Chest opener a terra 45"
+# BRACCIA: Stretch tricipite overhead 25"/lato
+# CERVICALE: Rotazione cervicale 30"/lato
+
+---
+
+# PULL 2 + ADDOME - Giorno 5
+# Focus: Schiena · Bicipiti · Addome
+# Riscaldamento: Cat-cow 2x8 | Face pull leggero 2x15 | Shoulder rolls 2x15
+
+Esercizio | Serie | Rip | Recupero | Note tecniche
+Band single-arm row | 3 | 10-12 (per lato) | 60 | Un piede sulla banda, tira con un braccio verso l'anca. Nessuna rotazione del busto. Muscoli: dorsale, romboidi.
+Band reverse fly | 3 | 12-15 | 45 | In piedi su banda, busto inclinato 45°, apri le braccia lateralmente. Muscoli: deltoide post., trapezio medio.
+Superman hold | 3 | 20-30 sec | 45 | Come superman ma in tenuta isometrica. Muscoli: erettori, lombare.
+Band curl 21s | 3 | 21 (7+7+7) | 45 | 7 rip metà bassa, 7 metà alta, 7 complete. Bicipite sotto tensione costante. Muscoli: bicipite.
+Band woodchopper | 3 | 12 (per lato) | 45 | Banda ancorata bassa (o sotto un piede), tira in diagonale verso l'alto ruotando il busto. Muscoli: obliqui, core rotazionale.
+Bicycle crunch | 3 | 15 (per lato) | 45 | Supino, alterna gomito-ginocchio opposto. Controlla, non tirare il collo. Muscoli: retto addominale, obliqui.
+
+# Stretching finale (4 min)
+# SCHIENA: Child's pose 45"
+# ADDOME: Cobra passivo 40"
+# LATERALE: Stretch laterale sdraiato 30"/lato
 
 ---
 
 # NOTE GENERALI
-# Split settimanale: Upper A (Lun) · Lower (Mer) · Upper B (Ven)
-# Muscoli stimolati 2x/settimana: Petto, Schiena, Spalle, Braccia
-# Gambe: 1x/settimana
-# Progressione: prima aumenta le rip fino al limite alto del range, poi aumenta il peso
-# Cambia scheda ogni 6-8 settimane
-# Cervicale/spalle: mobilità obbligatoria pre-Upper A e B. Mai forzare il range se c'è tensione.
-# Se cervicale in fase acuta: salta shoulder press, riduci alzate laterali a 1 serie leggera
+# Split settimanale: Push (1) - Pull (2) - Legs+Upper Extra (3) - Push2 (4) - Pull2+Addome (5)
+# Attrezzatura: set di 5 elastici a resistenza variabile + corpo libero (no ancoraggio fisso, no tappetino obbligatorio)
+# Focus: parte alta (petto, schiena, spalle, braccia, addome) prioritaria - gambe in mantenimento
+# Progressione: aumenta le rip fino al limite alto del range, poi passa a un elastico più resistente o combina 2 elastici insieme
+# Riducibile a 4 giorni: salta il Giorno 5 o alternalo a settimane alterne col Giorno 3
+# Cervicale/spalle: mobilità pre-Push e pre-Pull. Mai forzare il range se c'è tensione.

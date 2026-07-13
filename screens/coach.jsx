@@ -171,10 +171,24 @@ const Coach = ({ device, activities = [], checkIn, hydration, weekNum, bodyWeigh
     ? `${t("Ciao Lorenzo! Oggi tocca")} ${sess.label}. ${t("Sono pronto — chiedimi su scheda, dieta o recupero.")}`
     : t("Ciao Lorenzo! Oggi è un giorno di riposo. Parliamo di recupero, nutrizione o programmazione?");
 
-  const [messages, setMessages] = React.useState([{ role: "assistant", text: greeting }]);
+  // Chat persistita per giornata: navigare in un'altra tab non la cancella più
+  const chatKey = `coachChat_${window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10)}`;
+  const [messages, setMessages] = React.useState(() => {
+    const saved = window.storage ? window.storage.get(chatKey, null) : null;
+    return Array.isArray(saved) && saved.length ? saved : [{ role: "assistant", text: greeting }];
+  });
   const [input, setInput]       = React.useState("");
   const [busy, setBusy]         = React.useState(false);
   const scrollRef               = React.useRef(null);
+
+  React.useEffect(() => {
+    if (window.storage && messages.length > 1) window.storage.set(chatKey, messages.slice(-40));
+  }, [messages]);
+
+  const resetChat = () => {
+    if (window.storage) window.storage.remove(chatKey);
+    setMessages([{ role: "assistant", text: greeting }]);
+  };
 
   React.useEffect(() => {
     if (scrollRef.current) {
@@ -256,6 +270,20 @@ const Coach = ({ device, activities = [], checkIn, hydration, weekNum, bodyWeigh
             <span className="pill num" style={{ fontSize: 11, background: "rgba(48,209,88,0.15)", color: "var(--success)" }}>
               {bodyWeight}kg
             </span>
+          )}
+          {messages.length > 1 && (
+            <button
+              onClick={resetChat}
+              title={t("Nuova chat")}
+              disabled={busy}
+              style={{
+                width: 28, height: 28, borderRadius: 999, border: "1px solid var(--border)",
+                background: "var(--card-2)", color: "var(--text-2)", cursor: busy ? "default" : "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+              }}
+            >
+              <Icon name="refresh" size={13} strokeWidth={2} />
+            </button>
           )}
         </div>
 

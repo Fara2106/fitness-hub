@@ -1,36 +1,41 @@
-/* Lorenzo Fitness Hub — design tokens & base styles */
-
-@import url('https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* Lorenzo Fitness Hub — design tokens & base styles
+   Redesign 2026-07: iOS premium — font di sistema (zero webfont),
+   gradiente LF (--brand-grad) unico colore di marca, semantici solo con significato. */
 
 /* ── DARK theme (default) ── */
 :root {
   color-scheme: dark; /* form controls/scrollbar nativi coerenti col tema */
-  --bg:      #0a0a0a;
-  --bg-2:    #141416;
-  --card:    #1c1c1e;
-  --card-2:  #2c2c2e;
-  --card-3:  #3a3a3c;
-  --border:  rgba(255,255,255,0.07);
-  --border-2:rgba(255,255,255,0.12);
-  --nav-bg:  rgba(20,20,22,0.92);   /* TabBar / barre flottanti (theme-aware) */
-  --safe-bg: #141416;               /* tono TabBar (fallback dietro tutto) */
+  --bg:      #0b0b0f;
+  --bg-2:    #121218;
+  --card:    #15151b;
+  --card-2:  #1d1d25;
+  --card-3:  #26262f;
+  --border:  #23232b;
+  --border-2:#2e2e38;
+  --nav-bg:  rgba(11,11,15,0.92);   /* TabBar / barre flottanti (theme-aware) */
+  --safe-bg: #0b0b0f;               /* tono TabBar (fallback dietro tutto) */
+  /* Striscia status bar iOS (standalone, black-translucent = orologio SEMPRE bianco).
+     Dark: si fonde con lo sfondo. Light: tono scuro (vedi .theme-light) perché
+     il testo bianco iOS non è cambiabile a runtime dalla pagina. */
+  --statusbar-bg: var(--bg);
   --track:   rgba(255,255,255,0.08); /* sfondo "binario" di barre di progresso */
 
-  --text:    #ffffff;
-  --text-2:  #8e8e93;
-  --text-3:  #636366;
+  --text:    #f2f2f7;
+  --text-2:  #8e8e9a;
+  --text-3:  #5a5a66;
 
   --accent:  #0a84ff;
   --accent-2:#5ac8fa;
-  --success: #30d158;
-  --warning: #ff9f0a;
-  --danger:  #ff453a;
-  --purple:  #bf5af2;
+  --brand-2: #5e5ce6;
+  --brand-grad: linear-gradient(135deg, #0a84ff 0%, #5e5ce6 100%); /* UNICO colore di marca */
+  --success: #30d158;   /* SOLO "fatto" */
+  --warning: #ffd60a;   /* SOLO "attenzione" */
+  --danger:  #ff453a;   /* SOLO "errore" */
+  --purple:  #bf5af2;   /* legacy: referenziato dagli screens pre-redesign; rimuovere a fine fase 2 */
 
-  --display: "General Sans", -apple-system, system-ui, sans-serif;
-  --body:    "General Sans", -apple-system, system-ui, sans-serif;
-  --mono:    "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  --display: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --body:    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --mono:    ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
 
   --r-sm: 10px;
   --r:    16px;
@@ -45,21 +50,26 @@
   --bg-2:    #ffffff;
   --card:    #ffffff;
   --card-2:  #f2f2f7;
-  --card-3:  #e5e5ea;
-  --border:  rgba(0,0,0,0.08);
-  --border-2:rgba(0,0,0,0.14);
-  --nav-bg:  rgba(249,249,251,0.92);
-  --safe-bg: #f9f9fb; /* tono TabBar chiaro (fallback dietro tutto) */
+  --card-3:  #e8e8ed;
+  --border:  #e2e4ea;
+  --border-2:#d5d7de;
+  --nav-bg:  rgba(247,247,250,0.92);
+  --safe-bg: #f7f7fa; /* tono TabBar chiaro (fallback dietro tutto) */
+  /* Light: l'orologio iOS resta bianco (black-translucent) → striscia scura
+     (tono ground dark) per renderlo leggibile; si fonde col notch/Dynamic Island */
+  --statusbar-bg: rgba(11,11,15,0.90);
   --track:   rgba(0,0,0,0.08);
 
-  --text:    #000000;
-  --text-2:  #3c3c43;
-  --text-3:  #8e8e93;
+  --text:    #17181c;
+  --text-2:  #6a6e78;
+  --text-3:  #9a9aa3;
 
   --accent:  #007aff;
   --accent-2:#5ac8fa;
+  --brand-2: #5e5ce6;
+  --brand-grad: linear-gradient(135deg, #0a84ff 0%, #5e5ce6 100%);
   --success: #34c759;
-  --warning: #ff9500;
+  --warning: #b36b00;  /* ambra scurita: leggibile su fondo chiaro */
   --danger:  #ff3b30;
 }
 
@@ -72,7 +82,6 @@ body {
   color: var(--text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-feature-settings: "ss01","ss02";
   letter-spacing: -0.005em;
 }
 
@@ -430,3 +439,67 @@ input, textarea, select { font-family: inherit; color: inherit; }
 
 /* ── range inputs ── */
 input[type=range] { accent-color: var(--accent); }
+
+/* ── Redesign 2026-07: utility del design system ── */
+.tnum { font-variant-numeric: tabular-nums; }
+
+.ui-cap {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.ui-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 14px;
+}
+
+/* Card "hero" (Oggi in Home): bagliori radiali del gradiente LF */
+.ui-card--hero { position: relative; overflow: hidden; }
+.ui-card--hero::before {
+  content: "";
+  position: absolute;
+  inset: -40% 55% 55% -20%;
+  background: radial-gradient(closest-side, rgba(10,132,255,0.28), transparent);
+  pointer-events: none;
+}
+.ui-card--hero::after {
+  content: "";
+  position: absolute;
+  inset: 55% -20% -40% 60%;
+  background: radial-gradient(closest-side, rgba(94,92,230,0.22), transparent);
+  pointer-events: none;
+}
+.ui-card--hero > * { position: relative; }
+
+/* Bottom sheet (menu ⋯, editor piani) */
+.ui-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.ui-sheet {
+  width: 100%;
+  max-width: 560px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 22px 22px 0 0;
+  padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+  max-height: 82dvh;
+  overflow: auto;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ui-sheet { animation: ui-sheet-up 0.22s cubic-bezier(0.22, 0.8, 0.3, 1); }
+  @keyframes ui-sheet-up {
+    from { transform: translateY(24px); opacity: 0.6; }
+    to   { transform: translateY(0);    opacity: 1; }
+  }
+}

@@ -134,24 +134,77 @@ const ApiKeyRow = ({ icon, iconBg, title, sub, storageKey, testFn, placeholder }
 };
 
 // ── File importer ──────────────────────────────────────────────────────────
-const FileImporter = ({ label, icon, storageKey, accept = ".txt" }) => {
+// ── Validatori import .txt ─────────────────────────────────────────────────
+// Parsano il file PRIMA di salvare: un file sbagliato non deve mai
+// sovrascrivere i dati buoni in storage né essere pushato al cloud.
+function _validateSchedaText(text, t) {
+  try {
+    if (!window.parseScheda) return { ok: true, detail: "" };
+    const p = window.parseScheda(text);
+    const days = ["Upper A", "Lower", "Upper B"].filter(k =>
+      p && p[k] && Array.isArray(p[k].exercises) && p[k].exercises.length > 0);
+    if (!days.length) return { ok: false };
+    const nEx = days.reduce((n, k) => n + p[k].exercises.length, 0);
+    return { ok: true, detail: `${days.length} ${t("giorni")} · ${nEx} ${t("esercizi")}` };
+  } catch (_) { return { ok: false }; }
+}
+function _validateDietaText(text, t) {
+  try {
+    if (!window.parseDieta) return { ok: true, detail: "" };
+    const p = window.parseDieta(text);
+    const secs = p ? Object.keys(p).filter(k =>
+      p[k] && Array.isArray(p[k].meals) && p[k].meals.length > 0) : [];
+    if (!secs.length) return { ok: false };
+    const nMeals = secs.reduce((n, k) => n + p[k].meals.length, 0);
+    return { ok: true, detail: `${secs.length} ${t("sezioni")} · ${nMeals} ${t("pasti")}` };
+  } catch (_) { return { ok: false }; }
+}
+
+function _fmtImportDate(iso) {
+  try {
+    const d = new Date(iso);
+    if (isNaN(d)) return "";
+    return d.toLocaleDateString(undefined, { day: "2-digit", month: "2-digit", year: "numeric" }) +
+      " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  } catch (_) { return ""; }
+}
+
+// NB: nessun filtro `accept` di default. iOS (picker "File") rende NON
+// selezionabili i .txt quando accept=".txt"/"text/plain" (filtra per UTI):
+// il popup si apre ma il file resta grigio. Senza accept il file è sempre
+// selezionabile; la sicurezza è garantita da `validate` (valida il contenuto
+// dopo la lettura, un file sbagliato non tocca i dati esistenti).
+const FileImporter = ({ label, icon, storageKey, accept = "", validate }) => {
   const t = useT();
   const [loaded, setLoaded]   = React.useState(() => !!(window.storage && window.storage.get(storageKey, null)));
   const [fileName, setFileName] = React.useState(() => window.storage ? window.storage.get(storageKey + "_name", "") : "");
+  const [importedAt, setImportedAt] = React.useState(() => window.storage ? window.storage.get(storageKey + "_at", "") : "");
+  const [status, setStatus] = React.useState(null); // {type:'ok'|'err', msg}
   const inputRef = React.useRef(null);
 
   const handleFile = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
+    reader.onerror = () => setStatus({ type: "err", msg: t("Errore di lettura del file") });
     reader.onload = (ev) => {
       const text = ev.target.result;
+      // Validazione: se il formato non torna, NON toccare i dati esistenti
+      const v = validate ? validate(text, t) : { ok: true, detail: "" };
+      if (!v.ok) {
+        setStatus({ type: "err", msg: t("Formato non valido — dati attuali conservati") });
+        return;
+      }
+      const now = new Date().toISOString();
       if (window.storage) {
         window.storage.set(storageKey, text);
         window.storage.set(storageKey + "_name", file.name);
+        window.storage.set(storageKey + "_at", now);
       }
       setLoaded(true);
       setFileName(file.name);
+      setImportedAt(now);
+      setStatus({ type: "ok", msg: `${t("Importato")}${v.detail ? " · " + v.detail : ""}` });
       // Sync al cloud (scheda/dieta disponibili su tutti i device) con retry
       if (window._saveSettingRetry) {
         window._saveSettingRetry(storageKey, text);
@@ -162,6 +215,12 @@ const FileImporter = ({ label, icon, storageKey, accept = ".txt" }) => {
     reader.readAsText(file, "UTF-8");
   };
 
+  const subText = status
+    ? status.msg
+    : loaded
+      ? `${fileName || t("Caricato")}${importedAt ? " · " + t("Ultimo import") + " " + _fmtImportDate(importedAt) : ""}`
+      : t("Nessun file importato");
+
   return (
     <div className="row">
       <div className="icon-wrap" style={{ background: "#FF9F0A", color: "#fff" }}>
@@ -169,10 +228,10 @@ const FileImporter = ({ label, icon, storageKey, accept = ".txt" }) => {
       </div>
       <div className="row-main">
         <div className="row-title">{label}</div>
-        <div className="row-sub">{loaded ? (fileName || t("Caricato")) : t("Nessun file importato")}</div>
+        <div className="row-sub" style={status ? { color: status.type === "err" ? "var(--danger)" : "var(--success)" } : undefined}>{subText}</div>
       </div>
       <div className="row-trailing">
-        {loaded && <span className="pill" style={{ fontSize: 10, background: "rgba(48,209,88,0.18)", color: "var(--success)", marginRight: 6 }}>✓</span>}
+        {loaded && !status && <span className="pill" style={{ fontSize: 10, background: "rgba(48,209,88,0.18)", color: "var(--success)", marginRight: 6 }}>✓</span>}
         <button
           className="btn"
           style={{ padding: "6px 12px", fontSize: 12 }}
@@ -183,7 +242,7 @@ const FileImporter = ({ label, icon, storageKey, accept = ".txt" }) => {
         <input
           ref={inputRef}
           type="file"
-          accept={accept}
+          accept={accept || undefined}
           style={{ display: "none" }}
           onChange={handleFile}
           onClick={(e) => { e.target.value = ""; }}
@@ -264,6 +323,32 @@ const SyncNowRow = () => {
       ) : (
         <Icon name="chevron" size={13} color="var(--accent)" />
       )}
+    </IRow>
+  );
+};
+
+// ── Sync status row — legge window._syncState (aggiornato da app.jsx) ──────
+const SyncStatusRow = () => {
+  const t = useT();
+  const [s, setS] = React.useState(() => window._syncState || { status: "idle", last: null });
+  React.useEffect(() => {
+    const on = () => setS(Object.assign({}, window._syncState || { status: "idle", last: null }));
+    window.addEventListener("lfh-sync", on);
+    return () => window.removeEventListener("lfh-sync", on);
+  }, []);
+
+  const time = s.last
+    ? new Date(s.last).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : null;
+
+  return (
+    <IRow
+      icon="cloud"
+      iconBg="#30D158"
+      title={t("Stato sincronizzazione")}
+      sub={time ? `${t("Ultimo sync")}: ${time} · ${t("Cloud: Google Sheets via proxy")}` : t("In attesa del primo sync")}
+    >
+      {window.SyncBadge ? <SyncBadge /> : null}
     </IRow>
   );
 };
@@ -554,16 +639,16 @@ const Impostazioni = ({ device, onNav, theme, setTheme, weekNum, setWeekNum, bod
       {/* — Importa file — */}
       <ISection title={t("File di testo")} subtitle={t("Importa scheda.txt e dieta.txt")}>
         <FileImporter
-          label="scheda.txt"
+          label={t("Importa scheda (.txt)")}
           icon="dumbbell"
           storageKey="schedaData"
-          accept=".txt"
+          validate={_validateSchedaText}
         />
         <FileImporter
-          label="dieta.txt"
+          label={t("Importa dieta (.txt)")}
           icon="fork"
           storageKey="dietaData"
-          accept=".txt"
+          validate={_validateDietaText}
         />
         <IRow icon="info" iconBg="#8E8E93" title={t("Cibi esclusi")} sub="Pasta di ceci · lenticchie · piselli · bevanda di mandorla">
           <span className="pill" style={{ fontSize: 10, background: "rgba(255,69,58,0.14)", color: "var(--danger)" }}>🚫 {t("Sempre")}</span>
@@ -573,9 +658,7 @@ const Impostazioni = ({ device, onNav, theme, setTheme, weekNum, setWeekNum, bod
       {/* — Sync & Dati — */}
       <ISection title={t("Sincronizzazione & Dati")}>
         <SyncNowRow />
-        <IRow icon="lock" iconBg="#636366" title={t("Dati locali")} sub={t("Tutti i dati sono sul dispositivo")} trailing={
-          <span className="pill" style={{ fontSize: 10 }}>🔒 {t("Solo locale")}</span>
-        } />
+        <SyncStatusRow />
         <IRow
           icon="refresh"
           iconBg="#FF453A"
@@ -587,7 +670,7 @@ const Impostazioni = ({ device, onNav, theme, setTheme, weekNum, setWeekNum, bod
       </ISection>
 
       <div style={{ textAlign: "center", color: "var(--text-3)", fontSize: 11.5, padding: "8px 0 24px" }}>
-        Lorenzo Fitness Hub · v2.6.0 · build 2026.06
+        Lorenzo Fitness Hub · v2.7.0 · build 2026.07
       </div>
 
       {showReset && (

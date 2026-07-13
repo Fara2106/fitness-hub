@@ -5,22 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Lorenzo Fitness Hub</title>
 <meta name="description" content="Piano alimentare, allenamento e tracking personale" />
-<meta name="theme-color" content="#141416" />
+<meta name="theme-color" content="#0b0b0f" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Fitness Hub" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <link rel="manifest" href="manifest.json" />
-<link rel="stylesheet" href="styles.css?v=20260618110215" />
+<link rel="stylesheet" href="styles.css?v=20260713100015" />
 <style>
   /* iOS PWA standalone: la striscia della home-indicator NON è dipingibile dalla
      pagina (verificato: né #root/html/body né TabBar la raggiungono, neanche con
      100dvh) — iOS la colora da sé col <meta name="theme-color">. Il fix della banda
-     è quindi su theme-color (= tono TabBar #141416/#f9f9fb), non qui.
+     è quindi su theme-color (= tono TabBar #0b0b0f/#f7f7fa), non qui.
      #root usa height in dvh (con fallback 100vh / -webkit-fill-available) solo per
      riempire correttamente l'altezza utile; body overflow:hidden blocca lo scroll. */
-  html { height: 100%; margin: 0; background: var(--safe-bg, #141416); }
-  body { height: 100%; margin: 0; overflow: hidden; background: var(--bg, #0a0a0a); }
+  html { height: 100%; margin: 0; background: var(--safe-bg, #0b0b0f); }
+  body { height: 100%; margin: 0; overflow: hidden; background: var(--bg, #0b0b0f); }
   #root {
     position: fixed;
     top: 0;
@@ -31,7 +31,7 @@
     height: 100dvh;
     display: flex;
     align-items: stretch;
-    background: var(--bg, #0a0a0a);
+    background: var(--bg, #0b0b0f);
   }
   /* Desktop: no rounded corners */
   .lfh.desktop { border-radius: 0 !important; box-shadow: none !important; }
@@ -54,7 +54,7 @@
     var meta = document.querySelector('meta[name="theme-color"]');
     /* tono TabBar (non --bg): iOS usa theme-color per la striscia della
        home-indicator, che la pagina NON può dipingere → così si fonde con la barra */
-    if (meta) meta.setAttribute("content", light ? "#f9f9fb" : "#141416");
+    if (meta) meta.setAttribute("content", light ? "#f7f7fa" : "#0b0b0f");
   } catch (_) {}
 })();
 </script>
@@ -82,37 +82,44 @@
 </script>
 
 <!-- React + Babel -->
-<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<!-- production.min: build minificata (10KB+132KB vs 110KB+1MB dev), niente warning
+     di sviluppo in console. Per debug locale si può tornare a *.development.js. -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 
 <!-- Recharts (jsdelivr è più affidabile di unpkg) -->
+<!-- prop-types PRIMA di Recharts: l'UMD di Recharts lo richiede come globale
+     window.PropTypes — senza, Recharts crasha ("oneOfType of undefined") e
+     il grafico peso in Storico resta per sempre su "Caricamento grafico…" -->
+<script src="https://cdn.jsdelivr.net/npm/prop-types@15.8.1/prop-types.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js" crossorigin="anonymous"></script>
 <script>if (typeof Recharts !== 'undefined') window.Recharts = Recharts;</script>
 
-<!-- Core utilities (?v=20260618110215: versionato, bumpato a ogni deploy → niente cache stale) -->
-<script type="text/babel" src="storage.jsx?v=20260618110215"></script>
-<script type="text/babel" src="api.jsx?v=20260618110215"></script>
-<script type="text/babel" src="parser.jsx?v=20260618110215"></script>
+<!-- Core utilities (?v=20260713100015: versionato, bumpato a ogni deploy → niente cache stale) -->
+<script type="text/babel" src="storage.jsx?v=20260713100015"></script>
+<script type="text/babel" src="api.jsx?v=20260713100015"></script>
+<script type="text/babel" src="parser.jsx?v=20260713100015"></script>
 
 <!-- Components -->
-<script type="text/babel" src="i18n.jsx?v=20260618110215"></script>
-<script type="text/babel" src="icons.jsx?v=20260618110215"></script>
-<script type="text/babel" src="anatomy.jsx?v=20260618110215"></script>
-<script type="text/babel" src="nav.jsx?v=20260618110215"></script>
+<script type="text/babel" src="i18n.jsx?v=20260713100015"></script>
+<script type="text/babel" src="icons.jsx?v=20260713100015"></script>
+<script type="text/babel" src="ui.jsx?v=20260713100015"></script>
+<script type="text/babel" src="anatomy.jsx?v=20260713100015"></script>
+<script type="text/babel" src="nav.jsx?v=20260713100015"></script>
 
 <!-- Screens -->
-<script type="text/babel" src="screens/onboarding.jsx?v=20260618110215"></script>
-<script type="text/babel" src="screens/dashboard.jsx?v=20260618110215"></script>
-<script type="text/babel" src="screens/scheda.jsx?v=20260618110215"></script>
-<script type="text/babel" src="screens/dieta.jsx?v=20260618110215"></script>
-<script type="text/babel" src="screens/spesa.jsx?v=20260618110215"></script>
-<script type="text/babel" src="screens/coach.jsx?v=20260618110215"></script>
-<script type="text/babel" src="screens/storico.jsx?v=20260618110215"></script>
-<script type="text/babel" src="screens/impostazioni.jsx?v=20260618110215"></script>
+<script type="text/babel" src="screens/onboarding.jsx?v=20260713100015"></script>
+<script type="text/babel" src="screens/dashboard.jsx?v=20260713100015"></script>
+<script type="text/babel" src="screens/scheda.jsx?v=20260713100015"></script>
+<script type="text/babel" src="screens/dieta.jsx?v=20260713100015"></script>
+<script type="text/babel" src="screens/spesa.jsx?v=20260713100015"></script>
+<script type="text/babel" src="screens/coach.jsx?v=20260713100015"></script>
+<script type="text/babel" src="screens/storico.jsx?v=20260713100015"></script>
+<script type="text/babel" src="screens/impostazioni.jsx?v=20260713100015"></script>
 
 <!-- App frame -->
-<script type="text/babel" src="app.jsx?v=20260618110215"></script>
+<script type="text/babel" src="app.jsx?v=20260713100015"></script>
 
 <!-- Mount: auto-detect device -->
 <script type="text/babel" data-presets="env,react">
@@ -140,12 +147,15 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js')
       .then(reg => {
+        // reg può essere undefined se l'ambiente blocca i SW (es. automazione/test):
+        // senza guard, reg.scope lancerebbe un TypeError confuso dentro il catch
+        if (!reg) { console.warn('[SW] Registrazione bloccata dall\'ambiente (nessun registration object) — ok in test/automazione'); return; }
         console.log('[SW] Registrato:', reg.scope);
         // Controlla aggiornamenti subito e poi ogni 60s
         reg.update().catch(() => {});
         setInterval(() => reg.update().catch(() => {}), 60000);
       })
-      .catch(err => console.warn('[SW] Errore registrazione:', err));
+      .catch(err => console.warn('[SW] Registrazione non riuscita (normale se l\'ambiente blocca i service worker):', err && err.message ? err.message : err));
   });
 }
 </script>

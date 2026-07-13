@@ -79,6 +79,9 @@
       }
     },
 
+    // Elenco chiavi presenti (per pulizia dei dati giornalieri vecchi)
+    keys() { return Object.keys(_m); },
+
     onReady(cb) { _rdy ? cb() : _q.push(cb); },
     isReady()   { return _rdy; },
   };

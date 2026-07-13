@@ -94,7 +94,7 @@ const Sidebar = ({ screen, onNav }) => {
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 8px 22px" }}>
         <div style={{
           width: 32, height: 32, borderRadius: 9,
-          background: "linear-gradient(135deg, #0A84FF 0%, #5e5ce6 100%)",
+          background: "var(--brand-grad)",
           display: "flex", alignItems: "center", justifyContent: "center",
           fontFamily: "var(--display)", fontWeight: 700, fontSize: 16, letterSpacing: -0.04,
         }}>LF</div>
@@ -143,11 +143,11 @@ const Sidebar = ({ screen, onNav }) => {
           border: "1px solid var(--border)",
         }}>
           <div style={{
-            width: 32, height: 32, borderRadius: 999,
-            background: "linear-gradient(135deg, #FF9F0A 0%, #FF453A 100%)",
+            width: 32, height: 32, borderRadius: 9,
+            background: "var(--brand-grad)",
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontWeight: 700, fontSize: 13, color: "#1a0a04",
-          }}>L</div>
+            fontWeight: 700, fontSize: 13, color: "#fff", letterSpacing: "-0.03em",
+          }}>LF</div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 600 }}>Lorenzo</div>
             <div style={{ fontSize: 11, color: "var(--text-2)" }}>
@@ -160,6 +160,42 @@ const Sidebar = ({ screen, onNav }) => {
   );
 };
 
+// — Sync badge — piccolo indicatore dello stato cloud-sync (legge window._syncState,
+//   aggiornato da _cloudSync in app.jsx via evento "lfh-sync") —
+const SyncBadge = ({ compact }) => {
+  const t = useT();
+  const [s, setS] = React.useState(() => window._syncState || { status: "idle", last: null });
+  React.useEffect(() => {
+    const on = () => setS(Object.assign({}, window._syncState || { status: "idle", last: null }));
+    window.addEventListener("lfh-sync", on);
+    return () => window.removeEventListener("lfh-sync", on);
+  }, []);
+
+  const status = s.status || "idle";
+  if (status === "idle") return null;
+
+  const time = s.last
+    ? new Date(s.last).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : null;
+  const CFG = {
+    syncing: { color: "var(--text-2)",  bg: "rgba(120,120,128,0.14)", icon: "cloud",     label: t("Sincronizzazione…") },
+    ok:      { color: "var(--success)", bg: "rgba(48,209,88,0.12)",   icon: "cloud",     label: time ? `${t("Sync")} ${time}` : t("Sincronizzato") },
+    error:   { color: "var(--warning)",  bg: "rgba(255,159,10,0.14)",  icon: "cloud-off", label: t("Sync non riuscito") },
+    offline: { color: "var(--text-3)",  bg: "rgba(120,120,128,0.14)", icon: "cloud-off", label: t("Offline") },
+  };
+  const cfg = CFG[status] || CFG.ok;
+
+  return (
+    <span className="pill" title={cfg.label} style={{ fontSize: 10.5, padding: "3px 8px", gap: 5, background: cfg.bg, color: cfg.color }}>
+      {status === "syncing"
+        ? <span className="spinner" style={{ width: 10, height: 10, borderWidth: 1.5 }} />
+        : <Icon name={cfg.icon} size={11} strokeWidth={2} />}
+      {!compact && cfg.label}
+    </span>
+  );
+};
+
 window.TabBar  = TabBar;
 window.Sidebar = Sidebar;
+window.SyncBadge = SyncBadge;
 window.NAV_ITEMS = NAV_ITEMS;

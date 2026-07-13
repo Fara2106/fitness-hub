@@ -82,6 +82,10 @@ const Icon = ({ name, size = 20, color = "currentColor", strokeWidth = 1.6, styl
       return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="M12 8h.01M11 12h1v5h1" /></svg>;
     case "trend-up":
       return <svg {...common}><path d="M3 17 9 11l4 4 8-9M14 6h7v7" /></svg>;
+    case "cloud":
+      return <svg {...common}><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" /></svg>;
+    case "cloud-off":
+      return <svg {...common}><path d="M22.61 16.95A5 5 0 0 0 18 10h-1.26a8 8 0 0 0-7.05-6M5 5a8 8 0 0 0 4 15h9a5 5 0 0 0 1.7-.3M1 1l22 22" /></svg>;
     case "doc":
       return <svg {...common}><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><path d="M14 3v6h6M9 14h6M9 17h4" /></svg>;
     default:

@@ -71,33 +71,77 @@ function _buildSchedule() {
   }
 }
 
+// ── Persistenza progressi di giornata (per giorno + sessione) ─────────────
+// Senza, uscire dalla tab Scheda a metà allenamento perdeva serie completate,
+// pesi digitati e sostituzioni (lo stato viveva solo nel componente montato).
+// NB: le chiavi restano indicizzate per posizione → il reset tra tab (bleed)
+// è gestito caricando SEMPRE il blocco salvato della tab di destinazione.
+function _progKey() {
+  return `schedaProg_${window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10)}`;
+}
+function _loadProg(tab) {
+  const all = window.storage ? window.storage.get(_progKey(), {}) : {};
+  return (all && all[tab]) || { completion: {}, substitutions: {}, pesos: {} };
+}
+function _saveProg(tab, patch) {
+  if (!window.storage) return;
+  const key = _progKey();
+  const all = window.storage.get(key, {}) || {};
+  all[tab] = Object.assign({}, all[tab], patch);
+  window.storage.set(key, all);
+}
+
 // ── Timer overlay ──────────────────────────────────────────────────────────
 const TimerOverlay = ({ seconds, onClose }) => {
   const t = useT();
+  // Conto alla rovescia basato su timestamp (non su decrementi): se iOS
+  // sospende il tab / blocchi lo schermo, al ritorno il timer è comunque giusto.
+  const endRef = React.useRef(Date.now() + seconds * 1000);
   const [remaining, setRemaining] = React.useState(seconds);
   const beeped = React.useRef(false);
 
   React.useEffect(() => {
-    if (remaining <= 0) {
-      if (!beeped.current) {
+    const tick = () => {
+      const r = Math.max(0, Math.round((endRef.current - Date.now()) / 1000));
+      setRemaining(r);
+      if (r <= 0 && !beeped.current) {
         beeped.current = true;
-        // Triple beep: done!
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
         if (window.playBeep) {
           window.playBeep(880, 0.18);
           setTimeout(() => window.playBeep(880, 0.18), 220);
           setTimeout(() => window.playBeep(1100, 0.28), 440);
         }
       }
-      return;
+    };
+    const tid = setInterval(tick, 250);
+    document.addEventListener("visibilitychange", tick);
+    return () => { clearInterval(tid); document.removeEventListener("visibilitychange", tick); };
+  }, []);
+
+  // Wake Lock: tiene lo schermo acceso durante il recupero (iOS ≥16.4);
+  // senza, lo schermo si spegne e il beep di fine recupero non parte.
+  React.useEffect(() => {
+    let lock = null;
+    let released = false;
+    if (navigator.wakeLock && navigator.wakeLock.request) {
+      navigator.wakeLock.request("screen")
+        .then(l => { if (released) l.release().catch(() => {}); else lock = l; })
+        .catch(() => {});
     }
-    const tid = setInterval(() => setRemaining(r => Math.max(0, r - 1)), 1000);
-    return () => clearInterval(tid);
-  }, [remaining]);
+    return () => { released = true; if (lock) lock.release().catch(() => {}); };
+  }, []);
+
+  const adjust = (d) => {
+    endRef.current = Math.max(Date.now(), endRef.current + d * 1000);
+    if (d > 0) beeped.current = false;
+    setRemaining(Math.max(0, Math.round((endRef.current - Date.now()) / 1000)));
+  };
 
   const total = seconds;
   const R = 86;
   const C = 2 * Math.PI * R;
-  const dashOffset = C - (C * Math.max(0, remaining)) / total;
+  const dashOffset = C - C * Math.min(1, Math.max(0, remaining) / total);
   const done = remaining === 0;
 
   return (
@@ -140,8 +184,8 @@ const TimerOverlay = ({ seconds, onClose }) => {
         </div>
       </div>
       <div style={{ display: "flex", gap: 10, marginTop: 28 }}>
-        <button className="btn" onClick={(e) => { e.stopPropagation(); setRemaining(r => Math.max(0, r - 15)); }}>−15s</button>
-        <button className="btn" onClick={(e) => { e.stopPropagation(); setRemaining(r => r + 15); }}>+15s</button>
+        <button className="btn" onClick={(e) => { e.stopPropagation(); adjust(-15); }}>−15s</button>
+        <button className="btn" onClick={(e) => { e.stopPropagation(); adjust(15); }}>+15s</button>
         <button className="btn primary" onClick={(e) => { e.stopPropagation(); onClose(); }}>
           {done ? t("Riprendi") : t("Salta")}
         </button>
@@ -308,11 +352,12 @@ const ExerciseCard = ({
   ex, completed, onToggleSet, onRest,
   occupied, onOccupied, isDesktop,
   rpeAdjust, substituted, onSubstitute,
-  sheetsWeights, onPesosChange,
+  sheetsWeights, savedPesos, onPesosChange,
 }) => {
   const t = useT();
   const [pesos, setPesos] = React.useState(() => {
-    // Pre-fill from Sheets data if available, else default to ex.sets weights
+    // 1) pesi già digitati oggi (ripristino sessione) → 2) Sheets → 3) default scheda
+    if (savedPesos && savedPesos.length === ex.sets.length) return savedPesos.slice();
     return ex.sets.map((s, i) => {
       const key = ex.name.toLowerCase();
       if (sheetsWeights && sheetsWeights[key] && sheetsWeights[key][i] != null) {
@@ -326,6 +371,8 @@ const ExerciseCard = ({
 
   // Update pesos when sheetsWeights arrives
   React.useEffect(() => {
+    // i pesi digitati/ripristinati di oggi vincono sui dati Sheets
+    if (savedPesos && savedPesos.length === ex.sets.length) return;
     const key = ex.name.toLowerCase();
     if (sheetsWeights && sheetsWeights[key]) {
       const updated = ex.sets.map((s, i) => {
@@ -493,19 +540,41 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
   const t = useT();
 
   const [SCHEDULE]    = React.useState(() => _buildSchedule());
-  const [completion, setCompletion]   = React.useState({});
+  const [completion, setCompletion]   = React.useState(() => _loadProg(scheda).completion || {});
   const [timer, setTimer]             = React.useState(null);
   const [occupied, setOccupied]       = React.useState({});
   const [showConfetti, setShowConfetti] = React.useState(false);
   const [rpeAdjust, setRpeAdjust]     = React.useState(0);
-  const [substitutions, setSubstitutions] = React.useState({});
+  const [substitutions, setSubstitutions] = React.useState(() => _loadProg(scheda).substitutions || {});
   const [notes, setNotes]             = React.useState(() => window.storage ? window.storage.get(`notes_${window.todayKey ? window.todayKey() : ""}`, "") : "");
   const [sheetsWeights, setSheetsWeights] = React.useState(null);
   const [saving, setSaving]           = React.useState(false);
   const [saveMsg, setSaveMsg]         = React.useState("");
-  const prevDoneRef                   = React.useRef(false);
+  const prevDoneRef                   = React.useRef(null); // null = da inizializzare al primo render
   // Ref condiviso: ogni ExerciseCard scrive i propri pesos qui per il salvataggio su Sheets
-  const pesosRef = React.useRef({});
+  const pesosRef = React.useRef(null);
+  if (pesosRef.current === null) pesosRef.current = Object.assign({}, _loadProg(scheda).pesos);
+
+  // Cambia tab caricando i progressi salvati di QUELLA tab: tutti gli stati
+  // per-posizione (completion/substitutions/occupied/pesos) vanno sostituiti
+  // insieme per evitare il bleed tra giorni diversi.
+  const switchTo = (k) => {
+    const saved = _loadProg(k);
+    const exs = SCHEDULE[k] || [];
+    const tot  = exs.reduce((n, ex) => n + ex.sets.length, 0);
+    const done = exs.reduce((n, ex, i) => n + ((saved.completion || {})[i] || []).filter(Boolean).length, 0);
+    setScheda(k);
+    setCompletion(saved.completion || {});
+    setSubstitutions(saved.substitutions || {});
+    setOccupied({});
+    pesosRef.current = Object.assign({}, saved.pesos);
+    prevDoneRef.current = tot > 0 && done === tot; // niente confetti ri-entrando in una sessione già completa
+  };
+
+  // Persisti i progressi a ogni modifica (le note hanno già la loro chiave)
+  React.useEffect(() => {
+    _saveProg(scheda, { completion, substitutions });
+  }, [completion, substitutions, scheda]);
 
   // Load last weights from Sheets on mount
   React.useEffect(() => {
@@ -520,8 +589,8 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
   // Auto-detect today's session on mount
   React.useEffect(() => {
     const sess = window.getTodaySession ? window.getTodaySession() : null;
-    if (sess && (!scheda || scheda === "Upper A")) {
-      setScheda(sess.id);
+    if (sess && (!scheda || scheda === "Upper A") && sess.id !== scheda) {
+      switchTo(sess.id); // carica anche i progressi salvati della sessione giusta
     }
   }, []);
 
@@ -532,6 +601,8 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
   );
   const pct = totalSets ? (completedSets / totalSets) * 100 : 0;
   const allDone = completedSets > 0 && completedSets === totalSets;
+  // Primo render: se la sessione ripristinata è già completa, niente confetti
+  if (prevDoneRef.current === null) prevDoneRef.current = allDone;
 
   // Vibrate + confetti when session complete
   React.useEffect(() => {
@@ -568,6 +639,25 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
       const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
       // Persist notes
       if (window.storage) window.storage.set(`notes_${today}`, notes);
+
+      // Chiudere la sessione marca il giorno palestra e registra le serie per
+      // gruppo muscolare (la card "Settimana" in Dashboard usa dati reali)
+      if (window.storage) {
+        window.storage.set(`gym_${today}`, true);
+        const GROUP = {
+          petto: "Petto", schiena: "Schiena", spalle: "Spalle", trapezi: "Spalle",
+          quadricipiti: "Gambe", femorali: "Gambe", glutei: "Gambe", polpacci: "Gambe",
+          bicipiti: "Braccia", tricipiti: "Braccia", addome: "Core",
+        };
+        const daily = {};
+        exercises.forEach((ex, exIdx) => {
+          const done = (completion[exIdx] || []).filter(Boolean).length;
+          if (!done) return;
+          const g = GROUP[(ex.muscles && ex.muscles[0]) || ""] || "Altro";
+          daily[g] = (daily[g] || 0) + done;
+        });
+        window.storage.set(`muscleSets_${today}`, daily);
+      }
 
       if (window.sheetsAPI) {
         // 1. Salva riepilogo sessione
@@ -662,15 +752,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
             <button
               key={k}
               className={k === scheda ? "on" : ""}
-              onClick={() => {
-                setScheda(k);
-                setCompletion({});
-                setSubstitutions({});   // gli indici esercizio cambiano col giorno
-                setOccupied({});         // → azzera stati per-indice per evitare bleed
-                pesosRef.current = {};   // anche i pesi sono indicizzati per posizione:
-                                         // senza reset salveresti su Sheets i kg del giorno sbagliato
-                prevDoneRef.current = false;
-              }}
+              onClick={() => switchTo(k)}
             >
               {k}
             </button>
@@ -708,7 +790,11 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
             substituted={substitutions[i]}
             onSubstitute={(name) => setSubstitutions(s => ({ ...s, [i]: name }))}
             sheetsWeights={sheetsWeights}
-            onPesosChange={(pesos) => { pesosRef.current[i] = pesos; }}
+            savedPesos={pesosRef.current[i]}
+            onPesosChange={(pesos) => {
+              pesosRef.current[i] = pesos;
+              _saveProg(scheda, { pesos: Object.assign({}, pesosRef.current) });
+            }}
           />
         ))}
       </div>

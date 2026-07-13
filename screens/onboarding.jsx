@@ -143,7 +143,9 @@ const Onboarding = ({ device, onDone }) => {
           }}>LF</div>
           <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: -0.005 }}>{t("Fitness Hub")}</div>
         </div>
-        <button onClick={onDone} style={{
+        {/* "Salta" deve settare onboardingDone come gli altri due percorsi (auto-skip
+            e completamento), altrimenti il wizard riappare a ogni avvio */}
+        <button onClick={() => { if (window.storage) window.storage.set("onboardingDone", true); onDone(); }} style={{
           background: "transparent", border: 0, color: "var(--text-2)",
           fontSize: 13, fontWeight: 500, cursor: "pointer",
         }}>{t("Salta")}</button>
