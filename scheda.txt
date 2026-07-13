@@ -1,14 +1,14 @@
 # PUSH - Giorno 1
 # Focus: Petto · Spalle · Tricipiti
 # Riscaldamento: Rotazioni spalle 2x15 | Band pull-apart leggero 2x15 | Arm circles 1x20
+# Elastici: Fokky = compound (chest press, shoulder press) | Gritin = isolamento (lateral raise, tricep kickback)
 
 Esercizio | Serie | Rip | Recupero | Note tecniche
-Push-up (bodyweight) | 3 | 8-12 | 60 | Corpo in linea, gomiti a 45°. Petto sfiora terra. Espira in spinta. Muscoli: petto, tricipiti, deltoide ant.
-Band chest press | 3 | 12-15 | 60 | Banda dietro la schiena, sotto le ascelle. Spingi in avanti mani unite. No slancio del busto. Muscoli: petto, tricipiti.
-Band shoulder press | 3 | 10-12 | 60 | In piedi su banda, maniglie alle spalle. Spingi sopra la testa senza inarcare la lombare. Muscoli: deltoide, trapezio.
-Band lateral raise | 3 | 12-15 | 45 | In piedi su banda. Solleva fino a spalle, gomiti morbidi. No slancio. Muscoli: deltoide mediale.
-Band tricep kickback | 3 | 12-15 | 45 | Busto inclinato ~45°, banda sotto un piede. Estendi il gomito indietro, fermo ai fianchi. Muscoli: tricipite.
-Band pull-apart | 2 | 15 | 45 | Braccia tese avanti, apri fino al petto. Contrai le scapole. Muscoli: deltoide post., postura.
+Push-up (bodyweight) | 3 | 8-12 | 60 | Corpo in linea, gomiti a 45°. Petto sfiora terra. Espira in spinta. Ultime 2-3 rip vicine a cedimento. Muscoli: petto, tricipiti, deltoide ant.
+Band chest press | 3 | 12-15 | 60 | Fokky viola/nero. Banda dietro la schiena, sotto le ascelle. Spingi in avanti mani unite. No slancio del busto. Muscoli: petto, tricipiti.
+Band shoulder press | 2 | 10-12 | 60 | Fokky nero/rosso. In piedi su banda, maniglie alle spalle. Spingi sopra la testa senza inarcare la lombare. Muscoli: deltoide, trapezio.
+Band lateral raise | 2 | 12-15 | 45 | Gritin light/medium. In piedi su banda. Solleva fino a spalle, gomiti morbidi. No slancio. Muscoli: deltoide mediale.
+Band tricep kickback | 2 | 12-15 | 45 | Gritin medium. Busto inclinato ~45°, banda sotto un piede. Estendi il gomito indietro, fermo ai fianchi. Muscoli: tricipite.
 
 # Stretching finale (4 min)
 # PETTO: Chest opener a terra 45"
@@ -20,14 +20,14 @@ Band pull-apart | 2 | 15 | 45 | Braccia tese avanti, apri fino al petto. Contrai
 # PULL - Giorno 2
 # Focus: Schiena · Bicipiti
 # Riscaldamento: Cat-cow 2x8 | Face pull leggero 2x15 | Shoulder rolls 2x15
+# Elastici: Fokky = compound (bent-over row) | Gritin = isolamento (face pull, curl)
 
 Esercizio | Serie | Rip | Recupero | Note tecniche
-Band bent-over row | 4 | 10-12 | 60 | Piedi sulla banda, busto inclinato 45°, schiena neutra. Tira verso l'ombelico, gomiti vicini. Muscoli: dorsale, romboidi, bicipite.
-Superman | 3 | 12-15 | 45 | Prono, solleva braccia e gambe insieme. Contrai i glutei. No slancio. Muscoli: erettori spinali, lombare, glutei.
-Band face pull | 3 | 15 | 45 | Banda tesa davanti al petto, tira verso il viso aprendo i gomiti. Muscoli: deltoide post., cervicale/salute spalla.
-Y-T-W a terra | 3 | 10 (per lettera) | 45 | Prono su tappetino, braccia a Y poi T poi W, solleva leggermente. Muscoli: scapole, deltoide post.
-Band bicep curl | 3 | 10-12 | 45 | In piedi su banda, gomiti fissi ai fianchi. Curla espirando, scendi in 3s. No momentum. Muscoli: bicipite.
-Band hammer curl | 3 | 10-12 | 45 | Presa neutra, stesso movimento del curl. Muscoli: bicipite, brachioradiale.
+Band bent-over row | 3 | 10-12 | 60 | Fokky viola/nero. Piedi sulla banda, busto inclinato 45°, schiena neutra. Tira verso l'ombelico, gomiti vicini. Ultime rip vicine a cedimento. Muscoli: dorsale, romboidi, bicipite.
+Superman | 2 | 12-15 | 45 | Bodyweight. Prono, solleva braccia e gambe insieme. Contrai i glutei. No slancio. Muscoli: erettori spinali, lombare, glutei.
+Band face pull | 2 | 15 | 45 | Gritin light/medium. Banda tesa davanti al petto, tira verso il viso aprendo i gomiti. Muscoli: deltoide post., cervicale/salute spalla.
+Band bicep curl | 2 | 10-12 | 45 | Gritin medium. In piedi su banda, gomiti fissi ai fianchi. Curla espirando, scendi in 3s. No momentum. Muscoli: bicipite.
+Band hammer curl | 2 | 10-12 | 45 | Gritin medium. Presa neutra, stesso movimento del curl. Muscoli: bicipite, brachioradiale.
 
 # Stretching finale (4 min)
 # SCHIENA: Child's pose 45"
@@ -36,68 +36,30 @@ Band hammer curl | 3 | 10-12 | 45 | Presa neutra, stesso movimento del curl. Mus
 
 ---
 
-# LEGS (mantenimento) + UPPER EXTRA - Giorno 3
-# Focus: Gambe (mantenimento) · Core · Extra Petto/Schiena/Bicipiti
-# Riscaldamento: Air squat leggeri 1x15 | Rotazioni spalle 1x15
+# LEGS + CORE (mantenimento) - Giorno 3
+# Focus: Gambe · Glutei · Core
+# Riscaldamento: Air squat leggeri 1x15 | Mobilità anche/caviglie 1-2 min
+# Elastici: Fokky = compound (squat, RDL) | Gritin = isolamento (glute bridge)
 
 Esercizio | Serie | Rip | Recupero | Note tecniche
-Band squat | 3 | 12-15 | 45 | Banda sopra ginocchia o sotto piedi fino alle spalle. Scendi a parallelo, ginocchia in linea con le dita. Muscoli: quadricipiti, glutei.
-Band RDL (hip hinge) | 3 | 12-15 | 45 | Banda sotto i piedi, in mano. Spingi i fianchi indietro, schiena neutra. Muscoli: ischiocrurali, glutei.
-Band glute bridge | 2 | 15 | 45 | Banda sopra le ginocchia, supino. Spingi i fianchi in alto, contrai in cima. Muscoli: glutei.
-Plank | 2 | 45-60 sec | 45 | Avambracci a terra, corpo in linea. Addome contratto. Muscoli: core, trasverso addominale.
-Band chest press | 3 | 12-15 | 60 | Banda dietro la schiena, sotto le ascelle. Spingi avanti mani unite. Muscoli: petto, tricipiti.
-Band bent-over row | 3 | 12-15 | 60 | Piedi sulla banda, busto inclinato 45°. Tira verso l'ombelico. Muscoli: dorsale, bicipite.
-Band bicep curl | 2 | 12-15 | 45 | Gomiti fissi ai fianchi, curla espirando. Muscoli: bicipite.
+Band squat | 3 | 12-15 | 45 | Fokky verde/viola. Banda sopra ginocchia o sotto piedi fino alle spalle. Scendi a parallelo, ginocchia in linea con le dita. Muscoli: quadricipiti, glutei.
+Band RDL (hip hinge) | 2 | 12-15 | 45 | Fokky viola/nero. Banda sotto i piedi, in mano. Spingi i fianchi indietro, schiena neutra. Muscoli: ischiocrurali, glutei.
+Band glute bridge | 2 | 15 | 45 | Gritin medium/heavy. Banda sopra le ginocchia, supino. Spingi i fianchi in alto, contrai in cima. Muscoli: glutei.
+Plank | 2 | 45-60 sec | 45 | Bodyweight. Avambracci a terra, corpo in linea. Addome contratto. Muscoli: core, trasverso addominale.
+Bicycle crunch | 2 | 15 (per lato) | 45 | Bodyweight. Supino, alterna gomito-ginocchio opposto. Controlla, non tirare il collo. Muscoli: retto addominale, obliqui.
 
-# Stretching finale (4 min, misto)
-# GAMBE: Hamstring supino 30"/lato
+# Stretching finale (4-6 min)
+# GAMBE: Hamstring supino 30"/lato · Hip flexor affondo 30"/lato
 # PETTO: Chest opener 30"
-# BRACCIA: Stretch bicipite 25"
-
----
-
-# PUSH 2 - Giorno 4
-# Focus: Petto · Spalle · Tricipiti (variante)
-# Riscaldamento: Rotazioni spalle 2x15 | Band pull-apart leggero 2x15 | Arm circles 1x20
-
-Esercizio | Serie | Rip | Recupero | Note tecniche
-Push-up piedi rialzati (su gradino/divano) | 3 | 8-12 | 60 | Enfatizza il petto alto. Stessa esecuzione del push-up standard. Muscoli: petto superiore.
-Band chest fly | 3 | 12-15 | 60 | Banda dietro la schiena, braccia aperte, chiudi davanti al petto con angolo fisso al gomito. Muscoli: petto medio.
-Band Arnold press | 3 | 10-12 | 60 | In piedi su banda, parti con palmi verso di te, ruota spingendo sopra la testa. Muscoli: deltoide completo.
-Band front raise | 3 | 12-15 | 45 | In piedi su banda, solleva le braccia davanti fino a altezza spalle. Muscoli: deltoide anteriore.
-Band overhead tricep extension | 3 | 12-15 | 45 | Banda sotto un piede, dietro la testa, estendi verso l'alto senza aprire i gomiti. Muscoli: tricipite capo lungo.
-Diamond push-up | 3 | 6-10 | 60 | Mani a rombo sotto il petto. Se troppo difficile, esegui sulle ginocchia. Muscoli: tricipite, petto interno.
-
-# Stretching finale (4 min)
-# PETTO: Chest opener a terra 45"
-# BRACCIA: Stretch tricipite overhead 25"/lato
-# CERVICALE: Rotazione cervicale 30"/lato
-
----
-
-# PULL 2 + ADDOME - Giorno 5
-# Focus: Schiena · Bicipiti · Addome
-# Riscaldamento: Cat-cow 2x8 | Face pull leggero 2x15 | Shoulder rolls 2x15
-
-Esercizio | Serie | Rip | Recupero | Note tecniche
-Band single-arm row | 3 | 10-12 (per lato) | 60 | Un piede sulla banda, tira con un braccio verso l'anca. Nessuna rotazione del busto. Muscoli: dorsale, romboidi.
-Band reverse fly | 3 | 12-15 | 45 | In piedi su banda, busto inclinato 45°, apri le braccia lateralmente. Muscoli: deltoide post., trapezio medio.
-Superman hold | 3 | 20-30 sec | 45 | Come superman ma in tenuta isometrica. Muscoli: erettori, lombare.
-Band curl 21s | 3 | 21 (7+7+7) | 45 | 7 rip metà bassa, 7 metà alta, 7 complete. Bicipite sotto tensione costante. Muscoli: bicipite.
-Band woodchopper | 3 | 12 (per lato) | 45 | Banda ancorata bassa (o sotto un piede), tira in diagonale verso l'alto ruotando il busto. Muscoli: obliqui, core rotazionale.
-Bicycle crunch | 3 | 15 (per lato) | 45 | Supino, alterna gomito-ginocchio opposto. Controlla, non tirare il collo. Muscoli: retto addominale, obliqui.
-
-# Stretching finale (4 min)
-# SCHIENA: Child's pose 45"
-# ADDOME: Cobra passivo 40"
-# LATERALE: Stretch laterale sdraiato 30"/lato
+# SCHIENA: Cobra passivo 30"
 
 ---
 
 # NOTE GENERALI
-# Split settimanale: Push (1) - Pull (2) - Legs+Upper Extra (3) - Push2 (4) - Pull2+Addome (5)
-# Attrezzatura: set di 5 elastici a resistenza variabile + corpo libero (no ancoraggio fisso, no tappetino obbligatorio)
-# Focus: parte alta (petto, schiena, spalle, braccia, addome) prioritaria - gambe in mantenimento
-# Progressione: aumenta le rip fino al limite alto del range, poi passa a un elastico più resistente o combina 2 elastici insieme
-# Riducibile a 4 giorni: salta il Giorno 5 o alternalo a settimane alterne col Giorno 3
-# Cervicale/spalle: mobilità pre-Push e pre-Pull. Mai forzare il range se c'è tensione.
+# Split settimanale: Push (1) - Pull (2) - Legs + Core mantenimento (3) - stesso schema dell'Upper A / Lower / Upper B originale
+# Obiettivo: tonificazione - volume ridotto rispetto a un piano da ipertrofia, 2-3 serie per esercizio
+# Attrezzatura: set di 5 elastici a resistenza variabile (Fokky + Gritin) + corpo libero
+# Criterio chiave: ogni serie va portata vicino a cedimento nelle ultime 2-3 rip - qualita' dell'esecuzione, non numero di giorni, garantisce il risultato
+# Se una serie a fine range (es. 15 rip) risulta troppo facile, sali di resistenza - altrimenti il lavoro diventa mantenimento, non tonificazione
+# Progressione: aumenta le rip fino al limite alto del range, poi passa a un elastico piu' resistente o combina 2 elastici insieme
+# Cervicale/spalle: mobilita' pre-Push e pre-Pull. Mai forzare il range se c'e' tensione

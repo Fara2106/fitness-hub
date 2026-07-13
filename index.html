@@ -18,24 +18,27 @@
 <meta name="apple-mobile-web-app-title" content="Fitness Hub" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <link rel="manifest" href="manifest.json" />
-<link rel="stylesheet" href="styles.css?v=20260713161957" />
+<link rel="stylesheet" href="styles.css?v=20260713163000" />
 <style>
-  /* iOS PWA standalone: la striscia della home-indicator NON è dipingibile dalla
-     pagina (verificato: né #root/html/body né TabBar la raggiungono, neanche con
-     100dvh) — iOS la colora da sé col <meta name="theme-color">. Il fix della banda
-     è quindi su theme-color (= tono TabBar #0b0b0f/#f7f7fa), non qui.
-     #root usa height in dvh (con fallback 100vh / -webkit-fill-available) solo per
-     riempire correttamente l'altezza utile; body overflow:hidden blocca lo scroll. */
+  /* Due bande distinte in basso su iOS:
+     1) striscia sottile home-indicator: NON dipingibile dalla pagina → gestita da
+        <meta name="theme-color"> (media-scoped, sopra).
+     2) fascia grande scura sotto la TabBar: era il #root (fixed) più corto dello schermo
+        con 100dvh → ora #root è ancorato a 4 lati (top/bottom:0) così riempie il viewport
+        reale. body overflow:hidden blocca lo scroll; safe-area top/bottom assorbite da
+        StatusBar e TabBar. */
   html { height: 100%; margin: 0; background: var(--safe-bg, #0b0b0f); }
   body { height: 100%; margin: 0; overflow: hidden; background: var(--bg, #0b0b0f); }
   #root {
     position: fixed;
+    /* Ancoraggio a 4 lati: riempie il viewport reale a prescindere dai quirk iOS di
+       100dvh/-webkit-fill-available (che potevano risultare più corti → fascia scura
+       in basso sotto la TabBar). top+bottom definiscono un'altezza definita per i figli
+       in height:100% (.lfh, wrapper). */
     top: 0;
     left: 0;
     right: 0;
-    height: 100vh;
-    height: -webkit-fill-available;
-    height: 100dvh;
+    bottom: 0;
     display: flex;
     align-items: stretch;
     background: var(--bg, #0b0b0f);
@@ -104,30 +107,30 @@
 <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js" crossorigin="anonymous"></script>
 <script>if (typeof Recharts !== 'undefined') window.Recharts = Recharts;</script>
 
-<!-- Core utilities (?v=20260713161957: versionato, bumpato a ogni deploy → niente cache stale) -->
-<script type="text/babel" src="storage.jsx?v=20260713161957"></script>
-<script type="text/babel" src="api.jsx?v=20260713161957"></script>
-<script type="text/babel" src="parser.jsx?v=20260713161957"></script>
+<!-- Core utilities (?v=20260713163000: versionato, bumpato a ogni deploy → niente cache stale) -->
+<script type="text/babel" src="storage.jsx?v=20260713163000"></script>
+<script type="text/babel" src="api.jsx?v=20260713163000"></script>
+<script type="text/babel" src="parser.jsx?v=20260713163000"></script>
 
 <!-- Components -->
-<script type="text/babel" src="i18n.jsx?v=20260713161957"></script>
-<script type="text/babel" src="icons.jsx?v=20260713161957"></script>
-<script type="text/babel" src="ui.jsx?v=20260713161957"></script>
-<script type="text/babel" src="anatomy.jsx?v=20260713161957"></script>
-<script type="text/babel" src="nav.jsx?v=20260713161957"></script>
+<script type="text/babel" src="i18n.jsx?v=20260713163000"></script>
+<script type="text/babel" src="icons.jsx?v=20260713163000"></script>
+<script type="text/babel" src="ui.jsx?v=20260713163000"></script>
+<script type="text/babel" src="anatomy.jsx?v=20260713163000"></script>
+<script type="text/babel" src="nav.jsx?v=20260713163000"></script>
 
 <!-- Screens -->
-<script type="text/babel" src="screens/onboarding.jsx?v=20260713161957"></script>
-<script type="text/babel" src="screens/dashboard.jsx?v=20260713161957"></script>
-<script type="text/babel" src="screens/scheda.jsx?v=20260713161957"></script>
-<script type="text/babel" src="screens/dieta.jsx?v=20260713161957"></script>
-<script type="text/babel" src="screens/spesa.jsx?v=20260713161957"></script>
-<script type="text/babel" src="screens/coach.jsx?v=20260713161957"></script>
-<script type="text/babel" src="screens/storico.jsx?v=20260713161957"></script>
-<script type="text/babel" src="screens/impostazioni.jsx?v=20260713161957"></script>
+<script type="text/babel" src="screens/onboarding.jsx?v=20260713163000"></script>
+<script type="text/babel" src="screens/dashboard.jsx?v=20260713163000"></script>
+<script type="text/babel" src="screens/scheda.jsx?v=20260713163000"></script>
+<script type="text/babel" src="screens/dieta.jsx?v=20260713163000"></script>
+<script type="text/babel" src="screens/spesa.jsx?v=20260713163000"></script>
+<script type="text/babel" src="screens/coach.jsx?v=20260713163000"></script>
+<script type="text/babel" src="screens/storico.jsx?v=20260713163000"></script>
+<script type="text/babel" src="screens/impostazioni.jsx?v=20260713163000"></script>
 
 <!-- App frame -->
-<script type="text/babel" src="app.jsx?v=20260713161957"></script>
+<script type="text/babel" src="app.jsx?v=20260713163000"></script>
 
 <!-- Mount: auto-detect device -->
 <script type="text/babel" data-presets="env,react">
