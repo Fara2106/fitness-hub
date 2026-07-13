@@ -1,37 +1,12 @@
 // app.jsx — AppFrame: shell con routing, storage, theme, stato globale
 
-// ── Detect PWA standalone mode ────────────────────────────────────────────
-const _isStandalone = window.navigator.standalone === true
-  || window.matchMedia("(display-mode: standalone)").matches;
-
 // ── Status bar (mobile) ───────────────────────────────────────────────────
-// In PWA installata non mostriamo il finto orario, ma riempiamo comunque
-// l'area del notch (safe-area-inset-top) con --statusbar-bg: in dark = --bg,
-// in light = tono scuro (l'orologio iOS con black-translucent è SEMPRE bianco
-// e non è cambiabile a runtime → serve uno sfondo scuro per leggerlo).
-const StatusBar = () => _isStandalone ? (
+// Riempie solo l'area del notch/Dynamic Island (safe-area-inset-top) con
+// --statusbar-bg (dark = --bg, light = tono scuro → l'orologio iOS bianco resta
+// leggibile). Niente finto orario/wifi/batteria: si mostra sempre e solo la
+// barra di sistema reale (in browser, dove non c'è, l'inset è 0 → spacer nullo).
+const StatusBar = () => (
   <div style={{ height: "env(safe-area-inset-top)", flexShrink: 0, background: "var(--statusbar-bg, var(--bg))" }} />
-) : (
-  <div className="lfh-status" style={{ paddingTop: "env(safe-area-inset-top)", boxSizing: "content-box" }}>
-
-    <span className="num">9:41</span>
-    <span className="sig">
-      <svg width="17" height="11" viewBox="0 0 17 11" fill="none">
-        <rect x="0" y="6"  width="3" height="5"  rx="0.7" fill="currentColor" />
-        <rect x="5" y="4"  width="3" height="7"  rx="0.7" fill="currentColor" />
-        <rect x="10" y="2" width="3" height="9"  rx="0.7" fill="currentColor" />
-        <rect x="15" y="0" width="2" height="11" rx="0.7" fill="currentColor" opacity="0.4" />
-      </svg>
-      <svg width="15" height="10" viewBox="0 0 15 10" fill="none">
-        <path d="M7.5 1.7C5 1.7 2.7 2.5 1 3.9l1 1.3C3.4 4 5.4 3.3 7.5 3.3s4.1.7 5.5 1.9l1-1.3C12.3 2.5 10 1.7 7.5 1.7Zm0 3.3c-1.5 0-3 .5-4 1.4l1 1.3c.7-.6 1.8-1 3-1s2.3.4 3 1l1-1.3c-1-.9-2.5-1.4-4-1.4Zm0 3.4c-.7 0-1.4.2-1.9.7l1.9 2 1.9-2c-.5-.4-1.2-.7-1.9-.7Z" fill="currentColor" />
-      </svg>
-      <svg width="25" height="11" viewBox="0 0 25 11" fill="none">
-        <rect x="0.5" y="0.5" width="21" height="10" rx="2.5" stroke="currentColor" strokeOpacity="0.5" />
-        <rect x="22.5" y="3.5" width="1.5" height="4" rx="0.6" fill="currentColor" opacity="0.5" />
-        <rect x="2" y="2" width="17" height="7" rx="1.5" fill="currentColor" />
-      </svg>
-    </span>
-  </div>
 );
 
 // ── Screen renderer ────────────────────────────────────────────────────────
