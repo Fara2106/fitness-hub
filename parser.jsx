@@ -1,5 +1,6 @@
 // parser.jsx — Parse scheda.txt  +  dieta.txt
-// window.parseScheda(text)  →  { "Upper A": {exercises,alternatives}, "Lower": ..., "Upper B": ... }
+// window.parseScheda(text)  →  { days: [ {num,key,name,focus,exercises,altMap} ] }  (N giorni dinamici)
+// window.getSchedule() / window.getSelectedSession()  — unica fonte di verità sui giorni
 // window.parseDieta(text)   →  { riposo, mattina, ore17, ore21, ore22 }  each = { meals, integratori }
 
 // ── MUSCLE DETECTION ───────────────────────────────────────────────────────
@@ -31,66 +32,71 @@ function _detectMuscles(notes) {
 }
 
 // ── SCHEDA PARSER ──────────────────────────────────────────────────────────
+// Restituisce { days: [ { num, key, name, focus[], exercises[], altMap } ] } — lista ordinata,
+// N dinamico letto dagli header "- Giorno N". Fallback legacy Upper/Lower se non ci sono header numerati.
 window.parseScheda = function (text) {
-  if (!text || typeof text !== "string") return null;
-
+  if (!text || typeof text !== "string") return { days: [] };
   const lines = text.split("\n");
-  const result = { "Upper A": null, "Lower": null, "Upper B": null };
-  let currentBlock = null; // "Upper A" | "Lower" | "Upper B"
+  const days = [];       // lista ordinata
+  let cur = null;        // giorno corrente
   let inTable = false;
-  const altMap = {}; // { blockName: { exerciseFragment: [alts] } }
+
+  // Un header di giorno finisce con "- Giorno N" (evita falsi positivi come
+  // "# Riducibile a 4 giorni: salta il Giorno 5 …" che contiene "Giorno 5" a metà frase).
+  const DAY_RE = /-\s*giorno\s+(\d+)\s*$/i;
+  // Se il file non ha nessun "- Giorno N", si usa il riconoscimento legacy Upper/Lower.
+  const hasNumbered = lines.some(l => DAY_RE.test(l.trim().replace(/^#\s*/, "")));
+
+  // Firma (num, key, name): key = chiave stabile ("Giorno N"), name = etichetta descrittiva.
+  const startDay = (num, key, name) => {
+    cur = { num, key, name, focus: [], exercises: [], altMap: {} };
+    days.push(cur);
+    inTable = false;
+  };
 
   for (let i = 0; i < lines.length; i++) {
-    const raw = lines[i];
-    const line = raw.trim();
-
+    const line = lines[i].trim();
     if (!line) continue;
 
-    if (line === "---") {
-      currentBlock = null;
-      inTable = false;
-      continue;
-    }
+    if (line === "---") { cur = null; inTable = false; continue; }
 
-    // Section header
     if (line.startsWith("# ")) {
-      const upper = line.toUpperCase();
-      if (upper.includes("UPPER A")) {
-        currentBlock = "Upper A";
-        if (!result[currentBlock]) result[currentBlock] = { exercises: [], altMap: {} };
-        if (!altMap[currentBlock]) altMap[currentBlock] = {};
-        inTable = false;
-      } else if (upper.includes("LOWER")) {
-        currentBlock = "Lower";
-        if (!result[currentBlock]) result[currentBlock] = { exercises: [], altMap: {} };
-        if (!altMap[currentBlock]) altMap[currentBlock] = {};
-        inTable = false;
-      } else if (upper.includes("UPPER B")) {
-        currentBlock = "Upper B";
-        if (!result[currentBlock]) result[currentBlock] = { exercises: [], altMap: {} };
-        if (!altMap[currentBlock]) altMap[currentBlock] = {};
-        inTable = false;
-      } else if (line.includes("→") && currentBlock) {
-        // Alternative comment: # Panca piana → Push-up zavorrati / Push-up con piedi rialzati
-        const content = line.slice(2);
-        const [exPart, altPart] = content.split("→").map(s => s.trim());
-        if (exPart && altPart) {
-          const alts = altPart.split("/").map(s => s.trim()).filter(Boolean);
-          altMap[currentBlock][exPart.toLowerCase()] = alts;
+      const body = line.slice(2).trim();
+
+      if (hasNumbered) {
+        const m = body.match(DAY_RE);
+        if (m) {
+          const num = parseInt(m[1], 10);
+          const name = body.replace(DAY_RE, "").replace(/[-–·|]+\s*$/, "").trim() || ("Giorno " + num);
+          startDay(num, "Giorno " + num, name);
+          continue;
         }
+      } else {
+        const up = body.toUpperCase();
+        if (up.includes("UPPER A")) { startDay(days.length + 1, "Upper A", "Upper A"); continue; }
+        if (up.includes("UPPER B")) { startDay(days.length + 1, "Upper B", "Upper B"); continue; }
+        if (up.includes("LOWER"))   { startDay(days.length + 1, "Lower",   "Lower");   continue; }
       }
-      continue;
+
+      // Riga Focus del giorno corrente (solo la prima: le righe Focus successive non la sovrascrivono)
+      const fm = body.match(/^focus:\s*(.+)$/i);
+      if (fm && cur) { if (!cur.focus.length) cur.focus = fm[1].split(/[·,|]/).map(s => s.trim()).filter(Boolean); continue; }
+
+      // Commento alternative: "# Panca → Push-up / Dip"
+      if (body.includes("→") && cur) {
+        const [exPart, altPart] = body.split("→").map(s => s.trim());
+        if (exPart && altPart) {
+          cur.altMap[exPart.toLowerCase()] = altPart.split("/").map(s => s.trim()).filter(Boolean);
+        }
+        continue;
+      }
+      continue; // altri commenti "# …" ignorati
     }
 
-    if (!currentBlock || !result[currentBlock]) continue;
+    if (!cur) continue;
 
-    // Table header
-    if (line.startsWith("Esercizio |")) {
-      inTable = true;
-      continue;
-    }
+    if (line.startsWith("Esercizio |")) { inTable = true; continue; }
 
-    // Exercise row
     if (inTable && line.includes("|")) {
       const parts = line.split("|").map(s => s.trim());
       if (parts.length < 4) continue;
@@ -100,46 +106,57 @@ window.parseScheda = function (text) {
       const setsCount = parseInt(setsStr) || 3;
       const rest = parseInt(restStr) || 90;
       const muscles = _detectMuscles(notes);
-
-      // Parse rip target
       const ripMatch = ripStr.match(/(\d+)[-–](\d+)/);
-      const ripVal   = ripMatch ? parseInt(ripMatch[1]) : (parseInt(ripStr) || 10);
+      const ripVal = ripMatch ? parseInt(ripMatch[1]) : (parseInt(ripStr) || 10);
       const ripRange = ripStr;
-
       const sets = Array.from({ length: setsCount }, (_, si) => ({
-        peso: 0,
-        rip: ripVal + (si === setsCount - 1 ? 0 : (ripMatch ? parseInt(ripMatch[1]) - parseInt(ripMatch[0]) : 0)),
-        rpe: 7 + (si === 0 ? 0 : si === 1 ? 1 : 2),
+        peso: 0, rip: ripVal, rpe: Math.min(10, 7 + si),
       }));
-      // Simplify: same target rip for all sets
-      sets.forEach((s, si) => { s.rip = ripVal; s.rpe = Math.min(10, 7 + si); });
 
-      result[currentBlock].exercises.push({
-        name,
-        muscles,
-        sets,
-        rest,
-        notes,
-        ripRange,
-        history: [],
-        alternatives: [],
-      });
+      cur.exercises.push({ name, muscles, sets, rest, notes, ripRange, history: [], alternatives: [] });
     }
   }
 
-  // Attach alternatives
-  Object.entries(altMap).forEach(([block, map]) => {
-    if (!result[block]) return;
-    result[block].exercises.forEach(ex => {
-      const key = Object.keys(map).find(k =>
-        ex.name.toLowerCase().includes(k) || k.includes(ex.name.toLowerCase().slice(0, 8))
-      );
-      if (key) ex.alternatives = map[key];
+  // Aggancia le alternative per giorno
+  days.forEach(d => {
+    d.exercises.forEach(ex => {
+      const k = Object.keys(d.altMap).find(key =>
+        ex.name.toLowerCase().includes(key) || key.includes(ex.name.toLowerCase().slice(0, 8)));
+      if (k) ex.alternatives = d.altMap[k];
     });
-    result[block].altMap = map;
   });
 
-  return result;
+  return { days };
+};
+
+// Muscoli unici aggregati dagli esercizi (fallback quando manca il Focus del giorno).
+function _musclesFromExercises(exercises) {
+  const seen = [];
+  (exercises || []).forEach(ex => (ex.muscles || []).forEach(m => {
+    const c = m.charAt(0).toUpperCase() + m.slice(1);
+    if (!seen.includes(c)) seen.push(c);
+  }));
+  return seen.slice(0, 6);
+}
+window._musclesFromExercises = _musclesFromExercises;
+
+// Schedule corrente dal file salvato (unica fonte di verità per tutti i consumer).
+window.getSchedule = function () {
+  const st = window.storage;
+  const text = st ? st.get("schedaData", null) : null;
+  if (!text) return { days: [] };
+  try { return window.parseScheda(text); } catch (_) { return { days: [] }; }
+};
+
+// Sessione selezionata manualmente (o null se oggi è riposo / nessun giorno).
+window.getSelectedSession = function () {
+  const st = window.storage;
+  const todayK = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
+  if (st && st.get("restDay_" + todayK, false)) return null;
+  const days = (window.getSchedule().days) || [];
+  if (!days.length) return null;
+  const selKey = st ? st.get("schedaSelectedDay", null) : null;
+  return days.find(d => d.key === selKey) || days[0];
 };
 
 // ── DIETA PARSER ───────────────────────────────────────────────────────────

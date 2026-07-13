@@ -14,6 +14,9 @@ const _QUICK_PROMPTS = [
 function _buildSystemPrompt({ activities, checkIn, hydration, weekNum, bodyWeight, lang }) {
   const sess = window.getTodaySession ? window.getTodaySession() : null;
   const sessLabel = sess ? `${sess.label} (${sess.muscles.join(", ")})` : "Riposo";
+  const _days = window.getSchedule ? (window.getSchedule().days || []) : [];
+  const _dayCount = _days.length || 3;
+  const _dayNames = _days.map(d => d.name).filter(Boolean).join(", ");
 
   // Ora del giorno e contesto temporale
   const now = new Date();
@@ -37,10 +40,10 @@ function _buildSystemPrompt({ activities, checkIn, hydration, weekNum, bodyWeigh
   let prompt = `Sei il personal coach di Lorenzo Faraoni: preciso, motivante, esperto di powerbuilding (RPE, mesocicli, periodizzazione) e nutrizione (bulk lento, timing proteine, manipolazione carbo). Rispondi in ${replyLang}, conciso (2-5 frasi), tono diretto da coach che lo conosce bene da anni.
 
 Lorenzo: ${bodyWeight || 77.5}kg, 178cm.
-Mesociclo: Settimana ${weekNum || 1} / 8 · Upper/Lower 3×/settimana.
+Mesociclo: Settimana ${weekNum || 1} / 8 · ${_dayCount} sessioni/settimana.
 Oggi: ${dateStr} — ${sessLabel}.
 Ora: ${timeStr} (${timeOfDay}).
-Piano: Upper A (Lun), Lower (Mer), Upper B (Ven). Cardio: camminata + ellittica nei giorni di riposo.
+Piano (${_dayCount} giorni, selezione manuale): ${_dayNames || "n/d"}. Cardio: camminata + ellittica nei giorni di riposo.
 ESCLUDERE SEMPRE dalla dieta: pasta di ceci, lenticchie, piselli, bevanda di mandorla.`;
 
   // ── Check-in ───────────────────────────────────────────────────────────────
@@ -76,7 +79,7 @@ ESCLUDERE SEMPRE dalla dieta: pasta di ceci, lenticchie, piselli, bevanda di man
     prompt += `\n\n=== SCHEDA ALLENAMENTO (file caricato) ===\n${txt}`;
   } else {
     // Fallback se il file non è stato caricato
-    prompt += `\n\nScheda: Upper/Lower split 3×/settimana. Esercizi principali: squat, panca, stacco, OHP, trazioni, rematore.`;
+    prompt += `\n\nScheda: nessun file caricato. Chiedi a Lorenzo di importare la sua scheda .txt dalle Impostazioni.`;
   }
 
   // ── Piano alimentare (file caricato) ──────────────────────────────────────

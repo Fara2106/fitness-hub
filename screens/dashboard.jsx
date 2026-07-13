@@ -284,8 +284,16 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
   const _h = now.getHours();
   const greetKey = _h < 13 ? "Buongiorno Lorenzo" : _h < 18 ? "Buon pomeriggio Lorenzo" : "Buonasera Lorenzo";
 
-  const todaySession = window.getTodaySession ? window.getTodaySession() : null;
   const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
+  const [restDay, setRestDay] = React.useState(() => window.storage ? window.storage.get("restDay_" + today, false) : false);
+  const toggleRest = () => {
+    const next = !restDay;
+    if (window.storage) window.storage.set("restDay_" + today, next);
+    setRestDay(next);
+  };
+  const daysCount = (window.getSchedule ? (window.getSchedule().days || []).length : 0) || 3;
+  const _rawSession = window.getTodaySession ? window.getTodaySession() : null;
+  const todaySession = restDay ? null : _rawSession;
 
   // Peso
   const [weightLog, setWeightLog] = React.useState(() => window.storage ? window.storage.get("weightLog", []) : []);
@@ -329,7 +337,7 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
   }, [today]);
   const hasWeekMuscles = Object.keys(weekMuscles).length > 0;
 
-  const nextMeal = React.useMemo(() => _nextMealHome(), [today]);
+  const nextMeal = React.useMemo(() => _nextMealHome(), [today, restDay]);
 
   const [ailOpen, setAilOpen]   = React.useState(!!(checkIn && checkIn.ailments));
   const [pesoOpen, setPesoOpen] = React.useState(false);
@@ -360,7 +368,15 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
 
       {/* Hero "Oggi" */}
       <UICard hero>
-        <div className="ui-cap">{t("Oggi")}</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div className="ui-cap">{t("Oggi")}</div>
+          <button
+            onClick={toggleRest}
+            style={{ background: restDay ? "var(--accent)" : "transparent", color: restDay ? "#fff" : "var(--text-2)", border: "1px solid var(--border)", borderRadius: 999, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", minHeight: 32 }}
+          >
+            {t("Oggi riposo")}
+          </button>
+        </div>
         <div style={{ fontFamily: "var(--display)", fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em", lineHeight: 1.05, margin: "3px 0 12px" }}>
           {todaySession ? todaySession.label : t("Giorno di riposo")}
         </div>
@@ -443,7 +459,7 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <span className="ui-cap">{t("Settimana")}</span>
           <span className="tnum" style={{ fontSize: 12, color: "var(--text-2)" }}>
-            <span style={{ color: "var(--text)", fontWeight: 700 }}>{weekGymDays}</span> / 3 {t("sessioni")}
+            <span style={{ color: "var(--text)", fontWeight: 700 }}>{weekGymDays}</span> / {daysCount} {t("sessioni")}
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>

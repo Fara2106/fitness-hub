@@ -60,6 +60,8 @@ const I18N_DICT = {
   "2/3 sessioni": { en: "2/3 sessions" },
   "Vai alla scheda": { en: "Go to workout" },
   "Giorno di riposo": { en: "Rest day" },
+  "Giorno": { en: "Day" },
+  "Oggi riposo": { en: "Rest today" },
   "Recupero attivo, mobilità e idratazione.": { en: "Active recovery, mobility and hydration." },
   "Cambia scheda": { en: "Change program" },
   "Aggiorna…": { en: "Update…" },

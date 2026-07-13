@@ -161,7 +161,7 @@ async function _reconcileRepoFiles() {
   const st = window.storage;
   const files = [
     { file: "scheda.txt", key: "schedaData", parse: window.parseScheda, valid: (p) =>
-        !!p && ["Upper A", "Lower", "Upper B"].some(k => p[k] && Array.isArray(p[k].exercises) && p[k].exercises.length) },
+        !!p && Array.isArray(p.days) && p.days.some(d => d && Array.isArray(d.exercises) && d.exercises.length) },
     { file: "dieta.txt",  key: "dietaData",  parse: window.parseDieta,  valid: (p) =>
         !!p && Object.keys(p || {}).some(k => p[k] && Array.isArray(p[k].meals) && p[k].meals.length) },
   ];

@@ -141,10 +141,9 @@ function _validateSchedaText(text, t) {
   try {
     if (!window.parseScheda) return { ok: true, detail: "" };
     const p = window.parseScheda(text);
-    const days = ["Upper A", "Lower", "Upper B"].filter(k =>
-      p && p[k] && Array.isArray(p[k].exercises) && p[k].exercises.length > 0);
+    const days = (p && p.days) || [];
     if (!days.length) return { ok: false };
-    const nEx = days.reduce((n, k) => n + p[k].exercises.length, 0);
+    const nEx = days.reduce((n, d) => n + ((d.exercises && d.exercises.length) || 0), 0);
     return { ok: true, detail: `${days.length} ${t("giorni")} · ${nEx} ${t("esercizi")}` };
   } catch (_) { return { ok: false }; }
 }

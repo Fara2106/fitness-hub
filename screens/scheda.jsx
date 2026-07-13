@@ -1,8 +1,8 @@
 // scheda.jsx — Workout tracker: sets, RPE, timer, vibration, Sheets sync
 
 // ── Fallback schedule (used when scheda.txt not loaded) ──────────────────
-const _DEFAULT_SCHEDULE = {
-  "Upper A": [
+const _DEFAULT_DAYS = [
+  { num: 1, key: "Upper A", name: "Upper A", focus: ["Petto", "Schiena", "Bicipiti"], altMap: {}, exercises: [
     { name:"Panca piana con bilanciere", muscles:["petto","tricipiti","spalle"], sets:[{peso:80,rip:9,rpe:7},{peso:82.5,rip:9,rpe:8},{peso:82.5,rip:8,rpe:9},{peso:82.5,rip:8,rpe:9}], rest:90, ripRange:"8-10", history:[], alternatives:["Push-up zavorrati","Push-up con piedi rialzati"] },
     { name:"Panca inclinata con manubri (30°)", muscles:["petto","spalle"], sets:[{peso:30,rip:11,rpe:7},{peso:30,rip:11,rpe:8},{peso:30,rip:10,rpe:9},{peso:30,rip:10,rpe:9}], rest:90, ripRange:"10-12", history:[], alternatives:["Push-up con piedi su sedia"] },
     { name:"Croci ai cavi bassi (chest fly)", muscles:["petto"], sets:[{peso:15,rip:13,rpe:7},{peso:15,rip:13,rpe:8},{peso:15,rip:12,rpe:9}], rest:75, ripRange:"12-15", history:[], alternatives:["Croci con elastico"] },
@@ -12,8 +12,8 @@ const _DEFAULT_SCHEDULE = {
     { name:"Alzate laterali con manubri", muscles:["spalle"], sets:[{peso:10,rip:13,rpe:7},{peso:10,rip:12,rpe:8},{peso:10,rip:12,rpe:9}], rest:75, ripRange:"12-15", history:[], alternatives:["Alzate con bottiglie d'acqua"] },
     { name:"Curl con bilanciere EZ", muscles:["bicipiti"], sets:[{peso:25,rip:11,rpe:7},{peso:27.5,rip:10,rpe:8},{peso:27.5,rip:10,rpe:9}], rest:75, ripRange:"10-12", history:[], alternatives:["Curl con bottiglie"] },
     { name:"Curl con manubri alternati (martello)", muscles:["bicipiti"], sets:[{peso:14,rip:11,rpe:7},{peso:14,rip:10,rpe:8},{peso:14,rip:10,rpe:9}], rest:75, ripRange:"10-12", history:[], alternatives:["Curl neutrale con bottiglie"] },
-  ],
-  "Lower": [
+  ] },
+  { num: 2, key: "Lower", name: "Lower", focus: ["Gambe", "Glutei", "Core"], altMap: {}, exercises: [
     { name:"Squat con bilanciere (back squat)", muscles:["quadricipiti","glutei"], sets:[{peso:100,rip:9,rpe:7},{peso:105,rip:8,rpe:8},{peso:105,rip:8,rpe:9},{peso:105,rip:8,rpe:9}], rest:120, ripRange:"8-10", history:[], alternatives:["Squat con zaino zavorrato","Bulgarian split squat"] },
     { name:"Leg press 45°", muscles:["quadricipiti","glutei"], sets:[{peso:120,rip:13,rpe:7},{peso:130,rip:12,rpe:8},{peso:130,rip:12,rpe:9}], rest:90, ripRange:"12-15", history:[], alternatives:["Squat sumo","Wall sit"] },
     { name:"Romanian Deadlift (RDL) con bilanciere", muscles:["femorali","glutei"], sets:[{peso:90,rip:11,rpe:7},{peso:95,rip:10,rpe:8},{peso:95,rip:10,rpe:9},{peso:95,rip:10,rpe:9}], rest:90, ripRange:"10-12", history:[], alternatives:["Stacco a una gamba corpo libero"] },
@@ -23,8 +23,8 @@ const _DEFAULT_SCHEDULE = {
     { name:"Crunch inverso a terra", muscles:["addome"], sets:[{peso:0,rip:17,rpe:7},{peso:0,rip:17,rpe:8},{peso:0,rip:17,rpe:9}], rest:60, ripRange:"15-20", history:[], alternatives:["Leg raise sdraiato"] },
     { name:"Plank isometrico", muscles:["addome"], sets:[{peso:0,rip:45,rpe:7},{peso:0,rip:50,rpe:8},{peso:0,rip:50,rpe:9}], rest:60, ripRange:"45-60 sec", history:[], alternatives:[] },
     { name:"Back extension (macchina o panca lombare)", muscles:["schiena"], sets:[{peso:20,rip:13,rpe:7},{peso:25,rip:12,rpe:8},{peso:25,rip:12,rpe:9}], rest:60, ripRange:"12-15", history:[], alternatives:[] },
-  ],
-  "Upper B": [
+  ] },
+  { num: 3, key: "Upper B", name: "Upper B", focus: ["Schiena", "Spalle", "Tricipiti"], altMap: {}, exercises: [
     { name:"Military press (bilanciere)", muscles:["spalle","tricipiti"], sets:[{peso:50,rip:8,rpe:7},{peso:52.5,rip:7,rpe:8},{peso:52.5,rip:6,rpe:9}], rest:120, ripRange:"6-10", history:[], alternatives:["Lento manubri","Push press"] },
     { name:"Trazioni o Lat machine presa stretta", muscles:["schiena","bicipiti"], sets:[{peso:-20,rip:10,rpe:7},{peso:-15,rip:8,rpe:8},{peso:-10,rip:7,rpe:9}], rest:120, ripRange:"8-12", history:[], alternatives:["Lat machine presa stretta","Pulley alto"] },
     { name:"Rematore con bilanciere (pendlay row)", muscles:["schiena"], sets:[{peso:70,rip:8,rpe:7},{peso:72.5,rip:8,rpe:8},{peso:72.5,rip:7,rpe:9}], rest:90, ripRange:"6-10", history:[], alternatives:["Rematore T-bar","Chest-supported row"] },
@@ -36,39 +36,22 @@ const _DEFAULT_SCHEDULE = {
     { name:"Shrug con manubri o bilanciere", muscles:["trapezi"], sets:[{peso:30,rip:13,rpe:7},{peso:32.5,rip:12,rpe:8},{peso:32.5,rip:12,rpe:9}], rest:75, ripRange:"12-15", history:[], alternatives:[] },
     { name:"Crunch inverso a terra", muscles:["addome"], sets:[{peso:0,rip:17,rpe:7},{peso:0,rip:17,rpe:8},{peso:0,rip:16,rpe:9}], rest:60, ripRange:"15-20", history:[], alternatives:["Leg raise sdraiato"] },
     { name:"Plank isometrico", muscles:["addome"], sets:[{peso:0,rip:45,rpe:7},{peso:0,rip:50,rpe:8},{peso:0,rip:50,rpe:9}], rest:60, ripRange:"45-60 sec", history:[], alternatives:[] },
-  ],
-};
+  ] },
+];
 
-// Build schedule from parser output or fallback
+// Costruisce la lista ordinata di giorni dal file (o fallback ai default).
 function _buildSchedule() {
-  if (!window.parseScheda || !window.storage) return _DEFAULT_SCHEDULE;
-  const text = window.storage.get("schedaData", null);
-  if (!text) return _DEFAULT_SCHEDULE;
-  try {
-    const parsed = window.parseScheda(text);
-    if (!parsed) return _DEFAULT_SCHEDULE;
-    const out = {};
-    ["Upper A", "Lower", "Upper B"].forEach(key => {
-      const block = parsed[key];
-      if (!block || !block.exercises || !block.exercises.length) {
-        out[key] = _DEFAULT_SCHEDULE[key];
-        return;
-      }
-      out[key] = block.exercises.map(ex => {
-        const altArr = block.altMap
-          ? block.altMap[ex.name.toLowerCase()] || []
-          : [];
-        return {
-          ...ex,
-          alternatives: altArr.length ? altArr : (ex.alternatives || []),
-          history: ex.history || [],
-        };
-      });
-    });
-    return out;
-  } catch (_) {
-    return _DEFAULT_SCHEDULE;
-  }
+  const sched = window.getSchedule ? window.getSchedule() : { days: [] };
+  const days = (sched && sched.days) || [];
+  if (!days.length) return _DEFAULT_DAYS;
+  return days.map(d => ({
+    ...d,
+    exercises: (d.exercises || []).map(ex => ({
+      ...ex,
+      alternatives: (ex.alternatives && ex.alternatives.length) ? ex.alternatives : (ex.alternatives || []),
+      history: ex.history || [],
+    })),
+  }));
 }
 
 // ── Persistenza progressi di giornata (per giorno + sessione) ─────────────
@@ -539,7 +522,8 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
   const isDesktop = device === "desktop";
   const t = useT();
 
-  const [SCHEDULE]    = React.useState(() => _buildSchedule());
+  const [days]        = React.useState(() => _buildSchedule());
+  const current       = days.find(d => d.key === scheda) || days[0] || { key: "", num: 0, name: "", focus: [], exercises: [] };
   const [completion, setCompletion]   = React.useState(() => _loadProg(scheda).completion || {});
   const [timer, setTimer]             = React.useState(null);
   const [occupied, setOccupied]       = React.useState({});
@@ -560,10 +544,11 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
   // insieme per evitare il bleed tra giorni diversi.
   const switchTo = (k) => {
     const saved = _loadProg(k);
-    const exs = SCHEDULE[k] || [];
+    const exs = (days.find(d => d.key === k) || {}).exercises || [];
     const tot  = exs.reduce((n, ex) => n + ex.sets.length, 0);
     const done = exs.reduce((n, ex, i) => n + ((saved.completion || {})[i] || []).filter(Boolean).length, 0);
     setScheda(k);
+    if (window.storage) window.storage.set("schedaSelectedDay", k);
     setCompletion(saved.completion || {});
     setSubstitutions(saved.substitutions || {});
     setOccupied({});
@@ -586,15 +571,15 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
     }).catch(() => {});
   }, []);
 
-  // Auto-detect today's session on mount
+  // On mount: apri il giorno persistito (o il primo). Persiste la scelta.
   React.useEffect(() => {
-    const sess = window.getTodaySession ? window.getTodaySession() : null;
-    if (sess && (!scheda || scheda === "Upper A") && sess.id !== scheda) {
-      switchTo(sess.id); // carica anche i progressi salvati della sessione giusta
-    }
+    const saved = window.storage ? window.storage.get("schedaSelectedDay", null) : null;
+    const target = (days.find(d => d.key === saved) || days[0]);
+    if (target && target.key !== scheda) switchTo(target.key);
+    else if (target && window.storage) window.storage.set("schedaSelectedDay", target.key);
   }, []);
 
-  const exercises = SCHEDULE[scheda] || [];
+  const exercises = current.exercises || [];
   const totalSets = exercises.reduce((n, ex) => n + ex.sets.length, 0);
   const completedSets = exercises.reduce(
     (n, ex, i) => n + (completion[i] || []).filter(Boolean).length, 0
@@ -687,7 +672,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
                 peso,
                 rip: s.rip,
                 rpe: Math.min(10, Math.max(1, s.rpe + rpeAdjust)),
-                sessione: scheda,
+                sessione: current.name || scheda,
                 weekNum: weekNum || 1,
               })
             );
@@ -745,19 +730,25 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
         </div>
       )}
 
-      {/* Tab pills */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      {/* Tab pills — giorni numerati G1…GN */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", maxWidth: "100%", overflowX: "auto" }}>
         <div className="tab-pills">
-          {Object.keys(SCHEDULE).map(k => (
+          {days.map(d => (
             <button
-              key={k}
-              className={k === scheda ? "on" : ""}
-              onClick={() => switchTo(k)}
+              key={d.key}
+              className={d.key === scheda ? "on" : ""}
+              onClick={() => switchTo(d.key)}
             >
-              {k}
+              {"G" + d.num}
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Intestazione giorno: Giorno N · Nome + focus */}
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 8, padding: "0 2px" }}>
+        <span style={{ fontWeight: 700, fontSize: 15 }}>{t("Giorno")} {current.num} · {current.name}</span>
+        {(current.focus || []).map(f => <UIChip key={f}>{f}</UIChip>)}
       </div>
 
       {/* Progress bar */}

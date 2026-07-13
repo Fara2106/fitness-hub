@@ -137,9 +137,18 @@ window.todayKey = function () {
 
 // ── Detect today's session ─────────────────────────────────────────────────
 window.getTodaySession = function () {
-  const day = new Date().getDay(); // 0=Sun,1=Mon,2=Tue,...,6=Sat
-  if (day === 1) return { id: "Upper A", label: "UPPER A",  muscles: ["Petto", "Schiena", "Bicipiti"], muscleKeys: ["petto","schiena","bicipiti"] };
-  if (day === 3) return { id: "Lower",   label: "LOWER",    muscles: ["Gambe", "Glutei", "Core"],       muscleKeys: ["quadricipiti","femorali","glutei","polpacci"] };
-  if (day === 5) return { id: "Upper B", label: "UPPER B",  muscles: ["Schiena", "Spalle", "Tricipiti"],muscleKeys: ["schiena","spalle","tricipiti"] };
-  return null; // rest day
+  const day = window.getSelectedSession ? window.getSelectedSession() : null;
+  if (!day) return null; // riposo o nessun giorno
+  const muscles = (day.focus && day.focus.length)
+    ? day.focus
+    : (window._musclesFromExercises ? window._musclesFromExercises(day.exercises) : []);
+  return {
+    id: day.key,
+    key: day.key,
+    label: (day.name || day.key || "").toUpperCase(),
+    name: day.name || day.key,
+    focus: day.focus || [],
+    muscles: muscles,
+    muscleKeys: muscles.map(m => String(m).toLowerCase()),
+  };
 };
