@@ -100,10 +100,11 @@ function _applyTheme(theme) {
     light = !(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   }
   root.classList.toggle("theme-light", light);
-  // theme-color dinamico: iOS lo usa per la striscia della home-indicator (che la
-  // pagina non può dipingere) → tono TabBar (--nav-bg ≈ #0b0b0f / #f7f7fa) così si fonde
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute("content", light ? "#f7f7fa" : "#0b0b0f");
+  // theme-color: iOS lo usa per la striscia della home-indicator (che la pagina non può
+  // dipingere). iOS standalone ONORA i meta media-scoped statici ma IGNORA questi update JS;
+  // aggiorniamo comunque entrambi i meta per i browser che li onorano + override tema manuale.
+  const metas = document.querySelectorAll('meta[name="theme-color"]');
+  metas.forEach(m => m.setAttribute("content", light ? "#f7f7fa" : "#0b0b0f"));
 }
 
 // ── Sync state (osservabile dalla UI: SyncBadge in nav.jsx, riga in Impostazioni) ──

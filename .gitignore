@@ -4,6 +4,9 @@
 # Dipendenze npm (servono solo in locale per la validazione Babel)
 node_modules/
 
+# File di lavoro/test locali (script Node, screenshot QA) — non parte del deploy
+scratchpad/
+
 # Sistema / log
 .DS_Store
 *.log

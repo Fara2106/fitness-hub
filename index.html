@@ -5,13 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Lorenzo Fitness Hub</title>
 <meta name="description" content="Piano alimentare, allenamento e tracking personale" />
-<meta name="theme-color" content="#0b0b0f" />
+<!-- theme-color con media: iOS PWA standalone valuta questi staticamente e li onora
+     (a differenza degli update JS runtime, che iOS ignora → banda nera in entrambi i temi).
+     Il JS sotto aggiorna comunque entrambi per i browser che lo onorano + override manuale. -->
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0b0f" />
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f7fa" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Fitness Hub" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <link rel="manifest" href="manifest.json" />
-<link rel="stylesheet" href="styles.css?v=20260713152642" />
+<link rel="stylesheet" href="styles.css?v=20260713161454" />
 <style>
   /* iOS PWA standalone: la striscia della home-indicator NON è dipingibile dalla
      pagina (verificato: né #root/html/body né TabBar la raggiungono, neanche con
@@ -51,10 +55,11 @@
   try {
     var light = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches;
     if (light) document.documentElement.classList.add("theme-light");
-    var meta = document.querySelector('meta[name="theme-color"]');
-    /* tono TabBar (non --bg): iOS usa theme-color per la striscia della
-       home-indicator, che la pagina NON può dipingere → così si fonde con la barra */
-    if (meta) meta.setAttribute("content", light ? "#f7f7fa" : "#0b0b0f");
+    /* tono TabBar (non --bg): iOS usa theme-color per la striscia della home-indicator,
+       che la pagina NON può dipingere → così si fonde con la barra. Aggiorna TUTTI i meta
+       theme-color (i due media-scoped) per i browser che onorano il JS. */
+    var metas = document.querySelectorAll('meta[name="theme-color"]');
+    for (var i = 0; i < metas.length; i++) metas[i].setAttribute("content", light ? "#f7f7fa" : "#0b0b0f");
   } catch (_) {}
 })();
 </script>
@@ -96,30 +101,30 @@
 <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js" crossorigin="anonymous"></script>
 <script>if (typeof Recharts !== 'undefined') window.Recharts = Recharts;</script>
 
-<!-- Core utilities (?v=20260713152642: versionato, bumpato a ogni deploy → niente cache stale) -->
-<script type="text/babel" src="storage.jsx?v=20260713152642"></script>
-<script type="text/babel" src="api.jsx?v=20260713152642"></script>
-<script type="text/babel" src="parser.jsx?v=20260713152642"></script>
+<!-- Core utilities (?v=20260713161454: versionato, bumpato a ogni deploy → niente cache stale) -->
+<script type="text/babel" src="storage.jsx?v=20260713161454"></script>
+<script type="text/babel" src="api.jsx?v=20260713161454"></script>
+<script type="text/babel" src="parser.jsx?v=20260713161454"></script>
 
 <!-- Components -->
-<script type="text/babel" src="i18n.jsx?v=20260713152642"></script>
-<script type="text/babel" src="icons.jsx?v=20260713152642"></script>
-<script type="text/babel" src="ui.jsx?v=20260713152642"></script>
-<script type="text/babel" src="anatomy.jsx?v=20260713152642"></script>
-<script type="text/babel" src="nav.jsx?v=20260713152642"></script>
+<script type="text/babel" src="i18n.jsx?v=20260713161454"></script>
+<script type="text/babel" src="icons.jsx?v=20260713161454"></script>
+<script type="text/babel" src="ui.jsx?v=20260713161454"></script>
+<script type="text/babel" src="anatomy.jsx?v=20260713161454"></script>
+<script type="text/babel" src="nav.jsx?v=20260713161454"></script>
 
 <!-- Screens -->
-<script type="text/babel" src="screens/onboarding.jsx?v=20260713152642"></script>
-<script type="text/babel" src="screens/dashboard.jsx?v=20260713152642"></script>
-<script type="text/babel" src="screens/scheda.jsx?v=20260713152642"></script>
-<script type="text/babel" src="screens/dieta.jsx?v=20260713152642"></script>
-<script type="text/babel" src="screens/spesa.jsx?v=20260713152642"></script>
-<script type="text/babel" src="screens/coach.jsx?v=20260713152642"></script>
-<script type="text/babel" src="screens/storico.jsx?v=20260713152642"></script>
-<script type="text/babel" src="screens/impostazioni.jsx?v=20260713152642"></script>
+<script type="text/babel" src="screens/onboarding.jsx?v=20260713161454"></script>
+<script type="text/babel" src="screens/dashboard.jsx?v=20260713161454"></script>
+<script type="text/babel" src="screens/scheda.jsx?v=20260713161454"></script>
+<script type="text/babel" src="screens/dieta.jsx?v=20260713161454"></script>
+<script type="text/babel" src="screens/spesa.jsx?v=20260713161454"></script>
+<script type="text/babel" src="screens/coach.jsx?v=20260713161454"></script>
+<script type="text/babel" src="screens/storico.jsx?v=20260713161454"></script>
+<script type="text/babel" src="screens/impostazioni.jsx?v=20260713161454"></script>
 
 <!-- App frame -->
-<script type="text/babel" src="app.jsx?v=20260713152642"></script>
+<script type="text/babel" src="app.jsx?v=20260713161454"></script>
 
 <!-- Mount: auto-detect device -->
 <script type="text/babel" data-presets="env,react">
