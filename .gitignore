@@ -1,2 +1,9 @@
 # Local Netlify folder
-.netlify
+.netlify/
+
+# Dipendenze npm (servono solo in locale per la validazione Babel)
+node_modules/
+
+# Sistema / log
+.DS_Store
+*.log
