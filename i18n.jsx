@@ -15,6 +15,7 @@ const I18N_DICT = {
   "Lista spesa": { en: "Shopping list" },
   "Ingredienti della settimana": { en: "This week's ingredients" },
   "Genera lista spesa": { en: "Generate shopping list" },
+  "kg o elastico": { en: "kg or band" },
   "AI Coach": { en: "AI Coach" },
   "Impostazioni": { en: "Settings" },
   "Fitness Hub": { en: "Fitness Hub" },

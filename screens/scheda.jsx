@@ -186,6 +186,7 @@ const TimerOverlay = ({ seconds, onClose }) => {
 
 // ── Set row ────────────────────────────────────────────────────────────────
 const SetRow = ({ s, idx, completed, onToggle, peso, onPesoChange, isPR }) => {
+  const t = useT();
   return (
     <div style={{
       display: "grid",
@@ -200,18 +201,17 @@ const SetRow = ({ s, idx, completed, onToggle, peso, onPesoChange, isPR }) => {
       <div style={{ display: "flex", alignItems: "center", gap: 4, position: "relative" }}>
         <input
           type="text"
-          inputMode="decimal"
           value={peso}
           onChange={(e) => onPesoChange(e.target.value)}
-          className="input input-mono"
+          placeholder={t("kg o elastico")}
+          className="input"
           style={{
-            padding: "6px 8px", fontSize: 14, fontWeight: 600, textAlign: "right", borderRadius: 7,
+            padding: "6px 8px", fontSize: 14, fontWeight: 600, textAlign: "left", borderRadius: 7, width: "100%",
             borderColor: isPR ? "#FF9F0A" : "var(--border)",
             boxShadow: isPR ? "0 0 0 1px #FF9F0A" : "none",
             color: isPR ? "#FF9F0A" : "var(--text)",
           }}
         />
-        <span style={{ fontSize: 11, color: "var(--text-3)" }}>kg</span>
         {isPR && (
           <span className="pop-in" style={{
             position: "absolute", top: -6, right: 22,
@@ -657,7 +657,11 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
           const exPesos = pesosRef.current[exIdx] || ex.sets.map(s => String(s.peso));
           ex.sets.forEach((s, setIdx) => {
             if (!exCompletion[setIdx]) return; // salta serie non completate
-            const peso = parseFloat(exPesos[setIdx]) || s.peso;
+            // Testo libero: peso può essere un numero (kg) o una parola (es. elastico
+            // "rosso"/"medio"). Salviamo il valore digitato COM'È; fallback al default
+            // solo se il campo è vuoto (prima un parseFloat lo convertiva e perdeva la parola).
+            const raw = exPesos[setIdx];
+            const peso = (raw != null && String(raw).trim() !== "") ? raw : s.peso;
             savePromises.push(
               window.sheetsAPI.savePeso({
                 date: today,

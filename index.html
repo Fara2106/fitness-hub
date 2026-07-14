@@ -18,7 +18,7 @@
 <meta name="apple-mobile-web-app-title" content="Fitness Hub" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <link rel="manifest" href="manifest.json" />
-<link rel="stylesheet" href="styles.css?v=20260714120623" />
+<link rel="stylesheet" href="styles.css?v=20260714144925" />
 <style>
   /* Due bande distinte in basso su iOS:
      1) striscia sottile home-indicator: NON dipingibile dalla pagina → gestita da
@@ -52,6 +52,19 @@
     padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
   }
+
+  /* ===== DIAGNOSTICA BANDA INFERIORE — TEMPORANEA, DA RIMUOVERE DOPO IL TEST =====
+     Coloro i 3 layer sovrapposti. La banda nera in basso prenderà il colore
+     dell'elemento che la "possiede":
+       • BLU  → #root arriva in fondo ma .lfh/contenuto è più corto (bug altezza interna)
+       • VERDE→ body arriva in fondo ma #root è più corto (fixed inset:0 non tocca il fondo)
+       • ROSSO→ anche body è più corto dello schermo
+       • resta NERA → nessun elemento è corto: la banda è la striscia iOS della
+                      home-indicator dipinta da <meta theme-color> (fix diverso)
+     .lfh resta col suo sfondo scuro così l'app sopra si vede normale e la banda si rivela. */
+  html  { background: #ff0000 !important; } /* ROSSO */
+  body  { background: #00ff00 !important; } /* VERDE */
+  #root { background: #0000ff !important; } /* BLU   */
 </style>
 <script>
 /* Tema di sistema PRIMA del mount React (evita flash di tema sbagliato).
@@ -107,30 +120,30 @@
 <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js" crossorigin="anonymous"></script>
 <script>if (typeof Recharts !== 'undefined') window.Recharts = Recharts;</script>
 
-<!-- Core utilities (?v=20260714120623: versionato, bumpato a ogni deploy → niente cache stale) -->
-<script type="text/babel" src="storage.jsx?v=20260714120623"></script>
-<script type="text/babel" src="api.jsx?v=20260714120623"></script>
-<script type="text/babel" src="parser.jsx?v=20260714120623"></script>
+<!-- Core utilities (?v=20260714144925: versionato, bumpato a ogni deploy → niente cache stale) -->
+<script type="text/babel" src="storage.jsx?v=20260714144925"></script>
+<script type="text/babel" src="api.jsx?v=20260714144925"></script>
+<script type="text/babel" src="parser.jsx?v=20260714144925"></script>
 
 <!-- Components -->
-<script type="text/babel" src="i18n.jsx?v=20260714120623"></script>
-<script type="text/babel" src="icons.jsx?v=20260714120623"></script>
-<script type="text/babel" src="ui.jsx?v=20260714120623"></script>
-<script type="text/babel" src="anatomy.jsx?v=20260714120623"></script>
-<script type="text/babel" src="nav.jsx?v=20260714120623"></script>
+<script type="text/babel" src="i18n.jsx?v=20260714144925"></script>
+<script type="text/babel" src="icons.jsx?v=20260714144925"></script>
+<script type="text/babel" src="ui.jsx?v=20260714144925"></script>
+<script type="text/babel" src="anatomy.jsx?v=20260714144925"></script>
+<script type="text/babel" src="nav.jsx?v=20260714144925"></script>
 
 <!-- Screens -->
-<script type="text/babel" src="screens/onboarding.jsx?v=20260714120623"></script>
-<script type="text/babel" src="screens/dashboard.jsx?v=20260714120623"></script>
-<script type="text/babel" src="screens/scheda.jsx?v=20260714120623"></script>
-<script type="text/babel" src="screens/dieta.jsx?v=20260714120623"></script>
-<script type="text/babel" src="screens/spesa.jsx?v=20260714120623"></script>
-<script type="text/babel" src="screens/coach.jsx?v=20260714120623"></script>
-<script type="text/babel" src="screens/storico.jsx?v=20260714120623"></script>
-<script type="text/babel" src="screens/impostazioni.jsx?v=20260714120623"></script>
+<script type="text/babel" src="screens/onboarding.jsx?v=20260714144925"></script>
+<script type="text/babel" src="screens/dashboard.jsx?v=20260714144925"></script>
+<script type="text/babel" src="screens/scheda.jsx?v=20260714144925"></script>
+<script type="text/babel" src="screens/dieta.jsx?v=20260714144925"></script>
+<script type="text/babel" src="screens/spesa.jsx?v=20260714144925"></script>
+<script type="text/babel" src="screens/coach.jsx?v=20260714144925"></script>
+<script type="text/babel" src="screens/storico.jsx?v=20260714144925"></script>
+<script type="text/babel" src="screens/impostazioni.jsx?v=20260714144925"></script>
 
 <!-- App frame -->
-<script type="text/babel" src="app.jsx?v=20260714120623"></script>
+<script type="text/babel" src="app.jsx?v=20260714144925"></script>
 
 <!-- Mount: auto-detect device -->
 <script type="text/babel" data-presets="env,react">
