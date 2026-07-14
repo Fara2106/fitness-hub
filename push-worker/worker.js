@@ -1,7 +1,55 @@
 // fitness-hub-push — Cloudflare Worker (Web Push per Lorenzo Fitness Hub)
 // Endpoint: POST /save, POST /unsubscribe, GET /health. Cron: send (Task 2).
 
+import { generatePushHTTPRequest, ApplicationServerKeys } from "webpush-webcrypto";
+
 const KV_KEY = "config";
+
+const WD = ["sun","mon","tue","wed","thu","fri","sat"]; // getDay() index
+
+// Ritorna { ymd:"YYYY-MM-DD", weekday:"mon".., hhmm:"HH:MM" } in ora di Roma.
+function romeNow(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Rome", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false,
+  }).formatToParts(date).reduce((a, p) => (a[p.type] = p.value, a), {});
+  const wdMap = { Sun:"sun",Mon:"mon",Tue:"tue",Wed:"wed",Thu:"thu",Fri:"fri",Sat:"sat" };
+  return {
+    ymd: `${parts.year}-${parts.month}-${parts.day}`,
+    weekday: wdMap[parts.weekday],
+    hhmm: `${parts.hour}:${parts.minute}`,
+  };
+}
+
+function resolveDaytype(cfg, ymd, weekday) {
+  return (cfg.overrides && cfg.overrides[ymd]) || (cfg.weekly && cfg.weekly[weekday]) || null;
+}
+
+function dueReminders(cfg, ymd, weekday, hhmm) {
+  const dt = resolveDaytype(cfg, ymd, weekday);
+  if (!dt) return [];
+  const list = (cfg.daytypes && cfg.daytypes[dt]) || [];
+  return list.filter(r => r.on && r.time === hhmm);
+}
+
+function notifText(r) {
+  const byCat = { pasto: "🍽️", integratore: "💊", allenamento: "🏋️" };
+  return { title: "Lorenzo Fitness Hub", body: `${byCat[r.cat] || "⏰"} ${r.label}`, tag: r.id };
+}
+
+// Invia una push a una subscription. Ritorna lo status HTTP del push service.
+async function sendPush(subscription, payloadObj, env) {
+  const keys = await ApplicationServerKeys.fromJSON(JSON.parse(env.VAPID_PRIVATE));
+  const { headers, body, endpoint } = await generatePushHTTPRequest({
+    applicationServerKeys: keys,
+    payload: JSON.stringify(payloadObj),
+    target: subscription,
+    adminContact: env.VAPID_SUBJECT,
+    ttl: 60,
+  });
+  const res = await fetch(endpoint, { method: "POST", headers, body });
+  return res.status;
+}
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -66,5 +114,38 @@ export default {
     }
 
     return json({ ok: false, error: "not found" }, 404);
+  },
+
+  async scheduled(event, env, ctx) {
+    const cfg = await readConfig(env);
+    if (!cfg.subscriptions.length) return;
+    const { ymd, weekday, hhmm } = romeNow(new Date(event.scheduledTime || Date.now()));
+
+    const due = dueReminders(cfg, ymd, weekday, hhmm);
+
+    // GC override passati (data < oggi)
+    let changed = false;
+    for (const k of Object.keys(cfg.overrides || {})) {
+      if (k < ymd) { delete cfg.overrides[k]; changed = true; }
+    }
+
+    if (due.length) {
+      const deadEndpoints = new Set();
+      for (const r of due) {
+        const payload = notifText(r);
+        for (const sub of cfg.subscriptions) {
+          try {
+            const status = await sendPush(sub, payload, env);
+            if (status === 404 || status === 410) deadEndpoints.add(sub.endpoint);
+          } catch (_) { /* ignora singolo invio fallito */ }
+        }
+      }
+      if (deadEndpoints.size) {
+        cfg.subscriptions = cfg.subscriptions.filter(s => !deadEndpoints.has(s.endpoint));
+        changed = true;
+      }
+    }
+
+    if (changed) { cfg.updatedAt = Date.now(); ctx.waitUntil(writeConfig(env, cfg)); }
   },
 };
