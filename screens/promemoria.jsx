@@ -113,7 +113,7 @@ const PromemoriaOverrides = ({ config, persist, t }) => {
         <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
           {active.map(k => (
             <div key={k} style={{ display:"flex", alignItems:"center", gap:8, fontSize:12.5 }}>
-              <span className="num" style={{ flex:1 }}>{k} → {config.overrides[k]}</span>
+              <span className="num" style={{ flex:1 }}>{k} → {t(_DT_LABELS[config.overrides[k]] || config.overrides[k])}</span>
               <button onClick={() => clearOverride(k)} style={{ border:0, background:"transparent", color:"var(--danger)", fontSize:12, cursor:"pointer" }}>✕</button>
             </div>
           ))}
@@ -144,11 +144,14 @@ const Promemoria = ({ device, onNav }) => {
   const onToggleMaster = async () => {
     if (!window.pushAPI) return;
     if (enabled) {
-      await window.pushAPI.disable();
+      try { await window.pushAPI.disable(); }
+      catch (e) { setStatus(t("Errore attivazione notifiche")); return; }
       setEnabled(false); setStatus("");
       return;
     }
-    const res = await window.pushAPI.enable(config);
+    let res;
+    try { res = await window.pushAPI.enable(config); }
+    catch (e) { setStatus(t("Errore attivazione notifiche")); return; }
     if (res.ok) { setEnabled(true); setStatus(t("Notifiche attive")); }
     else {
       const map = {
@@ -156,6 +159,8 @@ const Promemoria = ({ device, onNav }) => {
         "not-installed": t("Le notifiche richiedono l'app installata sulla Home"),
         "not-configured": t("Configurazione push mancante"),
         "denied": t("Permesso negato — riattiva da Impostazioni iOS"),
+        "subscribe-failed": t("Errore attivazione notifiche"),
+        "save-failed": t("Errore attivazione notifiche"),
       };
       setStatus(map[res.error] || ("Errore: " + res.error));
     }

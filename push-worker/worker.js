@@ -5,13 +5,11 @@ import { generatePushHTTPRequest, ApplicationServerKeys } from "webpush-webcrypt
 
 const KV_KEY = "config";
 
-const WD = ["sun","mon","tue","wed","thu","fri","sat"]; // getDay() index
-
 // Ritorna { ymd:"YYYY-MM-DD", weekday:"mon".., hhmm:"HH:MM" } in ora di Roma.
 function romeNow(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Europe/Rome", year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false,
+    hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false, hourCycle: "h23",
   }).formatToParts(date).reduce((a, p) => (a[p.type] = p.value, a), {});
   const wdMap = { Sun:"sun",Mon:"mon",Tue:"tue",Wed:"wed",Thu:"thu",Fri:"fri",Sat:"sat" };
   return {
@@ -109,6 +107,7 @@ export default {
       if (!endpoint) return json({ ok: false, error: "no endpoint" }, 400);
       const cfg = await readConfig(env);
       cfg.subscriptions = cfg.subscriptions.filter(s => s.endpoint !== endpoint);
+      cfg.updatedAt = Date.now();
       await writeConfig(env, cfg);
       return json({ ok: true, subs: cfg.subscriptions.length });
     }
@@ -118,31 +117,32 @@ export default {
 
   async scheduled(event, env, ctx) {
     const cfg = await readConfig(env);
-    if (!cfg.subscriptions.length) return;
     const { ymd, weekday, hhmm } = romeNow(new Date(event.scheduledTime || Date.now()));
 
-    const due = dueReminders(cfg, ymd, weekday, hhmm);
-
-    // GC override passati (data < oggi)
+    // GC override passati (data < oggi) — sempre, anche senza subscription
     let changed = false;
     for (const k of Object.keys(cfg.overrides || {})) {
       if (k < ymd) { delete cfg.overrides[k]; changed = true; }
     }
 
-    if (due.length) {
-      const deadEndpoints = new Set();
-      for (const r of due) {
-        const payload = notifText(r);
-        for (const sub of cfg.subscriptions) {
-          try {
-            const status = await sendPush(sub, payload, env);
-            if (status === 404 || status === 410) deadEndpoints.add(sub.endpoint);
-          } catch (_) { /* ignora singolo invio fallito */ }
+    if (cfg.subscriptions.length) {
+      const due = dueReminders(cfg, ymd, weekday, hhmm);
+
+      if (due.length) {
+        const deadEndpoints = new Set();
+        for (const r of due) {
+          const payload = notifText(r);
+          for (const sub of cfg.subscriptions) {
+            try {
+              const status = await sendPush(sub, payload, env);
+              if (status === 404 || status === 410) deadEndpoints.add(sub.endpoint);
+            } catch (_) { /* ignora singolo invio fallito */ }
+          }
         }
-      }
-      if (deadEndpoints.size) {
-        cfg.subscriptions = cfg.subscriptions.filter(s => !deadEndpoints.has(s.endpoint));
-        changed = true;
+        if (deadEndpoints.size) {
+          cfg.subscriptions = cfg.subscriptions.filter(s => !deadEndpoints.has(s.endpoint));
+          changed = true;
+        }
       }
     }
 

@@ -1,7 +1,6 @@
 // Verifica risoluzione daytype + due reminders senza inviare nulla.
 import assert from "node:assert";
 
-const WD = ["sun","mon","tue","wed","thu","fri","sat"];
 function resolveDaytype(cfg, ymd, weekday) {
   return (cfg.overrides && cfg.overrides[ymd]) || (cfg.weekly && cfg.weekly[weekday]) || null;
 }

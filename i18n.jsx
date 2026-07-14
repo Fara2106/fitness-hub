@@ -503,6 +503,7 @@ const I18N_DICT = {
   "Notifiche non supportate su questo dispositivo": { en: "Notifications not supported on this device" },
   "Permesso negato — riattiva da Impostazioni iOS": { en: "Permission denied — re-enable in iOS Settings" },
   "Configurazione push mancante": { en: "Push configuration missing" },
+  "Errore attivazione notifiche": { en: "Failed to enable notifications" },
   "Orari per giorno": { en: "Times by day" },
   "Sposta allenamento": { en: "Move workout" },
   "Giorno prima": { en: "Day before" },
