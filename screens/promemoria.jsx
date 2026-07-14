@@ -65,7 +65,63 @@ const PromemoriaEditor = ({ config, persist, selDay, setSelDay, t }) => {
     </div>
   );
 };
-const PromemoriaOverrides = () => null;
+// Helper: YYYY-MM-DD locale + weekday key da una Date
+function _ymd(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+const _WD_KEYS = ["sun","mon","tue","wed","thu","fri","sat"];
+const _TRAINING = ["mattina","ore17","ore21","ore22"];
+
+const PromemoriaOverrides = ({ config, persist, t }) => {
+  const [pick, setPick] = React.useState(() => _ymd(new Date()));
+
+  // daytype effettivo di una data (override → weekly)
+  const daytypeOf = (ymd) => {
+    if (config.overrides && config.overrides[ymd]) return config.overrides[ymd];
+    const wd = _WD_KEYS[new Date(ymd + "T12:00:00").getDay()];
+    return (config.weekly && config.weekly[wd]) || "riposo";
+  };
+
+  const move = (dir) => {
+    const src = pick;
+    const srcType = daytypeOf(src);
+    if (!_TRAINING.includes(srcType)) return; // niente da spostare se è riposo
+    const d = new Date(src + "T12:00:00");
+    d.setDate(d.getDate() + (dir === "after" ? 1 : -1));
+    const dst = _ymd(d);
+    persist({ ...config, overrides: { ...config.overrides, [src]: "riposo", [dst]: srcType } });
+  };
+
+  const clearOverride = (ymd) => {
+    const next = { ...config.overrides }; delete next[ymd];
+    persist({ ...config, overrides: next });
+  };
+
+  const todayYmd = _ymd(new Date());
+  const active = Object.keys(config.overrides || {}).filter(k => k >= todayYmd).sort();
+
+  return (
+    <div className="card" style={{ padding:16, display:"flex", flexDirection:"column", gap:12 }}>
+      <div style={{ fontSize:11, fontWeight:600, color:"var(--text-3)", textTransform:"uppercase" }}>{t("Sposta allenamento")}</div>
+      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+        <input type="date" value={pick} min={todayYmd} onChange={e => setPick(e.target.value)}
+          style={{ flex:1, padding:"7px 10px", borderRadius:9, background:"var(--card-2)", color:"var(--text)", border:"1px solid var(--border)", fontSize:13 }} />
+      </div>
+      <div style={{ display:"flex", gap:8 }}>
+        <button onClick={() => move("before")} style={{ flex:1, border:0, borderRadius:10, padding:"10px", background:"var(--card-2)", color:"var(--text)", fontSize:13, fontWeight:600, cursor:"pointer" }}>← {t("Giorno prima")}</button>
+        <button onClick={() => move("after")} style={{ flex:1, border:0, borderRadius:10, padding:"10px", background:"var(--card-2)", color:"var(--text)", fontSize:13, fontWeight:600, cursor:"pointer" }}>{t("Giorno dopo")} →</button>
+      </div>
+      {active.length > 0 && (
+        <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+          {active.map(k => (
+            <div key={k} style={{ display:"flex", alignItems:"center", gap:8, fontSize:12.5 }}>
+              <span className="num" style={{ flex:1 }}>{k} → {config.overrides[k]}</span>
+              <button onClick={() => clearOverride(k)} style={{ border:0, background:"transparent", color:"var(--danger)", fontSize:12, cursor:"pointer" }}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const Promemoria = ({ device, onNav }) => {
   const isDesktop = device === "desktop";
