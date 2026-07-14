@@ -18,29 +18,29 @@
 <meta name="apple-mobile-web-app-title" content="Fitness Hub" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <link rel="manifest" href="manifest.json" />
-<link rel="stylesheet" href="styles.css?v=20260714151926" />
+<link rel="stylesheet" href="styles.css?v=20260714152556" />
 <style>
-  /* Banda nera in basso su iOS standalone — CAUSA RADICE provata on-device con
-     diagnostica a colori (banda = VERDE = body): #root con position:fixed NON arriva
-     al fondo fisico dello schermo (iOS standalone lo vincola al viewport "safe"),
-     mentre body height:100% SÌ → sotto #root spuntava lo sfondo scuro di body = la banda.
-     FIX: niente più #root fixed. body è il contenitore flex a tutta altezza e #root lo
-     riempie (flex:1) → arriva al fondo reale. La safe-area inferiore è coperta dal
-     padding-bottom della TabBar; la sottile striscia home-indicator (non dipingibile
-     dalla pagina) resta gestita da <meta theme-color> media-scoped.
-     1) striscia sottile home-indicator → theme-color (sopra).
-     2) fascia grande scura → risolta da body-flex + #root flex:1 (qui sotto). */
-  html { height: 100%; margin: 0; background: var(--safe-bg, #0b0b0f); }
+  /* Banda nera in basso su iOS standalone — CAUSA RADICE MISURATA on-device (PWA):
+     innerH/clientH/height:100%/position:fixed;bottom:0/svh/dvh valgono TUTTI il viewport
+     "piccolo" = 894, mentre lo schermo fisico (screenH) = 956 → i 62px in fondo restavano
+     fuori dal viewport (dipinti neri da iOS) = la banda. MA `100vh` e `100lvh` misurano
+     956 = schermo intero. FIX: il contenitore usa height:100vh→100lvh (956) invece di
+     height:100% (894), così body/#root/.lfh/TabBar arrivano al fondo fisico e la banda
+     sparisce. L'inset top (Dynamic Island) è assorbito dallo spacer StatusBar
+     (env(safe-area-inset-top)); l'inset bottom (home-indicator) dal padding-bottom della
+     TabBar. body overflow:hidden → lo scroll vive in .lfh-scroll. */
+  html { height: 100vh; height: 100lvh; margin: 0; background: var(--safe-bg, #0b0b0f); }
   body {
-    height: 100%;
+    height: 100vh;                /* viewport grande = schermo intero su iOS standalone… */
+    height: 100lvh;               /* …con lvh esplicito dove supportato (iOS ≥15.4) */
     margin: 0;
     overflow: hidden;             /* lo scroll vive in .lfh-scroll */
     background: var(--bg, #0b0b0f);
-    display: flex;                /* body = contenitore a tutta altezza (raggiunge il fondo iOS) */
+    display: flex;                /* body = contenitore a tutta altezza reale (956) */
     flex-direction: column;
   }
   #root {
-    flex: 1 1 auto;               /* riempie body → arriva al fondo fisico, niente banda */
+    flex: 1 1 auto;               /* riempie body (956) → arriva al fondo fisico, niente banda */
     min-height: 0;
     display: flex;
     align-items: stretch;
@@ -95,44 +95,6 @@
 })();
 </script>
 
-<!-- ===== SONDA GEOMETRIA (TEMPORANEA — da rimuovere dopo la diagnosi banda) =====
-     Riquadro rosso in alto a sinistra: stampa le altezze reali sul device così
-     capiamo esattamente dove l'app non arriva al fondo. -->
-<script>
-window.addEventListener('load', function () {
-  var probe = document.createElement('div');
-  probe.style.cssText = 'position:fixed;bottom:0;left:0;width:1px;height:env(safe-area-inset-bottom);pointer-events:none;';
-  document.body.appendChild(probe);
-  var box = document.createElement('div');
-  box.style.cssText = 'position:fixed;top:calc(env(safe-area-inset-top) + 6px);left:8px;z-index:2147483647;background:rgba(220,0,0,.9);color:#fff;font:12px/1.45 ui-monospace,monospace;padding:8px 10px;border-radius:8px;pointer-events:none;white-space:pre;';
-  document.body.appendChild(box);
-  // Barra magenta ancorata a bottom:0 → se raggiunge il fondo FISICO dello schermo,
-  // allora bottom:0 tocca il fondo (banda dipingibile); se resta una striscia nera
-  // SOTTO la magenta, quella striscia è fuori dal viewport (la dipinge iOS).
-  var bar = document.createElement('div');
-  bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;height:46px;background:magenta;z-index:2147483646;pointer-events:none;';
-  document.body.appendChild(bar);
-  function bot(el){ return el ? Math.round(el.getBoundingClientRect().bottom) : -1; }
-  function hgt(el){ return el ? Math.round(el.getBoundingClientRect().height) : -1; }
-  function uh(unit){ var e=document.createElement('div'); e.style.cssText='position:fixed;top:0;left:0;width:1px;visibility:hidden;height:'+unit+';'; document.body.appendChild(e); var h=Math.round(e.getBoundingClientRect().height); e.remove(); return h; }
-  function upd(){
-    var root = document.getElementById('root');
-    var nav  = document.querySelector('nav');
-    box.textContent =
-      'standalone=' + (navigator.standalone ? 'yes' : 'no') +
-      '\ninnerH  =' + window.innerHeight +
-      '\nscreenH =' + window.screen.height +
-      '\nsafeBot =' + Math.round(probe.getBoundingClientRect().height) +
-      '\nvh =' + uh('100vh') + ' svh=' + uh('100svh') +
-      '\nlvh=' + uh('100lvh') + ' dvh=' + uh('100dvh') +
-      '\nroot.bot=' + bot(root) +
-      '\nnav.bot =' + bot(nav) +
-      '\nbar.bot =' + bot(bar) + ' (magenta)';
-  }
-  setInterval(upd, 500); upd();
-});
-</script>
-
 <!-- React + Babel -->
 <!-- production.min: build minificata (10KB+132KB vs 110KB+1MB dev), niente warning
      di sviluppo in console. Per debug locale si può tornare a *.development.js. -->
@@ -148,30 +110,30 @@ window.addEventListener('load', function () {
 <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js" crossorigin="anonymous"></script>
 <script>if (typeof Recharts !== 'undefined') window.Recharts = Recharts;</script>
 
-<!-- Core utilities (?v=20260714151926: versionato, bumpato a ogni deploy → niente cache stale) -->
-<script type="text/babel" src="storage.jsx?v=20260714151926"></script>
-<script type="text/babel" src="api.jsx?v=20260714151926"></script>
-<script type="text/babel" src="parser.jsx?v=20260714151926"></script>
+<!-- Core utilities (?v=20260714152556: versionato, bumpato a ogni deploy → niente cache stale) -->
+<script type="text/babel" src="storage.jsx?v=20260714152556"></script>
+<script type="text/babel" src="api.jsx?v=20260714152556"></script>
+<script type="text/babel" src="parser.jsx?v=20260714152556"></script>
 
 <!-- Components -->
-<script type="text/babel" src="i18n.jsx?v=20260714151926"></script>
-<script type="text/babel" src="icons.jsx?v=20260714151926"></script>
-<script type="text/babel" src="ui.jsx?v=20260714151926"></script>
-<script type="text/babel" src="anatomy.jsx?v=20260714151926"></script>
-<script type="text/babel" src="nav.jsx?v=20260714151926"></script>
+<script type="text/babel" src="i18n.jsx?v=20260714152556"></script>
+<script type="text/babel" src="icons.jsx?v=20260714152556"></script>
+<script type="text/babel" src="ui.jsx?v=20260714152556"></script>
+<script type="text/babel" src="anatomy.jsx?v=20260714152556"></script>
+<script type="text/babel" src="nav.jsx?v=20260714152556"></script>
 
 <!-- Screens -->
-<script type="text/babel" src="screens/onboarding.jsx?v=20260714151926"></script>
-<script type="text/babel" src="screens/dashboard.jsx?v=20260714151926"></script>
-<script type="text/babel" src="screens/scheda.jsx?v=20260714151926"></script>
-<script type="text/babel" src="screens/dieta.jsx?v=20260714151926"></script>
-<script type="text/babel" src="screens/spesa.jsx?v=20260714151926"></script>
-<script type="text/babel" src="screens/coach.jsx?v=20260714151926"></script>
-<script type="text/babel" src="screens/storico.jsx?v=20260714151926"></script>
-<script type="text/babel" src="screens/impostazioni.jsx?v=20260714151926"></script>
+<script type="text/babel" src="screens/onboarding.jsx?v=20260714152556"></script>
+<script type="text/babel" src="screens/dashboard.jsx?v=20260714152556"></script>
+<script type="text/babel" src="screens/scheda.jsx?v=20260714152556"></script>
+<script type="text/babel" src="screens/dieta.jsx?v=20260714152556"></script>
+<script type="text/babel" src="screens/spesa.jsx?v=20260714152556"></script>
+<script type="text/babel" src="screens/coach.jsx?v=20260714152556"></script>
+<script type="text/babel" src="screens/storico.jsx?v=20260714152556"></script>
+<script type="text/babel" src="screens/impostazioni.jsx?v=20260714152556"></script>
 
 <!-- App frame -->
-<script type="text/babel" src="app.jsx?v=20260714151926"></script>
+<script type="text/babel" src="app.jsx?v=20260714152556"></script>
 
 <!-- Mount: auto-detect device -->
 <script type="text/babel" data-presets="env,react">
