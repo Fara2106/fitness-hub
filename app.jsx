@@ -20,7 +20,6 @@ const Screen = ({ which, device, state, set, globalCtx }) => {
         {...pass}
         activities={state.activities} addActivity={(a) => set(st => ({ ...st, activities: [{ ...a, id: Date.now(), when: "Oggi" }, ...st.activities] }))}
         checkIn={state.checkIn} setCheckIn={(v) => set(st => ({ ...st, checkIn: v }))}
-        healthData={state.healthData}
         bodyWeight={state.bodyWeight}
         setBodyWeight={(v) => set(st => ({ ...st, bodyWeight: v }))}
       />;
@@ -40,7 +39,7 @@ const Screen = ({ which, device, state, set, globalCtx }) => {
         setSpesaFreq={(v) => set(st => ({ ...st, spesaFreq: v }))}
       />;
     case "coach":
-      return <Coach {...pass} activities={state.activities} checkIn={state.checkIn} healthData={state.healthData} bodyWeight={state.bodyWeight} />;
+      return <Coach {...pass} activities={state.activities} checkIn={state.checkIn} bodyWeight={state.bodyWeight} />;
     case "storico":
       return <Storico {...pass} />;
     case "impostazioni":
@@ -346,7 +345,6 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
       isHome:       false,
       activities:   st.get("activities", []),
       checkIn:      st.get(`checkIn_${today}`, { sleep: 4, energy: 4, ailments: "" }),
-      healthData:   st.get("healthData", null),
       bodyWeight:   st.get("bodyWeight", 100),
       theme:        st.get("theme", "system"), // default: segue il sistema (Mac/iOS)
       spesaChecked: st.get("spesaChecked", {}),
@@ -354,19 +352,9 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
     };
   }
 
-  const [state, setStateRaw] = React.useState({ screen: initialScreen, scheda: "Upper A", isHome: false, activities: [], checkIn: { sleep: 4, energy: 4, ailments: "" }, healthData: null, bodyWeight: 100, theme: "system", spesaChecked: {}, spesaFreq: 1 });
+  const [state, setStateRaw] = React.useState({ screen: initialScreen, scheda: "Upper A", isHome: false, activities: [], checkIn: { sleep: 4, energy: 4, ailments: "" }, bodyWeight: 100, theme: "system", spesaChecked: {}, spesaFreq: 1 });
   const [lang, setLang] = React.useState(window.storage ? window.storage.get("lang", "it") : "it");
   const [initialized, setInitialized] = React.useState(false);
-
-  // Legge acqua+calorie da Apple Salute (via push-worker /healthdata) e le mette in stato.
-  const pullHealth = React.useCallback(() => {
-    if (!window.healthAPI) return;
-    window.healthAPI.get().then(d => {
-      if (!d) return;
-      if (window.storage) window.storage.set("healthData", d);
-      setStateRaw(prev => ({ ...prev, healthData: d }));
-    });
-  }, []);
 
   React.useEffect(() => {
     if (!storageReady || initialized) return;
@@ -376,7 +364,6 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
       setStateRaw(s);
       setLang(window.storage ? window.storage.get("lang", "it") : "it");
       setInitialized(true);
-      pullHealth();
     });
   }, [storageReady]);
 
@@ -438,7 +425,6 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
     // Pull dal cloud + riallinea lo stato React condiviso
     const pullAndApply = () => {
       if (document.visibilityState !== "visible") return;
-      pullHealth();
       _cloudSync({ pesiMs: 6000, settingsMs: 8000 }).finally(() => {
         const s = initState();
         setStateRaw(prev => ({

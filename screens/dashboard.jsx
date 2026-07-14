@@ -92,54 +92,6 @@ const CheckScale = ({ label, value, onChange }) => (
   </div>
 );
 
-// ── Idratazione (sola lettura da Apple Salute) ─────────────────────────────
-const HydrationCard = ({ healthData }) => {
-  const t = useT();
-  const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
-  const fresh = healthData && healthData.date === today && typeof healthData.waterMl === "number";
-  const waterMl = fresh ? healthData.waterMl : 0;
-  const upd = fresh && healthData.updatedAt
-    ? new Date(healthData.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
-  return (
-    <div className="ui-card">
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        <span className="ui-cap">{t("Idratazione")}</span>
-        {fresh
-          ? <span className="tnum" style={{ fontSize: 13, fontWeight: 700 }}>
-              {(waterMl / 1000).toFixed(2)}<span style={{ color: "var(--text-2)", fontWeight: 500 }}> / 3.00 L</span>
-            </span>
-          : <span style={{ fontSize: 11, color: "var(--text-3)" }}>{t("Nessun dato da Salute oggi")}</span>}
-      </div>
-      {fresh && <div><UIProgress value={waterMl / 3000} /></div>}
-      <div style={{ marginTop: 8, fontSize: 10.5, color: "var(--text-3)" }}>
-        {upd ? `${t("da Apple Salute")} · ${t("agg.")} ${upd}` : t("Registra l'acqua in Apple Salute")}
-      </div>
-    </div>
-  );
-};
-
-// ── Calorie bruciate (sola lettura da Apple Salute) ────────────────────────
-const CalorieCard = ({ healthData }) => {
-  const t = useT();
-  const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
-  const fresh = healthData && healthData.date === today && typeof healthData.kcal === "number";
-  const upd = fresh && healthData.updatedAt
-    ? new Date(healthData.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
-  return (
-    <div className="ui-card">
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span className="ui-cap">{t("Calorie bruciate")}</span>
-        {fresh
-          ? <span className="tnum" style={{ fontSize: 15, fontWeight: 700 }}>
-              {Math.round(healthData.kcal)}<span style={{ color: "var(--text-2)", fontSize: 11, fontWeight: 500 }}> kcal</span>
-            </span>
-          : <span style={{ fontSize: 11, color: "var(--text-3)" }}>{t("Nessun dato da Salute oggi")}</span>}
-      </div>
-      {upd && <div style={{ marginTop: 6, fontSize: 10.5, color: "var(--text-3)" }}>{`${t("da Apple Salute")} · ${t("agg.")} ${upd}`}</div>}
-    </div>
-  );
-};
-
 // ── Movimento / Cardio log (retained) ──────────────────────────────────────
 const MovimentoCard = ({ activities, addActivity, isDesktop }) => {
   const t = useT();
@@ -284,7 +236,7 @@ const ActivityLogger = ({ onClose, onSave, isDesktop }) => {
 };
 
 // ── Main Dashboard ─────────────────────────────────────────────────────────
-const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn, healthData, bodyWeight, setBodyWeight }) => {
+const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn, bodyWeight, setBodyWeight }) => {
   const isDesktop = device === "desktop";
   const t = useT();
   const { lang } = useLang();
@@ -449,8 +401,6 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
       </div>
 
       {/* Secondarie */}
-      <HydrationCard healthData={healthData} />
-      <CalorieCard healthData={healthData} />
       <MovimentoCard activities={activities} addActivity={addActivity} isDesktop={isDesktop} />
 
       {/* Riepilogo muscoli settimana (retained) */}
