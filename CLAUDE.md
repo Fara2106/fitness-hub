@@ -51,7 +51,7 @@ An agent/sandbox has no GitHub credentials and limited `.git` access: **only edi
 - `_cloudSync(opts)` pulls `getPesoCorporeo` + `getSettings` with per-call timeouts. **Anti-clobber: if the settings pull fails, `cloudKeys=null` and nothing is pushed** (prevents re-pushing stale local data). Cloud-wins on conflicts (last-writer-wins; no field-level merge).
 - `_cloudPushMissing` pushes (with retry) only keys present locally but absent in cloud, and only if the pull succeeded.
 - Periodic pull every 45s while visible + re-sync on `visibilitychange` foreground.
-- Synced keys: `groqApiKey`, `schedaData`/`dietaData`, `spesaChecked2`, `spesaFreq`, `bodyWeight`, `weekNum`, `onboardingDone`.
+- Synced keys: `groqApiKey`, `schedaData`/`dietaData`, `spesaChecked2`, `spesaFreq`, `bodyWeight`, `onboardingDone`. (Mesociclo/`weekNum` and RPE were removed from the app on 2026-07-14; the Sheets `Settimana`/`RPE` columns remain physically but now receive 0.)
 - **Shopping list gotcha:** cloud key is `spesaChecked2` (the legacy `spesaChecked` caused duplicate rows); local key stays `spesaChecked`. Pull is back-compat: `s.spesaChecked2 || s.spesaChecked`.
 
 ## Recurring bug family — "bleed between workout days"
@@ -62,8 +62,8 @@ Workout progress (completion/substitutions/pesos) persists per day+tab in `sched
 
 ## Domain reference
 
-- Training: Upper/Lower split, 3×/week on an 8-week mesocycle — Upper A (Mon), Lower (Wed), Upper B (Fri); cardio (walk + elliptical) on rest days. `getTodaySession()` maps weekday → session.
-- AI Coach (`screens/coach.jsx`, `_buildSystemPrompt`): feeds weight, mesocycle week, today's session, check-in, hydration, recent cardio, day notes, `schedaData`/`dietaData` (≤3000 chars, hardcoded fallback). Replies in the app language (IT/EN). **Always excludes from diet: chickpea pasta, lentils, peas, almond drink.**
+- Training: Upper/Lower split, 3×/week — Upper A (Mon), Lower (Wed), Upper B (Fri); cardio (walk + elliptical) on rest days. `getTodaySession()` maps weekday → session. (Mesociclo counter removed 2026-07-14.)
+- AI Coach (`screens/coach.jsx`, `_buildSystemPrompt`): feeds weight, today's session, check-in, hydration, recent cardio, day notes, `schedaData`/`dietaData` (≤3000 chars, hardcoded fallback). Replies in the app language (IT/EN). **Always excludes from diet: chickpea pasta, lentils, peas, almond drink.** (No RPE/mesociclo references — both removed 2026-07-14.)
 - Theme: default `"system"` (follows macOS/iOS via `prefers-color-scheme`, with anti-flash script in `index.html` `<head>`). Dark default; light adds `theme-light` on `<html>`. Use CSS vars (`--bg --card --text --border --accent --nav-bg --track …`); never hardcode colors. Anti-flash also updates `<meta name="theme-color">`.
 - i18n in `i18n.jsx` (IT/EN). Food names in Diet/Spesa stay Italian by design (plan data, not UI).
 - Local data files `scheda.txt` / `dieta.txt` are parsed by `parser.jsx`; both have hardcoded fallbacks if absent.

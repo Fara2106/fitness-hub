@@ -14,7 +14,7 @@ const NAV_ITEMS = [
 const TabBar = ({ screen, onNav }) => {
   const t = useT();
   // Mobile: 6 voci nella tab bar. Lo Storico è raggiungibile da Impostazioni → Progressi
-  // (su desktop è nella Sidebar).
+  // (su desktop è nella Sidebar). Spesa ha la sua tab dedicata in basso.
   const mobileItems = NAV_ITEMS.filter(it => it.id !== "storico");
   return (
     <nav
@@ -25,9 +25,9 @@ const TabBar = ({ screen, onNav }) => {
         padding: "8px 4px 10px",
         paddingBottom: "calc(10px + env(safe-area-inset-bottom))",
         background: "var(--nav-bg)", // theme-aware: si adatta a dark/light
-        backdropFilter: "blur(20px)",
-        WebkitBackdropFilter: "blur(20px)",
-        borderTop: "1px solid var(--border)",
+        backdropFilter: "blur(26px)",
+        WebkitBackdropFilter: "blur(26px)",
+        borderTop: "1px solid var(--hair)",
         position: "relative",
         zIndex: 5,
       }}
@@ -52,7 +52,7 @@ const TabBar = ({ screen, onNav }) => {
               transition: "color 0.16s",
             }}
           >
-            <Icon name={it.icon} size={22} strokeWidth={on ? 2 : 1.6} />
+            <Icon name={it.icon} size={24} strokeWidth={on ? 2.1 : 1.9} />
             <span style={{ fontSize: 9.5, fontWeight: on ? 600 : 500, letterSpacing: -0.005 }}>{t(it.label)}</span>
           </button>
         );
@@ -64,7 +64,6 @@ const TabBar = ({ screen, onNav }) => {
 // — Desktop left sidebar —
 const Sidebar = ({ screen, onNav }) => {
   const t = useT();
-  const weekNum = window.storage ? window.storage.get("weekNum", 3) : 3;
   const todaySess = window.getTodaySession ? window.getTodaySession() : null;
 
   const labels = {
@@ -151,7 +150,7 @@ const Sidebar = ({ screen, onNav }) => {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 600 }}>Lorenzo</div>
             <div style={{ fontSize: 11, color: "var(--text-2)" }}>
-              {t("Settimana")} {weekNum} · {todaySess ? todaySess.label : t("Riposo")}
+              {todaySess ? todaySess.label : t("Riposo")}
             </div>
           </div>
         </div>

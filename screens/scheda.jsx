@@ -1,41 +1,41 @@
-// scheda.jsx — Workout tracker: sets, RPE, timer, vibration, Sheets sync
+// scheda.jsx — Workout tracker: sets, timer, vibration, Sheets sync
 
 // ── Fallback schedule (used when scheda.txt not loaded) ──────────────────
 const _DEFAULT_DAYS = [
   { num: 1, key: "Upper A", name: "Upper A", focus: ["Petto", "Schiena", "Bicipiti"], altMap: {}, exercises: [
-    { name:"Panca piana con bilanciere", muscles:["petto","tricipiti","spalle"], sets:[{peso:80,rip:9,rpe:7},{peso:82.5,rip:9,rpe:8},{peso:82.5,rip:8,rpe:9},{peso:82.5,rip:8,rpe:9}], rest:90, ripRange:"8-10", history:[], alternatives:["Push-up zavorrati","Push-up con piedi rialzati"] },
-    { name:"Panca inclinata con manubri (30°)", muscles:["petto","spalle"], sets:[{peso:30,rip:11,rpe:7},{peso:30,rip:11,rpe:8},{peso:30,rip:10,rpe:9},{peso:30,rip:10,rpe:9}], rest:90, ripRange:"10-12", history:[], alternatives:["Push-up con piedi su sedia"] },
-    { name:"Croci ai cavi bassi (chest fly)", muscles:["petto"], sets:[{peso:15,rip:13,rpe:7},{peso:15,rip:13,rpe:8},{peso:15,rip:12,rpe:9}], rest:75, ripRange:"12-15", history:[], alternatives:["Croci con elastico"] },
-    { name:"Dips alle parallele", muscles:["petto","tricipiti"], sets:[{peso:0,rip:10,rpe:7},{peso:0,rip:9,rpe:8},{peso:0,rip:8,rpe:9}], rest:90, ripRange:"8-12", history:[], alternatives:["Dips su sedia"] },
-    { name:"Lat machine presa larga (pull-down)", muscles:["schiena","bicipiti"], sets:[{peso:55,rip:11,rpe:7},{peso:60,rip:10,rpe:8},{peso:60,rip:10,rpe:9},{peso:60,rip:9,rpe:9}], rest:90, ripRange:"10-12", history:[], alternatives:["Trazioni","Inverted row su tavolo"] },
-    { name:"Rematore con manubrio su panca (1 braccio)", muscles:["schiena","bicipiti"], sets:[{peso:32,rip:11,rpe:7},{peso:34,rip:10,rpe:8},{peso:34,rip:10,rpe:9}], rest:75, ripRange:"10-12", history:[], alternatives:["Row con zaino zavorrato","Elastico"] },
-    { name:"Alzate laterali con manubri", muscles:["spalle"], sets:[{peso:10,rip:13,rpe:7},{peso:10,rip:12,rpe:8},{peso:10,rip:12,rpe:9}], rest:75, ripRange:"12-15", history:[], alternatives:["Alzate con bottiglie d'acqua"] },
-    { name:"Curl con bilanciere EZ", muscles:["bicipiti"], sets:[{peso:25,rip:11,rpe:7},{peso:27.5,rip:10,rpe:8},{peso:27.5,rip:10,rpe:9}], rest:75, ripRange:"10-12", history:[], alternatives:["Curl con bottiglie"] },
-    { name:"Curl con manubri alternati (martello)", muscles:["bicipiti"], sets:[{peso:14,rip:11,rpe:7},{peso:14,rip:10,rpe:8},{peso:14,rip:10,rpe:9}], rest:75, ripRange:"10-12", history:[], alternatives:["Curl neutrale con bottiglie"] },
+    { name:"Panca piana con bilanciere", muscles:["petto","tricipiti","spalle"], sets:[{peso:80,rip:9},{peso:82.5,rip:9},{peso:82.5,rip:8},{peso:82.5,rip:8}], rest:90, ripRange:"8-10", history:[], alternatives:["Push-up zavorrati","Push-up con piedi rialzati"] },
+    { name:"Panca inclinata con manubri (30°)", muscles:["petto","spalle"], sets:[{peso:30,rip:11},{peso:30,rip:11},{peso:30,rip:10},{peso:30,rip:10}], rest:90, ripRange:"10-12", history:[], alternatives:["Push-up con piedi su sedia"] },
+    { name:"Croci ai cavi bassi (chest fly)", muscles:["petto"], sets:[{peso:15,rip:13},{peso:15,rip:13},{peso:15,rip:12}], rest:75, ripRange:"12-15", history:[], alternatives:["Croci con elastico"] },
+    { name:"Dips alle parallele", muscles:["petto","tricipiti"], sets:[{peso:0,rip:10},{peso:0,rip:9},{peso:0,rip:8}], rest:90, ripRange:"8-12", history:[], alternatives:["Dips su sedia"] },
+    { name:"Lat machine presa larga (pull-down)", muscles:["schiena","bicipiti"], sets:[{peso:55,rip:11},{peso:60,rip:10},{peso:60,rip:10},{peso:60,rip:9}], rest:90, ripRange:"10-12", history:[], alternatives:["Trazioni","Inverted row su tavolo"] },
+    { name:"Rematore con manubrio su panca (1 braccio)", muscles:["schiena","bicipiti"], sets:[{peso:32,rip:11},{peso:34,rip:10},{peso:34,rip:10}], rest:75, ripRange:"10-12", history:[], alternatives:["Row con zaino zavorrato","Elastico"] },
+    { name:"Alzate laterali con manubri", muscles:["spalle"], sets:[{peso:10,rip:13},{peso:10,rip:12},{peso:10,rip:12}], rest:75, ripRange:"12-15", history:[], alternatives:["Alzate con bottiglie d'acqua"] },
+    { name:"Curl con bilanciere EZ", muscles:["bicipiti"], sets:[{peso:25,rip:11},{peso:27.5,rip:10},{peso:27.5,rip:10}], rest:75, ripRange:"10-12", history:[], alternatives:["Curl con bottiglie"] },
+    { name:"Curl con manubri alternati (martello)", muscles:["bicipiti"], sets:[{peso:14,rip:11},{peso:14,rip:10},{peso:14,rip:10}], rest:75, ripRange:"10-12", history:[], alternatives:["Curl neutrale con bottiglie"] },
   ] },
   { num: 2, key: "Lower", name: "Lower", focus: ["Gambe", "Glutei", "Core"], altMap: {}, exercises: [
-    { name:"Squat con bilanciere (back squat)", muscles:["quadricipiti","glutei"], sets:[{peso:100,rip:9,rpe:7},{peso:105,rip:8,rpe:8},{peso:105,rip:8,rpe:9},{peso:105,rip:8,rpe:9}], rest:120, ripRange:"8-10", history:[], alternatives:["Squat con zaino zavorrato","Bulgarian split squat"] },
-    { name:"Leg press 45°", muscles:["quadricipiti","glutei"], sets:[{peso:120,rip:13,rpe:7},{peso:130,rip:12,rpe:8},{peso:130,rip:12,rpe:9}], rest:90, ripRange:"12-15", history:[], alternatives:["Squat sumo","Wall sit"] },
-    { name:"Romanian Deadlift (RDL) con bilanciere", muscles:["femorali","glutei"], sets:[{peso:90,rip:11,rpe:7},{peso:95,rip:10,rpe:8},{peso:95,rip:10,rpe:9},{peso:95,rip:10,rpe:9}], rest:90, ripRange:"10-12", history:[], alternatives:["Stacco a una gamba corpo libero"] },
-    { name:"Affondi con manubri (camminata)", muscles:["quadricipiti","glutei"], sets:[{peso:20,rip:10,rpe:7},{peso:22,rip:10,rpe:8},{peso:22,rip:10,rpe:9}], rest:90, ripRange:"10/gamba", history:[], alternatives:["Affondi statici","Reverse lunge"] },
-    { name:"Leg curl sdraiato (macchina)", muscles:["femorali"], sets:[{peso:50,rip:13,rpe:7},{peso:55,rip:12,rpe:8},{peso:55,rip:12,rpe:9}], rest:75, ripRange:"12-15", history:[], alternatives:["Nordic curl","Leg curl con elastico"] },
-    { name:"Calf raise in piedi (macchina o scalino)", muscles:["polpacci"], sets:[{peso:80,rip:17,rpe:7},{peso:80,rip:17,rpe:8},{peso:80,rip:16,rpe:9},{peso:80,rip:16,rpe:9}], rest:60, ripRange:"15-20", history:[], alternatives:["Calf raise su scalino"] },
-    { name:"Crunch inverso a terra", muscles:["addome"], sets:[{peso:0,rip:17,rpe:7},{peso:0,rip:17,rpe:8},{peso:0,rip:17,rpe:9}], rest:60, ripRange:"15-20", history:[], alternatives:["Leg raise sdraiato"] },
-    { name:"Plank isometrico", muscles:["addome"], sets:[{peso:0,rip:45,rpe:7},{peso:0,rip:50,rpe:8},{peso:0,rip:50,rpe:9}], rest:60, ripRange:"45-60 sec", history:[], alternatives:[] },
-    { name:"Back extension (macchina o panca lombare)", muscles:["schiena"], sets:[{peso:20,rip:13,rpe:7},{peso:25,rip:12,rpe:8},{peso:25,rip:12,rpe:9}], rest:60, ripRange:"12-15", history:[], alternatives:[] },
+    { name:"Squat con bilanciere (back squat)", muscles:["quadricipiti","glutei"], sets:[{peso:100,rip:9},{peso:105,rip:8},{peso:105,rip:8},{peso:105,rip:8}], rest:120, ripRange:"8-10", history:[], alternatives:["Squat con zaino zavorrato","Bulgarian split squat"] },
+    { name:"Leg press 45°", muscles:["quadricipiti","glutei"], sets:[{peso:120,rip:13},{peso:130,rip:12},{peso:130,rip:12}], rest:90, ripRange:"12-15", history:[], alternatives:["Squat sumo","Wall sit"] },
+    { name:"Romanian Deadlift (RDL) con bilanciere", muscles:["femorali","glutei"], sets:[{peso:90,rip:11},{peso:95,rip:10},{peso:95,rip:10},{peso:95,rip:10}], rest:90, ripRange:"10-12", history:[], alternatives:["Stacco a una gamba corpo libero"] },
+    { name:"Affondi con manubri (camminata)", muscles:["quadricipiti","glutei"], sets:[{peso:20,rip:10},{peso:22,rip:10},{peso:22,rip:10}], rest:90, ripRange:"10/gamba", history:[], alternatives:["Affondi statici","Reverse lunge"] },
+    { name:"Leg curl sdraiato (macchina)", muscles:["femorali"], sets:[{peso:50,rip:13},{peso:55,rip:12},{peso:55,rip:12}], rest:75, ripRange:"12-15", history:[], alternatives:["Nordic curl","Leg curl con elastico"] },
+    { name:"Calf raise in piedi (macchina o scalino)", muscles:["polpacci"], sets:[{peso:80,rip:17},{peso:80,rip:17},{peso:80,rip:16},{peso:80,rip:16}], rest:60, ripRange:"15-20", history:[], alternatives:["Calf raise su scalino"] },
+    { name:"Crunch inverso a terra", muscles:["addome"], sets:[{peso:0,rip:17},{peso:0,rip:17},{peso:0,rip:17}], rest:60, ripRange:"15-20", history:[], alternatives:["Leg raise sdraiato"] },
+    { name:"Plank isometrico", muscles:["addome"], sets:[{peso:0,rip:45},{peso:0,rip:50},{peso:0,rip:50}], rest:60, ripRange:"45-60 sec", history:[], alternatives:[] },
+    { name:"Back extension (macchina o panca lombare)", muscles:["schiena"], sets:[{peso:20,rip:13},{peso:25,rip:12},{peso:25,rip:12}], rest:60, ripRange:"12-15", history:[], alternatives:[] },
   ] },
   { num: 3, key: "Upper B", name: "Upper B", focus: ["Schiena", "Spalle", "Tricipiti"], altMap: {}, exercises: [
-    { name:"Military press (bilanciere)", muscles:["spalle","tricipiti"], sets:[{peso:50,rip:8,rpe:7},{peso:52.5,rip:7,rpe:8},{peso:52.5,rip:6,rpe:9}], rest:120, ripRange:"6-10", history:[], alternatives:["Lento manubri","Push press"] },
-    { name:"Trazioni o Lat machine presa stretta", muscles:["schiena","bicipiti"], sets:[{peso:-20,rip:10,rpe:7},{peso:-15,rip:8,rpe:8},{peso:-10,rip:7,rpe:9}], rest:120, ripRange:"8-12", history:[], alternatives:["Lat machine presa stretta","Pulley alto"] },
-    { name:"Rematore con bilanciere (pendlay row)", muscles:["schiena"], sets:[{peso:70,rip:8,rpe:7},{peso:72.5,rip:8,rpe:8},{peso:72.5,rip:7,rpe:9}], rest:90, ripRange:"6-10", history:[], alternatives:["Rematore T-bar","Chest-supported row"] },
-    { name:"Panca stretta (tricipiti)", muscles:["tricipiti","petto"], sets:[{peso:60,rip:10,rpe:7},{peso:62.5,rip:9,rpe:8},{peso:62.5,rip:8,rpe:9}], rest:90, ripRange:"8-12", history:[], alternatives:["Push-up presa stretta","Dips verticali"] },
-    { name:"Face pull (cavo alto)", muscles:["spalle","trapezi"], sets:[{peso:25,rip:15,rpe:7},{peso:27.5,rip:13,rpe:8},{peso:27.5,rip:13,rpe:9}], rest:75, ripRange:"12-15", history:[], alternatives:["Alzate posteriori manubri"] },
-    { name:"Alzate laterali con manubri", muscles:["spalle"], sets:[{peso:10,rip:13,rpe:7},{peso:10,rip:13,rpe:8},{peso:10,rip:12,rpe:9}], rest:75, ripRange:"12-15", history:[], alternatives:["Alzate laterali cavo","Alzate con bottiglie"] },
-    { name:"Skull crusher (EZ barra)", muscles:["tricipiti"], sets:[{peso:30,rip:11,rpe:7},{peso:32.5,rip:10,rpe:8},{peso:32.5,rip:10,rpe:9}], rest:75, ripRange:"10-12", history:[], alternatives:["Push-down cavo"] },
-    { name:"Curl con manubri alternati", muscles:["bicipiti"], sets:[{peso:14,rip:11,rpe:7},{peso:14,rip:10,rpe:8},{peso:14,rip:10,rpe:9}], rest:75, ripRange:"10-12", history:[], alternatives:["Curl EZ","Curl cavo"] },
-    { name:"Shrug con manubri o bilanciere", muscles:["trapezi"], sets:[{peso:30,rip:13,rpe:7},{peso:32.5,rip:12,rpe:8},{peso:32.5,rip:12,rpe:9}], rest:75, ripRange:"12-15", history:[], alternatives:[] },
-    { name:"Crunch inverso a terra", muscles:["addome"], sets:[{peso:0,rip:17,rpe:7},{peso:0,rip:17,rpe:8},{peso:0,rip:16,rpe:9}], rest:60, ripRange:"15-20", history:[], alternatives:["Leg raise sdraiato"] },
-    { name:"Plank isometrico", muscles:["addome"], sets:[{peso:0,rip:45,rpe:7},{peso:0,rip:50,rpe:8},{peso:0,rip:50,rpe:9}], rest:60, ripRange:"45-60 sec", history:[], alternatives:[] },
+    { name:"Military press (bilanciere)", muscles:["spalle","tricipiti"], sets:[{peso:50,rip:8},{peso:52.5,rip:7},{peso:52.5,rip:6}], rest:120, ripRange:"6-10", history:[], alternatives:["Lento manubri","Push press"] },
+    { name:"Trazioni o Lat machine presa stretta", muscles:["schiena","bicipiti"], sets:[{peso:-20,rip:10},{peso:-15,rip:8},{peso:-10,rip:7}], rest:120, ripRange:"8-12", history:[], alternatives:["Lat machine presa stretta","Pulley alto"] },
+    { name:"Rematore con bilanciere (pendlay row)", muscles:["schiena"], sets:[{peso:70,rip:8},{peso:72.5,rip:8},{peso:72.5,rip:7}], rest:90, ripRange:"6-10", history:[], alternatives:["Rematore T-bar","Chest-supported row"] },
+    { name:"Panca stretta (tricipiti)", muscles:["tricipiti","petto"], sets:[{peso:60,rip:10},{peso:62.5,rip:9},{peso:62.5,rip:8}], rest:90, ripRange:"8-12", history:[], alternatives:["Push-up presa stretta","Dips verticali"] },
+    { name:"Face pull (cavo alto)", muscles:["spalle","trapezi"], sets:[{peso:25,rip:15},{peso:27.5,rip:13},{peso:27.5,rip:13}], rest:75, ripRange:"12-15", history:[], alternatives:["Alzate posteriori manubri"] },
+    { name:"Alzate laterali con manubri", muscles:["spalle"], sets:[{peso:10,rip:13},{peso:10,rip:13},{peso:10,rip:12}], rest:75, ripRange:"12-15", history:[], alternatives:["Alzate laterali cavo","Alzate con bottiglie"] },
+    { name:"Skull crusher (EZ barra)", muscles:["tricipiti"], sets:[{peso:30,rip:11},{peso:32.5,rip:10},{peso:32.5,rip:10}], rest:75, ripRange:"10-12", history:[], alternatives:["Push-down cavo"] },
+    { name:"Curl con manubri alternati", muscles:["bicipiti"], sets:[{peso:14,rip:11},{peso:14,rip:10},{peso:14,rip:10}], rest:75, ripRange:"10-12", history:[], alternatives:["Curl EZ","Curl cavo"] },
+    { name:"Shrug con manubri o bilanciere", muscles:["trapezi"], sets:[{peso:30,rip:13},{peso:32.5,rip:12},{peso:32.5,rip:12}], rest:75, ripRange:"12-15", history:[], alternatives:[] },
+    { name:"Crunch inverso a terra", muscles:["addome"], sets:[{peso:0,rip:17},{peso:0,rip:17},{peso:0,rip:16}], rest:60, ripRange:"15-20", history:[], alternatives:["Leg raise sdraiato"] },
+    { name:"Plank isometrico", muscles:["addome"], sets:[{peso:0,rip:45},{peso:0,rip:50},{peso:0,rip:50}], rest:60, ripRange:"45-60 sec", history:[], alternatives:[] },
   ] },
 ];
 
@@ -149,8 +149,14 @@ const TimerOverlay = ({ seconds, onClose }) => {
             : "radial-gradient(circle, rgba(10,132,255,0.4), transparent 70%)",
         }} />
         <svg viewBox="0 0 200 200" width="220" height="220" style={{ position: "relative", transform: "rotate(-90deg)" }}>
-          <circle cx="100" cy="100" r={R} stroke="rgba(255,255,255,0.06)" strokeWidth="6" fill="none" />
-          <circle cx="100" cy="100" r={R} stroke={done ? "var(--success)" : "var(--accent)"} strokeWidth="6" fill="none"
+          <defs>
+            <linearGradient id="timerGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stopColor="#0A84FF" />
+              <stop offset="1" stopColor="#5E5CE6" />
+            </linearGradient>
+          </defs>
+          <circle cx="100" cy="100" r={R} stroke="rgba(255,255,255,0.08)" strokeWidth="8" fill="none" />
+          <circle cx="100" cy="100" r={R} stroke={done ? "var(--success)" : "url(#timerGrad)"} strokeWidth="8" fill="none"
             strokeDasharray={C} strokeDashoffset={dashOffset} strokeLinecap="round"
             style={{ transition: "stroke-dashoffset 1s linear" }} />
         </svg>
@@ -161,8 +167,8 @@ const TimerOverlay = ({ seconds, onClose }) => {
           <div className="num" style={{ fontSize: 56, fontWeight: 600, letterSpacing: -0.04 }}>
             {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}
           </div>
-          <div className="muted" style={{ fontSize: 11, letterSpacing: 0.5, textTransform: "uppercase", fontWeight: 600 }}>
-            {t("min · sec")}
+          <div className="muted" style={{ fontSize: 12, fontWeight: 500 }}>
+            {t("di")} {Math.floor(total / 60)}:{String(total % 60).padStart(2, "0")}
           </div>
         </div>
       </div>
@@ -179,12 +185,11 @@ const TimerOverlay = ({ seconds, onClose }) => {
 };
 
 // ── Set row ────────────────────────────────────────────────────────────────
-const SetRow = ({ s, idx, completed, onToggle, peso, onPesoChange, isPR, rpeAdjust = 0 }) => {
-  const effRpe = Math.min(10, Math.max(1, s.rpe + rpeAdjust));
+const SetRow = ({ s, idx, completed, onToggle, peso, onPesoChange, isPR }) => {
   return (
     <div style={{
       display: "grid",
-      gridTemplateColumns: "26px 1.4fr 0.8fr 0.8fr 36px",
+      gridTemplateColumns: "26px 1.4fr 0.8fr 36px",
       gap: 10, alignItems: "center",
       padding: "8px 4px",
       borderTop: "1px solid var(--border)",
@@ -217,15 +222,6 @@ const SetRow = ({ s, idx, completed, onToggle, peso, onPesoChange, isPR, rpeAdju
         )}
       </div>
       <div className="num" style={{ fontSize: 14, fontWeight: 600, textAlign: "center" }}>{s.rip}</div>
-      <div style={{ textAlign: "center" }}>
-        <span className="pill" style={{
-          fontSize: 11, padding: "3px 8px", fontWeight: 600,
-          background: effRpe >= 9 ? "rgba(255,69,58,0.15)" : effRpe >= 8 ? "rgba(255,159,10,0.15)" : "rgba(48,209,88,0.15)",
-          color: effRpe >= 9 ? "#FF453A" : effRpe >= 8 ? "#FF9F0A" : "#30D158",
-        }}>
-          {effRpe}{rpeAdjust !== 0 && <span style={{ opacity: 0.6, marginLeft: 2, fontSize: 9 }}>({rpeAdjust > 0 ? "+" : ""}{rpeAdjust})</span>}
-        </span>
-      </div>
       <button
         onClick={onToggle}
         className={`check ${completed ? "on" : ""}`}
@@ -254,18 +250,16 @@ const HistoryPopover = ({ history, onClose }) => {
         <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--text-3)", letterSpacing: 0.5, textTransform: "uppercase" }}>{t("Storico · ultime 3")}</div>
         <button onClick={onClose} style={{ background: "transparent", border: 0, color: "var(--text-2)", cursor: "pointer", padding: 0, display: "flex" }}><Icon name="x" size={13} /></button>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 0.7fr 0.7fr", gap: 8, alignItems: "center", fontSize: 10.5, color: "var(--text-3)", textTransform: "uppercase", fontWeight: 600, letterSpacing: 0.4, padding: "0 2px 6px", borderBottom: "1px solid var(--border)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 0.7fr", gap: 8, alignItems: "center", fontSize: 10.5, color: "var(--text-3)", textTransform: "uppercase", fontWeight: 600, letterSpacing: 0.4, padding: "0 2px 6px", borderBottom: "1px solid var(--border)" }}>
         <div>{t("Quando")}</div>
         <div style={{ textAlign: "right" }}>{t("Peso")}</div>
         <div style={{ textAlign: "center" }}>{t("Rip")}</div>
-        <div style={{ textAlign: "center" }}>RPE</div>
       </div>
       {history.slice(0, 3).map((h, i) => (
-        <div key={i} style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 0.7fr 0.7fr", gap: 8, alignItems: "center", padding: "7px 2px", borderTop: i > 0 ? "1px solid var(--border)" : 0 }}>
+        <div key={i} style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 0.7fr", gap: 8, alignItems: "center", padding: "7px 2px", borderTop: i > 0 ? "1px solid var(--border)" : 0 }}>
           <div style={{ fontSize: 12, color: i === 0 ? "var(--text)" : "var(--text-2)", fontWeight: i === 0 ? 600 : 500 }}>{h.when || h.date}</div>
           <div className="num" style={{ fontSize: 13, fontWeight: 600, textAlign: "right" }}>{h.peso} <span style={{ color: "var(--text-3)", fontSize: 10, fontWeight: 500 }}>kg</span></div>
           <div className="num" style={{ fontSize: 12, textAlign: "center", color: "var(--text-2)" }}>{h.rip}</div>
-          <div className="num" style={{ fontSize: 12, textAlign: "center", color: "var(--text-2)" }}>{h.rpe}</div>
         </div>
       ))}
     </div>
@@ -334,7 +328,7 @@ const Confetti = () => {
 const ExerciseCard = ({
   ex, completed, onToggleSet, onRest,
   occupied, onOccupied, isDesktop,
-  rpeAdjust, substituted, onSubstitute,
+  substituted, onSubstitute,
   sheetsWeights, savedPesos, onPesosChange,
 }) => {
   const t = useT();
@@ -381,12 +375,19 @@ const ExerciseCard = ({
     return Math.max(...ex.history.map(h => Number(h.peso) || 0));
   }, [ex.history]);
 
+  // Bordo-sinistro colorato per stato (come nel mockup): fatto / in corso / da fare
+  const doneCount = completed.filter(Boolean).length;
+  const edge = doneCount > 0 && doneCount === ex.sets.length
+    ? "var(--success)"
+    : doneCount > 0 ? "var(--accent)" : "var(--border)";
+
   return (
     <div className="card lift" style={{
       padding: isDesktop ? 22 : 16,
       opacity: occupied ? 0.55 : 1,
       transition: "opacity 0.2s",
       position: "relative",
+      borderLeft: `3px solid ${edge}`,
     }}>
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 8 }}>
@@ -453,7 +454,7 @@ const ExerciseCard = ({
 
       {/* Column headers */}
       <div style={{
-        display: "grid", gridTemplateColumns: "26px 1.4fr 0.8fr 0.8fr 36px",
+        display: "grid", gridTemplateColumns: "26px 1.4fr 0.8fr 36px",
         gap: 10, alignItems: "center",
         padding: "8px 4px 4px",
         fontSize: 10, letterSpacing: 0.6, fontWeight: 600, color: "var(--text-3)", textTransform: "uppercase",
@@ -461,10 +462,6 @@ const ExerciseCard = ({
         <div style={{ textAlign: "center" }}>{t("Set")}</div>
         <div style={{ textAlign: "right", paddingRight: 18 }}>{t("Peso")}</div>
         <div style={{ textAlign: "center" }}>{t("Rip")}</div>
-        <div style={{ textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center", gap: 3 }}>
-          RPE
-          <span title={t("Rate of Perceived Exertion: quanto hai lavorato duramente su scala 1-10. 7 = moderato · 8 = faticoso · 9 = quasi al limite · 10 = massimale")} style={{ cursor: "help", fontSize: 9, background: "var(--card-3)", color: "var(--text-3)", borderRadius: 999, width: 13, height: 13, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>?</span>
-        </div>
         <div />
       </div>
 
@@ -481,7 +478,6 @@ const ExerciseCard = ({
             peso={pesos[i]}
             onPesoChange={(v) => handlePesoChange(i, v)}
             isPR={isPR}
-            rpeAdjust={rpeAdjust}
           />
         );
       })}
@@ -518,7 +514,7 @@ const ExerciseCard = ({
 };
 
 // ── Main Scheda screen ─────────────────────────────────────────────────────
-const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
+const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   const isDesktop = device === "desktop";
   const t = useT();
 
@@ -528,7 +524,6 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
   const [timer, setTimer]             = React.useState(null);
   const [occupied, setOccupied]       = React.useState({});
   const [showConfetti, setShowConfetti] = React.useState(false);
-  const [rpeAdjust, setRpeAdjust]     = React.useState(0);
   const [substitutions, setSubstitutions] = React.useState(() => _loadProg(scheda).substitutions || {});
   const [notes, setNotes]             = React.useState(() => window.storage ? window.storage.get(`notes_${window.todayKey ? window.todayKey() : ""}`, "") : "");
   const [sheetsWeights, setSheetsWeights] = React.useState(null);
@@ -649,7 +644,6 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
         await window.sheetsAPI.saveSessione({
           date: today,
           type: scheda,
-          weekNum: weekNum || 1,
           setsCompleted: completedSets,
           totalSets,
           notes,
@@ -671,9 +665,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
                 setN: setIdx + 1,
                 peso,
                 rip: s.rip,
-                rpe: Math.min(10, Math.max(1, s.rpe + rpeAdjust)),
                 sessione: current.name || scheda,
-                weekNum: weekNum || 1,
               })
             );
           });
@@ -696,21 +688,8 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)", letterSpacing: 0.5, textTransform: "uppercase" }}>{t("Allenamento")} · W{weekNum || "?"}</div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)", letterSpacing: 0.5, textTransform: "uppercase" }}>{t("Allenamento")}</div>
           <h1 style={{ fontSize: isDesktop ? 28 : 24, fontWeight: 600 }}>{t("Scheda")}</h1>
-        </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button
-            className="btn"
-            onClick={() => setRpeAdjust(a => a === 0 ? -1 : 0)}
-            style={{
-              padding: "8px 12px", fontSize: 12.5,
-              background: rpeAdjust !== 0 ? "rgba(255,159,10,0.18)" : "var(--card-2)",
-              color: rpeAdjust !== 0 ? "#FF9F0A" : "var(--text)",
-            }}
-          >
-            {rpeAdjust === 0 ? t("− RPE") : `RPE −1 ✓`}
-          </button>
         </div>
       </div>
 
@@ -725,24 +704,36 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
         }}>
           <span style={{ fontSize: 16 }}>⚠️</span>
           <span>
-            {checkIn.sleep <= 2 ? t("Sonno scarso — valuta RPE −1 su tutti gli esercizi") : t("Energia bassa — ascolta il corpo oggi")}
+            {checkIn.sleep <= 2 ? t("Sonno scarso — riduci l'intensità oggi") : t("Energia bassa — ascolta il corpo oggi")}
           </span>
         </div>
       )}
 
-      {/* Tab pills — giorni numerati G1…GN */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", maxWidth: "100%", overflowX: "auto" }}>
-        <div className="tab-pills">
-          {days.map(d => (
+      {/* Segmented giorni — G# + nome, full-width, robusto fino a 5 giorni dinamici */}
+      <div style={{
+        display: "flex", gap: 4, background: "var(--card-2)", border: "1px solid var(--border)",
+        borderRadius: 12, padding: 4, overflowX: "auto",
+      }}>
+        {days.map(d => {
+          const on = d.key === scheda;
+          return (
             <button
               key={d.key}
-              className={d.key === scheda ? "on" : ""}
               onClick={() => switchTo(d.key)}
+              style={{
+                flex: 1, minWidth: 54, border: "none", cursor: "pointer", borderRadius: 9,
+                padding: "9px 4px", display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+                background: on ? "var(--card)" : "transparent",
+                color: on ? "var(--text)" : "var(--text-2)",
+                boxShadow: on ? "0 1px 4px rgba(0,0,0,.25)" : "none",
+                transition: "background .16s, color .16s",
+              }}
             >
-              {"G" + d.num}
+              <span style={{ fontSize: 13, fontWeight: 600 }}>{"G" + d.num}</span>
+              <span style={{ fontSize: 9, lineHeight: 1, opacity: 0.7, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</span>
             </button>
-          ))}
-        </div>
+          );
+        })}
       </div>
 
       {/* Intestazione giorno: Giorno N · Nome + focus */}
@@ -777,7 +768,6 @@ const Scheda = ({ device, scheda, setScheda, checkIn, weekNum }) => {
             onRest={(s) => setTimer(s)}
             occupied={occupied[i]}
             onOccupied={() => setOccupied(o => ({ ...o, [i]: !o[i] }))}
-            rpeAdjust={rpeAdjust}
             substituted={substitutions[i]}
             onSubstitute={(name) => setSubstitutions(s => ({ ...s, [i]: name }))}
             sheetsWeights={sheetsWeights}

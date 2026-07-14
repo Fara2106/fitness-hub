@@ -11,7 +11,7 @@ const _QUICK_PROMPTS = [
   "Recupero ottimale",
 ];
 
-function _buildSystemPrompt({ activities, checkIn, hydration, weekNum, bodyWeight, lang }) {
+function _buildSystemPrompt({ activities, checkIn, hydration, bodyWeight, lang }) {
   const sess = window.getTodaySession ? window.getTodaySession() : null;
   const sessLabel = sess ? `${sess.label} (${sess.muscles.join(", ")})` : "Riposo";
   const _days = window.getSchedule ? (window.getSchedule().days || []) : [];
@@ -37,10 +37,9 @@ function _buildSystemPrompt({ activities, checkIn, hydration, weekNum, bodyWeigh
   // ── Prompt base ────────────────────────────────────────────────────────────
   // Lingua di risposta del coach: segue la lingua dell'app
   const replyLang = lang === "en" ? "inglese" : "italiano";
-  let prompt = `Sei il personal coach di Lorenzo Faraoni: preciso, motivante, esperto di powerbuilding (RPE, mesocicli, periodizzazione) e nutrizione (bulk lento, timing proteine, manipolazione carbo). Rispondi in ${replyLang}, conciso (2-5 frasi), tono diretto da coach che lo conosce bene da anni.
+  let prompt = `Sei il personal coach di Lorenzo Faraoni: preciso, motivante, esperto di powerbuilding (periodizzazione, progressione) e nutrizione (bulk lento, timing proteine, manipolazione carbo). Rispondi in ${replyLang}, conciso (2-5 frasi), tono diretto da coach che lo conosce bene da anni.
 
 Lorenzo: ${bodyWeight || 77.5}kg, 178cm.
-Mesociclo: Settimana ${weekNum || 1} / 8 · ${_dayCount} sessioni/settimana.
 Oggi: ${dateStr} — ${sessLabel}.
 Ora: ${timeStr} (${timeOfDay}).
 Piano (${_dayCount} giorni, selezione manuale): ${_dayNames || "n/d"}. Cardio: camminata + ellittica nei giorni di riposo.
@@ -51,7 +50,7 @@ ESCLUDERE SEMPRE dalla dieta: pasta di ceci, lenticchie, piselli, bevanda di man
     const lvl = (v) => ["","pessimo","basso","medio","buono","ottimo"][Math.max(1, Math.min(5, v || 3))];
     prompt += `\n\nCheck-in oggi: sonno ${lvl(checkIn.sleep)} (${checkIn.sleep}/5), energia ${lvl(checkIn.energy)} (${checkIn.energy}/5)${checkIn.ailments ? `, fastidi: "${checkIn.ailments}"` : ""}.`;
     if (checkIn.sleep <= 2 || checkIn.energy <= 2) {
-      prompt += ` ⚠️ Recupero scarso — suggerisci RPE −1 o taglio ultima serie se rilevante.`;
+      prompt += ` ⚠️ Recupero scarso — suggerisci di ridurre l'intensità o tagliare l'ultima serie se rilevante.`;
     }
   }
 
@@ -88,7 +87,7 @@ ESCLUDERE SEMPRE dalla dieta: pasta di ceci, lenticchie, piselli, bevanda di man
     prompt += `\n\n=== PIANO ALIMENTARE (file caricato — usa questi dati come riferimento primario) ===\n${txt}`;
   } else {
     // Fallback se il file non è stato caricato
-    prompt += `\n\nDieta: bulk lento — ~2700 kcal giorno allenamento, ~2400 riposo. Proteine: ~180g/die.`;
+    prompt += `\n\nDieta: bulk lento. Proteine: ~180g/die.`;
     prompt += `\nIntegratori: MGK pre-WO, Omnia intra/post, Barretta 4Plus 45g (snack ore 17/21/22).`;
   }
 
@@ -164,7 +163,7 @@ const Bubble = ({ m }) => {
 };
 
 // ── Coach screen ───────────────────────────────────────────────────────────
-const Coach = ({ device, activities = [], checkIn, hydration, weekNum, bodyWeight }) => {
+const Coach = ({ device, activities = [], checkIn, hydration, bodyWeight }) => {
   const isDesktop = device === "desktop";
   const t = useT();
   const { lang } = useLang();
@@ -215,7 +214,7 @@ const Coach = ({ device, activities = [], checkIn, hydration, weekNum, bodyWeigh
 
       const reply = await window.groqAPI.complete({
         messages: history,
-        systemPrompt: _buildSystemPrompt({ activities, checkIn, hydration, weekNum, bodyWeight, lang }),
+        systemPrompt: _buildSystemPrompt({ activities, checkIn, hydration, bodyWeight, lang }),
         model: "llama-3.3-70b-versatile",
         maxTokens: 512,
       });
@@ -264,11 +263,6 @@ const Coach = ({ device, activities = [], checkIn, hydration, weekNum, bodyWeigh
                 : t("Groq · llama-3.3-70b-versatile")}
             </div>
           </div>
-          {weekNum && (
-            <span className="pill" style={{ fontSize: 11, background: "rgba(10,132,255,0.18)", color: "var(--accent)" }}>
-              W{weekNum}
-            </span>
-          )}
           {bodyWeight && (
             <span className="pill num" style={{ fontSize: 11, background: "rgba(48,209,88,0.15)", color: "var(--success)" }}>
               {bodyWeight}kg

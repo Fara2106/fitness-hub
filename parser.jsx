@@ -109,8 +109,8 @@ window.parseScheda = function (text) {
       const ripMatch = ripStr.match(/(\d+)[-–](\d+)/);
       const ripVal = ripMatch ? parseInt(ripMatch[1]) : (parseInt(ripStr) || 10);
       const ripRange = ripStr;
-      const sets = Array.from({ length: setsCount }, (_, si) => ({
-        peso: 0, rip: ripVal, rpe: Math.min(10, 7 + si),
+      const sets = Array.from({ length: setsCount }, () => ({
+        peso: 0, rip: ripVal,
       }));
 
       cur.exercises.push({ name, muscles, sets, rest, notes, ripRange, history: [], alternatives: [] });

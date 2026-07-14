@@ -1,5 +1,5 @@
 // dashboard.jsx — Home (Redesign Fase 2 2026-07)
-// 4 blocchi spec in cima (Hero Oggi · Prossimo pasto · Check-in · StatTile Peso+Mesociclo)
+// 4 blocchi spec in cima (Hero Oggi · Prossimo pasto · Check-in · StatTile Peso)
 // + card secondarie retained sotto (Idratazione · Movimento · Muscoli settimana).
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -274,7 +274,7 @@ const ActivityLogger = ({ onClose, onSave, isDesktop }) => {
 };
 
 // ── Main Dashboard ─────────────────────────────────────────────────────────
-const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn, hydration, setHydration, weekNum, setWeekNum, bodyWeight, setBodyWeight }) => {
+const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn, hydration, setHydration, bodyWeight, setBodyWeight }) => {
   const isDesktop = device === "desktop";
   const t = useT();
   const { lang } = useLang();
@@ -316,8 +316,6 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
     setNewWeight("");
   };
 
-  const safeWeek = Math.max(1, Math.min(8, weekNum));
-
   // Riepilogo settimana (retained): sessioni + muscoli reali dagli ultimi 7 giorni
   const weekGymDays = React.useMemo(() => {
     if (!window.storage) return 0;
@@ -341,15 +339,8 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
 
   const [ailOpen, setAilOpen]   = React.useState(!!(checkIn && checkIn.ailments));
   const [pesoOpen, setPesoOpen] = React.useState(false);
-  const [weekOpen, setWeekOpen] = React.useState(false);
 
   const startWorkout = () => { window._schedaIntent = "player"; onNav("scheda"); };
-
-  const stepperBtn = {
-    width: 56, height: 56, borderRadius: 16, border: "1px solid var(--border)",
-    background: "var(--card-2)", color: "var(--text)", fontSize: 26, fontWeight: 600,
-    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-  };
 
   return (
     <div className="fade-up" style={{ padding: isDesktop ? "28px 40px" : "10px 16px 24px", display: "flex", flexDirection: "column", gap: 12, maxWidth: 640, margin: "0 auto", width: "100%" }}>
@@ -438,15 +429,12 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
         </div>
       </UICard>
 
-      {/* StatTile: Peso + Mesociclo */}
+      {/* StatTile: Peso */}
       <div style={{ display: "flex", gap: 12 }}>
         <UIStatTile cap={t("Peso")} value={latestWeight.toFixed(1)} unit="kg" onClick={() => setPesoOpen(true)}>
           {sparkData.length >= 2
             ? <div style={{ marginTop: 8 }}><Sparkline data={sparkData} width={140} height={40} color="var(--accent)" /></div>
             : <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-3)" }}>{t("Registra il peso per almeno 2 giorni per vedere il trend.")}</div>}
-        </UIStatTile>
-        <UIStatTile cap={t("Mesociclo")} value={safeWeek} unit="/8" onClick={() => setWeekOpen(true)}>
-          <div style={{ marginTop: 10 }}><UIProgress value={safeWeek / 8} /></div>
         </UIStatTile>
       </div>
 
@@ -500,18 +488,6 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
             {weightDelta > 0 ? "+" : ""}{weightDelta.toFixed(1)} kg {t("negli ultimi 14 giorni")}
           </div>
         ) : null}
-      </UISheet>
-
-      {/* Sheet: stepper mesociclo */}
-      <UISheet open={weekOpen} onClose={() => setWeekOpen(false)} title={t("Settimana mesociclo")}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 24, padding: "8px 0 4px" }}>
-          <button aria-label="-1" onClick={() => setWeekNum(Math.max(1, safeWeek - 1))} style={stepperBtn}>−</button>
-          <div className="tnum" style={{ fontSize: 44, fontWeight: 700, minWidth: 96, textAlign: "center" }}>
-            {safeWeek}<span style={{ fontSize: 18, color: "var(--text-2)" }}>/8</span>
-          </div>
-          <button aria-label="+1" onClick={() => setWeekNum(Math.min(8, safeWeek + 1))} style={stepperBtn}>+</button>
-        </div>
-        <div style={{ marginTop: 12 }}><UIProgress value={safeWeek / 8} height={6} /></div>
       </UISheet>
     </div>
   );

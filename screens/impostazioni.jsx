@@ -251,35 +251,6 @@ const FileImporter = ({ label, icon, storageKey, accept = "", validate }) => {
   );
 };
 
-// ── Week stepper ───────────────────────────────────────────────────────────
-const WeekStepper = ({ value, onChange }) => {
-  const t = useT();
-  return (
-    <div className="row">
-      <div className="icon-wrap" style={{ background: "#5e5ce6", color: "#fff" }}>
-        <Icon name="calendar" size={15} strokeWidth={2} />
-      </div>
-      <div className="row-main">
-        <div className="row-title">{t("Settimana mesociclo")}</div>
-        <div className="row-sub">{t("Settimana")} {value} {t("di")} 8</div>
-      </div>
-      <div className="row-trailing" style={{ gap: 6 }}>
-        <button
-          className="btn ghost"
-          style={{ padding: "4px 10px", fontSize: 15 }}
-          onClick={() => onChange(Math.max(1, value - 1))}
-        >−</button>
-        <span className="num" style={{ fontSize: 17, fontWeight: 700, minWidth: 22, textAlign: "center" }}>{value}</span>
-        <button
-          className="btn ghost"
-          style={{ padding: "4px 10px", fontSize: 15 }}
-          onClick={() => onChange(Math.min(8, value + 1))}
-        >+</button>
-      </div>
-    </div>
-  );
-};
-
 // ── Sync now row (componente dedicato: gli hook NON possono stare in una
 //    IIFE dentro al render — ordine fragile e contrario alle Rules of Hooks) ─
 const SyncNowRow = () => {
@@ -465,7 +436,7 @@ const ProfileEditor = ({ profile, onSave, onClose, isDesktop }) => {
 };
 
 // ── Main Impostazioni screen ───────────────────────────────────────────────
-const Impostazioni = ({ device, onNav, theme, setTheme, weekNum, setWeekNum, bodyWeight, setBodyWeight, onResetAll }) => {
+const Impostazioni = ({ device, onNav, theme, setTheme, bodyWeight, setBodyWeight, onResetAll }) => {
   const isDesktop = device === "desktop";
   const t = useT();
   const { lang, setLang } = useLang();
@@ -610,7 +581,6 @@ const Impostazioni = ({ device, onNav, theme, setTheme, weekNum, setWeekNum, bod
             </button>
           </div>
         </div>
-        <WeekStepper value={weekNum || 1} onChange={setWeekNum} />
       </ISection>
 
       {/* — Connessioni — */}

@@ -21,8 +21,6 @@ const Screen = ({ which, device, state, set, globalCtx }) => {
         activities={state.activities} addActivity={(a) => set(st => ({ ...st, activities: [{ ...a, id: Date.now(), when: "Oggi" }, ...st.activities] }))}
         checkIn={state.checkIn} setCheckIn={(v) => set(st => ({ ...st, checkIn: v }))}
         hydration={state.hydration} setHydration={(v) => set(st => ({ ...st, hydration: v }))}
-        weekNum={state.weekNum}
-        setWeekNum={(v) => set(st => ({ ...st, weekNum: v }))}
         bodyWeight={state.bodyWeight}
         setBodyWeight={(v) => set(st => ({ ...st, bodyWeight: v }))}
       />;
@@ -31,7 +29,6 @@ const Screen = ({ which, device, state, set, globalCtx }) => {
         {...pass}
         scheda={state.scheda} setScheda={(s) => set(st => ({ ...st, scheda: s }))}
         checkIn={state.checkIn}
-        weekNum={state.weekNum}
       />;
     case "dieta":
       return <Dieta {...pass} />;
@@ -43,14 +40,13 @@ const Screen = ({ which, device, state, set, globalCtx }) => {
         setSpesaFreq={(v) => set(st => ({ ...st, spesaFreq: v }))}
       />;
     case "coach":
-      return <Coach {...pass} activities={state.activities} checkIn={state.checkIn} hydration={state.hydration} weekNum={state.weekNum} bodyWeight={state.bodyWeight} />;
+      return <Coach {...pass} activities={state.activities} checkIn={state.checkIn} hydration={state.hydration} bodyWeight={state.bodyWeight} />;
     case "storico":
       return <Storico {...pass} />;
     case "impostazioni":
       return <Impostazioni
         {...pass}
         theme={state.theme} setTheme={(v) => set(st => ({ ...st, theme: v }))}
-        weekNum={state.weekNum} setWeekNum={(v) => set(st => ({ ...st, weekNum: v }))}
         bodyWeight={state.bodyWeight} setBodyWeight={(v) => set(st => ({ ...st, bodyWeight: v }))}
         onResetAll={() => {
           window.storage.clear();
@@ -216,8 +212,6 @@ async function _cloudSync(opts) {
       if (s.spesaFreq)  st.set("spesaFreq", Number(s.spesaFreq) || 1);
       // groqApiKey: cloud wins sempre
       if (s.groqApiKey) { st.set("groqApiKey", s.groqApiKey); console.log("[sync pull] groqApiKey ✓"); }
-      // clamp 1..8: un valore corrotto nel foglio non deve rompere la UI
-      if (s.weekNum)    st.set("weekNum", Math.max(1, Math.min(8, Number(s.weekNum) || 1)));
       if (s.bodyWeight && parseFloat(s.bodyWeight) > 0) {
         st.set("bodyWeight", parseFloat(s.bodyWeight));
         console.log("[sync pull] bodyWeight (settings) →", s.bodyWeight);
@@ -261,7 +255,7 @@ function _cloudPushMissing(cloudKeys) {
   };
 
   // Chiavi semplici (string/number)
-  const KEYS = ["groqApiKey", "bodyWeight", "weekNum", "onboardingDone", "spesaFreq"];
+  const KEYS = ["groqApiKey", "bodyWeight", "onboardingDone", "spesaFreq"];
   KEYS.forEach(k => {
     const local = st.get(k, "");
     if (local && !cloudKeys[k]) {
@@ -298,7 +292,6 @@ window._cloudPushAll = function() {
   // Tutte le chiavi sincronizzabili
   push("groqApiKey",    st.get("groqApiKey", ""));
   push("bodyWeight",    st.get("bodyWeight", ""));
-  push("weekNum",       st.get("weekNum", ""));
   push("spesaFreq",     st.get("spesaFreq", ""));
   push("onboardingDone", st.get("onboardingDone", false) ? "true" : "");
 
@@ -352,7 +345,6 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
       activities:   st.get("activities", []),
       checkIn:      st.get(`checkIn_${today}`, { sleep: 4, energy: 4, ailments: "" }),
       hydration:    st.get(`hydration_${today}`, 3),
-      weekNum:      st.get("weekNum", 1),
       bodyWeight:   st.get("bodyWeight", 100),
       theme:        st.get("theme", "system"), // default: segue il sistema (Mac/iOS)
       spesaChecked: st.get("spesaChecked", {}),
@@ -360,7 +352,7 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
     };
   }
 
-  const [state, setStateRaw] = React.useState({ screen: initialScreen, scheda: "Upper A", isHome: false, activities: [], checkIn: { sleep: 4, energy: 4, ailments: "" }, hydration: 3, weekNum: 1, bodyWeight: 100, theme: "system", spesaChecked: {}, spesaFreq: 1 });
+  const [state, setStateRaw] = React.useState({ screen: initialScreen, scheda: "Upper A", isHome: false, activities: [], checkIn: { sleep: 4, energy: 4, ailments: "" }, hydration: 3, bodyWeight: 100, theme: "system", spesaChecked: {}, spesaFreq: 1 });
   const [lang, setLang] = React.useState(window.storage ? window.storage.get("lang", "it") : "it");
   const [initialized, setInitialized] = React.useState(false);
 
@@ -391,10 +383,6 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
       // Push settings con retry (_saveSettingRetry): il fire-and-forget singolo
       // perdeva il dato al primo errore di rete (stessa ragione per cui esiste
       // _saveSettingRetry — ora usato coerentemente anche qui).
-      if (next.weekNum    !== prev.weekNum) {
-        window.storage.set("weekNum", next.weekNum);
-        _saveSettingRetry("weekNum", next.weekNum);
-      }
       if (next.bodyWeight !== prev.bodyWeight) {
         window.storage.set("bodyWeight", next.bodyWeight);
         _saveSettingRetry("bodyWeight", next.bodyWeight);
@@ -443,7 +431,6 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
         setStateRaw(prev => ({
           ...prev,
           bodyWeight:   s.bodyWeight,
-          weekNum:      s.weekNum,
           checkIn:      s.checkIn,
           hydration:    s.hydration,
           spesaChecked: s.spesaChecked,

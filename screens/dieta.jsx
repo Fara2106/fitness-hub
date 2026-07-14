@@ -455,12 +455,6 @@ const MealCard = ({ meal, isDesktop }) => {
             <div className="num muted" style={{ fontSize: 12 }}>{meal.time}</div>
           </div>
         </div>
-        {meal.kcal > 0 && (
-          <span className="pill" style={{ fontSize: 11, padding: "3px 8px" }}>
-            <span className="num" style={{ fontWeight: 700 }}>{meal.kcal}</span>
-            <span style={{ color: "var(--text-3)", fontWeight: 500 }}> kcal</span>
-          </span>
-        )}
       </div>
 
       <div style={{ display: "flex", flexDirection: "column" }}>
@@ -513,7 +507,7 @@ const MealCard = ({ meal, isDesktop }) => {
 };
 
 // ── Main Dieta screen ──────────────────────────────────────────────────────
-const Dieta = ({ device }) => {
+const Dieta = ({ device, onNav }) => {
   const isDesktop = device === "desktop";
   const t = useT();
 
@@ -547,10 +541,7 @@ const Dieta = ({ device }) => {
   const meals      = section.meals || [];
   const supps      = _SUPPS_MAP[dayType] || _SUPPS_RIPOSO;
 
-  const baseKcal   = meals.reduce((s, m) => s + (m.kcal || 0), 0);
   const ct         = _CARDIO_TYPES.find(c => c.id === cardioType) || _CARDIO_TYPES[0];
-  const cardioBurn = cardio ? Math.round(cardioMin * ct.kcalMin) : 0;
-  const netKcal    = baseKcal + (cardio ? Math.round(cardioBurn * 0.6) : 0);
 
   // Build unified timeline
   const timeline = _buildTimeline(meals, supps);
@@ -629,7 +620,7 @@ const Dieta = ({ device }) => {
             <div style={{ fontSize: 14, fontWeight: 600 }}>{t("Cardio")}</div>
             <div className="muted" style={{ fontSize: 12, marginTop: 1 }}>
               {cardio
-                ? <>{ct.emoji} {t(ct.label)} · <span className="num">{cardioMin}</span>′ · ~<span className="num" style={{ color: "#FF9F0A", fontWeight: 600 }}>{cardioBurn}</span> kcal</>
+                ? <>{ct.emoji} {t(ct.label)} · <span className="num">{cardioMin}</span>′</>
                 : t("Corsa, bike, ellittica, camminata…")}
             </div>
           </div>
@@ -672,21 +663,6 @@ const Dieta = ({ device }) => {
             </div>
           </div>
         )}
-      </div>
-
-      {/* Daily macros */}
-      <div className="card" style={{ padding: isDesktop ? 18 : 14, display: "flex", justifyContent: "space-around", textAlign: "center" }}>
-        {[
-          { label: t("kcal"), value: netKcal > 0 ? netKcal : "—", c: "var(--text)" },
-          { label: t("proteine"), value: "180g", c: "#0A84FF" },
-          { label: t("carbo"),    value: "240g", c: "#FF9F0A" },
-          { label: t("grassi"),   value: "70g",  c: "#30D158" },
-        ].map(m => (
-          <div key={m.label}>
-            <div className="num" style={{ fontSize: isDesktop ? 22 : 19, fontWeight: 600, color: m.c, letterSpacing: -0.02 }}>{m.value}</div>
-            <div style={{ fontSize: 10.5, color: "var(--text-3)", letterSpacing: 0.4, textTransform: "uppercase", fontWeight: 500, marginTop: 1 }}>{m.label}</div>
-          </div>
-        ))}
       </div>
 
       {/* Chronological timeline */}
@@ -777,6 +753,21 @@ const Dieta = ({ device }) => {
           <div style={{ fontSize: 32, marginBottom: 12 }}>🍽️</div>
           <div className="muted">{t("Nessun pasto in questa configurazione")}</div>
         </div>
+      )}
+
+      {/* Genera lista spesa → Spesa (unico accesso mobile oltre a Impostazioni) */}
+      {onNav && (
+        <button
+          onClick={() => onNav("spesa")}
+          style={{
+            width: "100%", border: "1px solid var(--border)", background: "var(--card)",
+            color: "var(--text)", borderRadius: 16, padding: 15, fontSize: 15, fontWeight: 600,
+            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 9,
+          }}
+        >
+          <Icon name="cart" size={18} color="var(--accent)" strokeWidth={1.9} />
+          {t("Genera lista spesa")}
+        </button>
       )}
 
       {/* Excluded foods reminder */}
