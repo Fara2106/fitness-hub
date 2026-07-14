@@ -1,7 +1,7 @@
 // push.jsx — window.pushAPI: gestione permessi + subscription Web Push
 (function () {
-  const VAPID_PUBLIC = "";                 // ← Lorenzo: incolla la VAPID PUBLIC key (base64url)
-  const _PUSH_BASE   = "";                 // ← Lorenzo: incolla l'URL del push-worker (senza slash finale)
+  const VAPID_PUBLIC = "BKTHaGRHHKNrswS50MRvDIR4QJIhnpd9bqEsm2efrDU4R7BoIYQ7OBzoBpVCv2Fq-7AlOPojdGrhboKLgQWKtxQ";
+  const _PUSH_BASE   = "https://fitness-hub-push.lorefara97.workers.dev";
 
   function urlB64ToUint8Array(base64String) {
     const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
