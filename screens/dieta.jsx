@@ -463,7 +463,10 @@ const MealCard = ({ meal, isDesktop }) => {
             display: "flex", justifyContent: "space-between", alignItems: "flex-start",
             padding: "7px 0", borderTop: i > 0 ? "1px solid var(--border)" : "0", gap: 8,
           }}>
-            <div style={{ fontSize: 13.5, fontWeight: 500, lineHeight: 1.35 }}>{f.food}</div>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 7, fontSize: 13.5, fontWeight: 500, lineHeight: 1.35, minWidth: 0 }}>
+              <span style={{ fontSize: 15, flexShrink: 0, lineHeight: 1.2 }}>{window.foodEmoji(f.food)}</span>
+              <span>{f.food}</span>
+            </div>
             {f.qty && (
               <div className="num" style={{ fontSize: 12.5, color: "var(--text-2)", fontWeight: 600, whiteSpace: "nowrap", flexShrink: 0 }}>{f.qty}</div>
             )}
@@ -494,7 +497,7 @@ const MealCard = ({ meal, isDesktop }) => {
                   display: "flex", alignItems: "flex-start", gap: 8,
                   padding: "8px 10px", background: "var(--card-2)", borderRadius: 9,
                 }}>
-                  <div style={{ width: 6, height: 6, borderRadius: 999, background: "var(--accent)", flexShrink: 0, marginTop: 4 }} />
+                  <span style={{ fontSize: 14, flexShrink: 0, lineHeight: 1.2 }}>{window.foodEmoji(f.food)}</span>
                   <span style={{ fontSize: 13 }}>{f.food}</span>
                 </div>
               ))}

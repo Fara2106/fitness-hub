@@ -250,6 +250,47 @@ const _INTEGRATORI = {
   ],
 };
 
+// ── FOOD EMOJI ─────────────────────────────────────────────────────────────
+// Emoji dinamica per ogni riga-alimento (keyword IT, valutate al render → si
+// aggiorna da sola quando cambia la dieta). Prima corrispondenza vince; le
+// etichette di categoria (Proteina/Carboidrato/Verdure) hanno priorità così le
+// righe multi-opzione ("pollo | salmone | orata") restano coerenti. Fallback 🍽️.
+const _FOOD_EMOJI = [
+  [["proteina"], "🍗"],
+  [["carboidrato"], "🍚"],
+  [["verdure", "ortaggi", "insalata", "spinaci"], "🥦"],
+  [["olio", "evo"], "🫒"],
+  [["burro"], "🧈"],
+  [["yogurt", "skyr", "yoeggs"], "🥛"],
+  [["ricotta", "primo sale", "parmigiano", "feta", "mozzarella", "formaggio"], "🧀"],
+  [["uova", "uovo"], "🥚"],
+  [["tonno", "salmone", "orata", "merluzzo", "platessa", "branzino", "spigola", "pesce", "gamber"], "🐟"],
+  [["pollo", "tacchino", "manzo", "vitello", "bresaola", "prosciutto", "hamburger", "chianina", "bistecca", "carne"], "🍗"],
+  [["gallette", "cracker"], "🍘"],
+  [["pane", "segale"], "🍞"],
+  [["pasta", "gnocchi"], "🍝"],
+  [["riso", "basmati", "parboiled", "arborio", "farro", "orzo", "couscous", "cereali", "avena"], "🍚"],
+  [["patate"], "🥔"],
+  [["muesli"], "🥣"],
+  [["marmellata", "miele", "confettura"], "🍯"],
+  [["frutta", "mela", "banana", "frutti", "macedonia"], "🍎"],
+  [["noci", "mandorle", "nocciole", "semi"], "🥜"],
+  [["barretta", "4plus", "endurance"], "🍫"],
+  [["legumi", "ceci", "lenticchie", "fagioli"], "🫘"],
+  [["caffè", "caffe"], "☕"],
+  [["acqua"], "💧"],
+  [["nessun"], "🚫"],
+];
+
+window.foodEmoji = function (text) {
+  if (!text || typeof text !== "string") return "🍽️";
+  const s = text.toLowerCase();
+  for (const [keys, emoji] of _FOOD_EMOJI) {
+    if (keys.some(k => s.includes(k))) return emoji;
+  }
+  return "🍽️";
+};
+
 window.parseDieta = function (text) {
   if (!text || typeof text !== "string") return null;
 
