@@ -23,7 +23,9 @@ const TabBar = ({ screen, onNav }) => {
         display: "flex",
         gap: 0,
         padding: "8px 4px 10px",
-        paddingBottom: "calc(10px + env(safe-area-inset-bottom))",
+        // Icone più in basso: solo la safe-area home-indicator sotto (niente extra),
+        // così restano sopra la barra iOS ma scendono di ~10px.
+        paddingBottom: "calc(2px + env(safe-area-inset-bottom))",
         background: "var(--nav-bg)", // theme-aware: si adatta a dark/light
         backdropFilter: "blur(26px)",
         WebkitBackdropFilter: "blur(26px)",
