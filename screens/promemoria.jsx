@@ -13,6 +13,7 @@ const PromemoriaEditor = ({ config, persist, selDay, setSelDay, t }) => {
 
   const list = config.daytypes[selDay] || [];
   const catLabel = { pasto: t("Pasti"), integratore: t("Integratori"), allenamento: t("Allenamento") };
+  const todayDt = _todayDaytype(config);
 
   return (
     <div className="card" style={{ padding:16, display:"flex", flexDirection:"column", gap:14 }}>
@@ -36,12 +37,14 @@ const PromemoriaEditor = ({ config, persist, selDay, setSelDay, t }) => {
       <div className="hscroll" style={{ marginLeft:0, marginRight:0 }}>
         {Object.keys(_DT_LABELS).map(dt => {
           const on = selDay === dt;
+          const isToday = dt === todayDt;
           return (
             <button key={dt} onClick={() => setSelDay(dt)} style={{
               padding:"7px 12px", border:0, borderRadius:999, marginRight:4, whiteSpace:"nowrap",
               background: on ? "var(--accent)" : "var(--card-2)", color: on ? "#fff" : "var(--text)",
+              boxShadow: isToday && !on ? "inset 0 0 0 1.5px var(--accent)" : "none",
               fontSize:12.5, fontWeight: on ? 600 : 500, cursor:"pointer",
-            }}>{t(_DT_LABELS[dt])}</button>
+            }}>{t(_DT_LABELS[dt])}{isToday ? " · " + t("Oggi") : ""}</button>
           );
         })}
       </div>
@@ -70,8 +73,17 @@ function _ymd(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(
 const _WD_KEYS = ["sun","mon","tue","wed","thu","fri","sat"];
 const _TRAINING = ["mattina","ore17","ore21","ore22"];
 
+// Tipo di giornata di OGGI (override per data → baseline settimanale).
+function _todayDaytype(config) {
+  const ymd = _ymd(new Date());
+  if (config && config.overrides && config.overrides[ymd]) return config.overrides[ymd];
+  const wd = _WD_KEYS[new Date().getDay()];
+  return (config && config.weekly && config.weekly[wd]) || "riposo";
+}
+
 const PromemoriaOverrides = ({ config, persist, t }) => {
   const [pick, setPick] = React.useState(() => _ymd(new Date()));
+  const [msg, setMsg] = React.useState("");
 
   // daytype effettivo di una data (override → weekly)
   const daytypeOf = (ymd) => {
@@ -83,11 +95,12 @@ const PromemoriaOverrides = ({ config, persist, t }) => {
   const move = (dir) => {
     const src = pick;
     const srcType = daytypeOf(src);
-    if (!_TRAINING.includes(srcType)) return; // niente da spostare se è riposo
+    if (!_TRAINING.includes(srcType)) { setMsg(t("Quel giorno non ha allenamento da spostare")); return; }
     const d = new Date(src + "T12:00:00");
     d.setDate(d.getDate() + (dir === "after" ? 1 : -1));
     const dst = _ymd(d);
     persist({ ...config, overrides: { ...config.overrides, [src]: "riposo", [dst]: srcType } });
+    setMsg(t("Allenamento spostato al") + " " + dst);
   };
 
   const clearOverride = (ymd) => {
@@ -109,6 +122,7 @@ const PromemoriaOverrides = ({ config, persist, t }) => {
         <button onClick={() => move("before")} style={{ flex:1, border:0, borderRadius:10, padding:"10px", background:"var(--card-2)", color:"var(--text)", fontSize:13, fontWeight:600, cursor:"pointer" }}>← {t("Giorno prima")}</button>
         <button onClick={() => move("after")} style={{ flex:1, border:0, borderRadius:10, padding:"10px", background:"var(--card-2)", color:"var(--text)", fontSize:13, fontWeight:600, cursor:"pointer" }}>{t("Giorno dopo")} →</button>
       </div>
+      {msg && <div className="muted" style={{ fontSize:12 }}>{msg}</div>}
       {active.length > 0 && (
         <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
           {active.map(k => (
@@ -133,7 +147,7 @@ const Promemoria = ({ device, onNav }) => {
   });
   const [enabled, setEnabled] = React.useState(() => window.storage ? window.storage.get("notifEnabled", false) : false);
   const [status, setStatus] = React.useState("");   // messaggio diagnostico
-  const [selDay, setSelDay] = React.useState("ore17");
+  const [selDay, setSelDay] = React.useState(() => _todayDaytype(config));
 
   const persist = (next) => {
     setConfig(next);

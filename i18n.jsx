@@ -499,6 +499,8 @@ const I18N_DICT = {
   "Promemoria": { en: "Reminders" },
   "Attiva notifiche": { en: "Enable notifications" },
   "Notifiche attive": { en: "Notifications on" },
+  "Allenamento spostato al": { en: "Workout moved to" },
+  "Quel giorno non ha allenamento da spostare": { en: "That day has no workout to move" },
   "Le notifiche richiedono l'app installata sulla Home": { en: "Notifications require the app installed to the Home Screen" },
   "Notifiche non supportate su questo dispositivo": { en: "Notifications not supported on this device" },
   "Permesso negato — riattiva da Impostazioni iOS": { en: "Permission denied — re-enable in iOS Settings" },
