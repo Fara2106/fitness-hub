@@ -30,6 +30,7 @@ const STATIC_ASSETS = [
   BASE + "/screens/coach.jsx",
   BASE + "/screens/storico.jsx",
   BASE + "/screens/impostazioni.jsx",
+  BASE + "/screens/promemoria.jsx",
   BASE + "/screens/onboarding.jsx",
 ];
 
@@ -96,5 +97,32 @@ self.addEventListener("fetch", (event) => {
         return response;
       })
       .catch(() => caches.match(event.request))
+  );
+});
+
+// ── Push: mostra la notifica ────────────────────────────────────────────────
+self.addEventListener("push", (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (_) {}
+  const title = data.title || "Lorenzo Fitness Hub";
+  const body  = data.body  || "Promemoria";
+  event.waitUntil(self.registration.showNotification(title, {
+    body,
+    icon: BASE + "/icon-192.png",
+    badge: BASE + "/icon-192.png",
+    tag: data.tag || "reminder",
+    data: { url: BASE + "/" },
+  }));
+});
+
+// ── Tap sulla notifica: focalizza o apre l'app ──────────────────────────────
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || (BASE + "/");
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
+      for (const w of wins) { if (w.url.includes(BASE) && "focus" in w) return w.focus(); }
+      if (self.clients.openWindow) return self.clients.openWindow(target);
+    })
   );
 });
