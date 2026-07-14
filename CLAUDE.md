@@ -26,11 +26,15 @@ Also cross-check when relevant:
 - Every static `t("key")` used in screens exists in `i18n.jsx` (IT + EN dictionaries).
 - Every `<Icon name="…">` referenced exists in `icons.jsx`.
 
-## Deploy — agents CANNOT do this
+## Deploy — agents MAY commit, push, and deploy (authorized 2026-07-14)
 
-Deploy runs **only on Lorenzo's Mac** via double-clicking `Deploy GitHub Pages.command` (it has the git credentials). The script: clears stale git locks → bumps `CACHE_NAME` in `sw.js` → bumps every `?v=…` in `index.html` → `git add -A` + commit + `git push origin main`.
+Lorenzo has granted full git autonomy to agents running on his Mac (which has the git credentials): agents **may `git commit`, `git push origin main`, and run the full deploy**. (This replaces the old "never commit/push" rule, which assumed a credential-less sandbox.) Sandbox/Cowork sessions without `.git` access still can't — in that case edit local files only and tell Lorenzo to deploy.
 
-An agent/sandbox has no GitHub credentials and limited `.git` access: **only edit local files; never attempt to commit or push.** Tell Lorenzo to run the deploy script. iOS service worker is "sticky" — after deploy, close the PWA from multitasking and reopen so the new SW takes over.
+**Deploying app code** = run `Deploy GitHub Pages.command` (or replicate it): clear stale git locks → bump `CACHE_NAME` in `sw.js` → bump every `?v=…` in `index.html` → `git add -A` + commit + `git push origin main`. The cache bumps are **mandatory for any change to app files** (`.jsx`/`.css`/`.html`/`sw.js`/icons) — without them the SW serves stale code.
+
+**Docs/config-only changes** (`docs/`, `CLAUDE.md`, `.gitignore`, memory) don't affect the live app — `docs/` is excluded from the Pages build. Commit + push these **without** bumping caches, so users' SW cache isn't needlessly invalidated. Do NOT run the full deploy script for docs-only commits.
+
+iOS service worker is "sticky" — after a code deploy, close the PWA from multitasking and reopen so the new SW takes over. Still confirm before pushing when the intent is ambiguous; this autonomy covers work Lorenzo has asked for, not unrelated pushes.
 
 ## Architecture
 
