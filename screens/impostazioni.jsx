@@ -532,6 +532,13 @@ const Impostazioni = ({ device, onNav, theme, setTheme, bodyWeight, setBodyWeigh
             onClick={() => onNav("storico")}
             trailing={<Icon name="chevron" size={13} color="var(--text-3)" />}
           />
+          <IRow
+            icon="pill"
+            iconBg="#FF453A"
+            title={t("Promemoria")}
+            onClick={() => onNav("promemoria")}
+            trailing={<Icon name="chevron" size={13} color="var(--text-3)" />}
+          />
         </ISection>
       )}
 

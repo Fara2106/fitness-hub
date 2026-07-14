@@ -53,6 +53,8 @@ const Screen = ({ which, device, state, set, globalCtx }) => {
           window.location.reload();
         }}
       />;
+    case "promemoria":
+      return <Promemoria {...pass} />;
     case "onboarding":
       return <Onboarding {...pass} onDone={() => set(st => ({ ...st, screen: "dashboard" }))} />;
     default:
