@@ -416,3 +416,34 @@ window.parseDieta = function (text) {
 
   return result;
 };
+
+// ── DEFAULT NOTIF CONFIG ────────────────────────────────────────────────────
+// Costruisce weekly + daytypes precompilati dai dati piano. L'utente poi edita.
+window.buildDefaultNotifConfig = function () {
+  // reminder pasti dai _MEAL_META presenti per un giorno "tipo" (usiamo tutte le voci note)
+  const mealsFor = (keys) => keys.map(k => {
+    const m = _MEAL_META[k];
+    return { id: "pasto_" + k.toLowerCase().replace(/\s+/g, "_"), cat: "pasto", label: m.title, time: m.time, on: true };
+  });
+
+  // integratori dal set _INTEGRATORI[daytype]
+  const suppsFor = (dt) => (_INTEGRATORI[dt] || []).map((s, i) => ({
+    id: "int_" + dt + "_" + i, cat: "integratore", label: s.name, time: s.sortTime, on: true,
+  }));
+
+  // allenamento: un promemoria mattutino nei daytype di training
+  const workout = (label, time) => ({ id: "allenamento", cat: "allenamento", label, time, on: true });
+
+  const daytypes = {
+    riposo:  [...mealsFor(["COLAZIONE","SPUNTINO","PRANZO","MERENDA","CENA"]), ...suppsFor("riposo")],
+    mattina: [workout("Allenamento", "07:00"), ...mealsFor(["PRE WO","POST WO","MERENDA","CENA"]), ...suppsFor("mattina")],
+    ore17:   [...mealsFor(["COLAZIONE","SPUNTINO","PRANZO"]), workout("Allenamento ore 17", "16:30"), ...suppsFor("ore17")],
+    ore21:   [...mealsFor(["COLAZIONE","SPUNTINO","PRANZO","MERENDA"]), workout("Allenamento ore 21", "20:00"), ...suppsFor("ore21")],
+    ore22:   [...mealsFor(["COLAZIONE","SPUNTINO","PRANZO"]), workout("Allenamento ore 22", "21:00"), ...suppsFor("ore22")],
+  };
+
+  // weekly: Lun/Mer/Ven allenamento ore17 (default slot), resto riposo
+  const weekly = { mon:"ore17", tue:"riposo", wed:"ore17", thu:"riposo", fri:"ore17", sat:"riposo", sun:"riposo" };
+
+  return { weekly, daytypes, overrides: {} };
+};
