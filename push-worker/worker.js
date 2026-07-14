@@ -112,6 +112,24 @@ export default {
       return json({ ok: true, subs: cfg.subscriptions.length });
     }
 
+    if (request.method === "GET" && url.pathname === "/healthdata") {
+      const raw = await env.PUSH_KV.get("healthdata");
+      return json(raw ? JSON.parse(raw) : {});
+    }
+
+    if (request.method === "POST" && url.pathname === "/healthdata") {
+      let body; try { body = await request.json(); } catch (_) { return json({ ok: false, error: "bad json" }, 400); }
+      if (!body || body.token !== env.HEALTH_TOKEN) return json({ ok: false, error: "unauthorized" }, 401);
+      const rec = {
+        date: String(body.date || "").slice(0, 10),
+        waterMl: Math.max(0, Math.round(Number(body.waterMl) || 0)),
+        kcal: Math.max(0, Math.round(Number(body.kcal) || 0)),
+        updatedAt: Date.now(),
+      };
+      await env.PUSH_KV.put("healthdata", JSON.stringify(rec));
+      return json({ ok: true, ...rec });
+    }
+
     return json({ ok: false, error: "not found" }, 404);
   },
 
