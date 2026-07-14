@@ -90,4 +90,15 @@
   };
 
   window.pushAPI = pushAPI;
+
+  window.healthAPI = {
+    async get() {
+      if (!_PUSH_BASE) return null;
+      try {
+        const r = await fetch(_PUSH_BASE + "/healthdata", { cache: "no-store" });
+        const d = await r.json();
+        return (d && typeof d.waterMl === "number") ? d : null;
+      } catch (_) { return null; }
+    },
+  };
 })();
