@@ -18,27 +18,30 @@
 <meta name="apple-mobile-web-app-title" content="Fitness Hub" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <link rel="manifest" href="manifest.json" />
-<link rel="stylesheet" href="styles.css?v=20260714144925" />
+<link rel="stylesheet" href="styles.css?v=20260714150517" />
 <style>
-  /* Due bande distinte in basso su iOS:
-     1) striscia sottile home-indicator: NON dipingibile dalla pagina → gestita da
-        <meta name="theme-color"> (media-scoped, sopra).
-     2) fascia grande scura sotto la TabBar: era il #root (fixed) più corto dello schermo
-        con 100dvh → ora #root è ancorato a 4 lati (top/bottom:0) così riempie il viewport
-        reale. body overflow:hidden blocca lo scroll; safe-area top/bottom assorbite da
-        StatusBar e TabBar. */
+  /* Banda nera in basso su iOS standalone — CAUSA RADICE provata on-device con
+     diagnostica a colori (banda = VERDE = body): #root con position:fixed NON arriva
+     al fondo fisico dello schermo (iOS standalone lo vincola al viewport "safe"),
+     mentre body height:100% SÌ → sotto #root spuntava lo sfondo scuro di body = la banda.
+     FIX: niente più #root fixed. body è il contenitore flex a tutta altezza e #root lo
+     riempie (flex:1) → arriva al fondo reale. La safe-area inferiore è coperta dal
+     padding-bottom della TabBar; la sottile striscia home-indicator (non dipingibile
+     dalla pagina) resta gestita da <meta theme-color> media-scoped.
+     1) striscia sottile home-indicator → theme-color (sopra).
+     2) fascia grande scura → risolta da body-flex + #root flex:1 (qui sotto). */
   html { height: 100%; margin: 0; background: var(--safe-bg, #0b0b0f); }
-  body { height: 100%; margin: 0; overflow: hidden; background: var(--bg, #0b0b0f); }
+  body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;             /* lo scroll vive in .lfh-scroll */
+    background: var(--bg, #0b0b0f);
+    display: flex;                /* body = contenitore a tutta altezza (raggiunge il fondo iOS) */
+    flex-direction: column;
+  }
   #root {
-    position: fixed;
-    /* Ancoraggio a 4 lati: riempie il viewport reale a prescindere dai quirk iOS di
-       100dvh/-webkit-fill-available (che potevano risultare più corti → fascia scura
-       in basso sotto la TabBar). top+bottom definiscono un'altezza definita per i figli
-       in height:100% (.lfh, wrapper). */
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    flex: 1 1 auto;               /* riempie body → arriva al fondo fisico, niente banda */
+    min-height: 0;
     display: flex;
     align-items: stretch;
     background: var(--bg, #0b0b0f);
@@ -52,19 +55,6 @@
     padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
   }
-
-  /* ===== DIAGNOSTICA BANDA INFERIORE — TEMPORANEA, DA RIMUOVERE DOPO IL TEST =====
-     Coloro i 3 layer sovrapposti. La banda nera in basso prenderà il colore
-     dell'elemento che la "possiede":
-       • BLU  → #root arriva in fondo ma .lfh/contenuto è più corto (bug altezza interna)
-       • VERDE→ body arriva in fondo ma #root è più corto (fixed inset:0 non tocca il fondo)
-       • ROSSO→ anche body è più corto dello schermo
-       • resta NERA → nessun elemento è corto: la banda è la striscia iOS della
-                      home-indicator dipinta da <meta theme-color> (fix diverso)
-     .lfh resta col suo sfondo scuro così l'app sopra si vede normale e la banda si rivela. */
-  html  { background: #ff0000 !important; } /* ROSSO */
-  body  { background: #00ff00 !important; } /* VERDE */
-  #root { background: #0000ff !important; } /* BLU   */
 </style>
 <script>
 /* Tema di sistema PRIMA del mount React (evita flash di tema sbagliato).
@@ -120,30 +110,30 @@
 <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js" crossorigin="anonymous"></script>
 <script>if (typeof Recharts !== 'undefined') window.Recharts = Recharts;</script>
 
-<!-- Core utilities (?v=20260714144925: versionato, bumpato a ogni deploy → niente cache stale) -->
-<script type="text/babel" src="storage.jsx?v=20260714144925"></script>
-<script type="text/babel" src="api.jsx?v=20260714144925"></script>
-<script type="text/babel" src="parser.jsx?v=20260714144925"></script>
+<!-- Core utilities (?v=20260714150517: versionato, bumpato a ogni deploy → niente cache stale) -->
+<script type="text/babel" src="storage.jsx?v=20260714150517"></script>
+<script type="text/babel" src="api.jsx?v=20260714150517"></script>
+<script type="text/babel" src="parser.jsx?v=20260714150517"></script>
 
 <!-- Components -->
-<script type="text/babel" src="i18n.jsx?v=20260714144925"></script>
-<script type="text/babel" src="icons.jsx?v=20260714144925"></script>
-<script type="text/babel" src="ui.jsx?v=20260714144925"></script>
-<script type="text/babel" src="anatomy.jsx?v=20260714144925"></script>
-<script type="text/babel" src="nav.jsx?v=20260714144925"></script>
+<script type="text/babel" src="i18n.jsx?v=20260714150517"></script>
+<script type="text/babel" src="icons.jsx?v=20260714150517"></script>
+<script type="text/babel" src="ui.jsx?v=20260714150517"></script>
+<script type="text/babel" src="anatomy.jsx?v=20260714150517"></script>
+<script type="text/babel" src="nav.jsx?v=20260714150517"></script>
 
 <!-- Screens -->
-<script type="text/babel" src="screens/onboarding.jsx?v=20260714144925"></script>
-<script type="text/babel" src="screens/dashboard.jsx?v=20260714144925"></script>
-<script type="text/babel" src="screens/scheda.jsx?v=20260714144925"></script>
-<script type="text/babel" src="screens/dieta.jsx?v=20260714144925"></script>
-<script type="text/babel" src="screens/spesa.jsx?v=20260714144925"></script>
-<script type="text/babel" src="screens/coach.jsx?v=20260714144925"></script>
-<script type="text/babel" src="screens/storico.jsx?v=20260714144925"></script>
-<script type="text/babel" src="screens/impostazioni.jsx?v=20260714144925"></script>
+<script type="text/babel" src="screens/onboarding.jsx?v=20260714150517"></script>
+<script type="text/babel" src="screens/dashboard.jsx?v=20260714150517"></script>
+<script type="text/babel" src="screens/scheda.jsx?v=20260714150517"></script>
+<script type="text/babel" src="screens/dieta.jsx?v=20260714150517"></script>
+<script type="text/babel" src="screens/spesa.jsx?v=20260714150517"></script>
+<script type="text/babel" src="screens/coach.jsx?v=20260714150517"></script>
+<script type="text/babel" src="screens/storico.jsx?v=20260714150517"></script>
+<script type="text/babel" src="screens/impostazioni.jsx?v=20260714150517"></script>
 
 <!-- App frame -->
-<script type="text/babel" src="app.jsx?v=20260714144925"></script>
+<script type="text/babel" src="app.jsx?v=20260714150517"></script>
 
 <!-- Mount: auto-detect device -->
 <script type="text/babel" data-presets="env,react">
