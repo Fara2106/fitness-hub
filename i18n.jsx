@@ -494,6 +494,21 @@ const I18N_DICT = {
   // Misc
   "lunedì": { en: "monday" },
   "Lunedì": { en: "Monday" },
+
+  // Promemoria
+  "Promemoria": { en: "Reminders" },
+  "Attiva notifiche": { en: "Enable notifications" },
+  "Notifiche attive": { en: "Notifications on" },
+  "Le notifiche richiedono l'app installata sulla Home": { en: "Notifications require the app installed to the Home Screen" },
+  "Notifiche non supportate su questo dispositivo": { en: "Notifications not supported on this device" },
+  "Permesso negato — riattiva da Impostazioni iOS": { en: "Permission denied — re-enable in iOS Settings" },
+  "Configurazione push mancante": { en: "Push configuration missing" },
+  "Orari per giorno": { en: "Times by day" },
+  "Sposta allenamento": { en: "Move workout" },
+  "Giorno prima": { en: "Day before" },
+  "Giorno dopo": { en: "Day after" },
+  "Rigenera orari dal piano": { en: "Regenerate times from plan" },
+  "Pasti": { en: "Meals" },
 };
 
 // Context + provider + hook
