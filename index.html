@@ -18,7 +18,7 @@
 <meta name="apple-mobile-web-app-title" content="Fitness Hub" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <link rel="manifest" href="manifest.json" />
-<link rel="stylesheet" href="styles.css?v=20260714150517" />
+<link rel="stylesheet" href="styles.css?v=20260714151010" />
 <style>
   /* Banda nera in basso su iOS standalone — CAUSA RADICE provata on-device con
      diagnostica a colori (banda = VERDE = body): #root con position:fixed NON arriva
@@ -95,6 +95,38 @@
 })();
 </script>
 
+<!-- ===== SONDA GEOMETRIA (TEMPORANEA — da rimuovere dopo la diagnosi banda) =====
+     Riquadro rosso in alto a sinistra: stampa le altezze reali sul device così
+     capiamo esattamente dove l'app non arriva al fondo. -->
+<script>
+window.addEventListener('load', function () {
+  var probe = document.createElement('div');
+  probe.style.cssText = 'position:fixed;bottom:0;left:0;width:1px;height:env(safe-area-inset-bottom);pointer-events:none;';
+  document.body.appendChild(probe);
+  var box = document.createElement('div');
+  box.style.cssText = 'position:fixed;top:calc(env(safe-area-inset-top) + 6px);left:8px;z-index:2147483647;background:rgba(220,0,0,.9);color:#fff;font:12px/1.45 ui-monospace,monospace;padding:8px 10px;border-radius:8px;pointer-events:none;white-space:pre;';
+  document.body.appendChild(box);
+  function bot(el){ return el ? Math.round(el.getBoundingClientRect().bottom) : -1; }
+  function hgt(el){ return el ? Math.round(el.getBoundingClientRect().height) : -1; }
+  function upd(){
+    var root = document.getElementById('root');
+    var lfh  = document.querySelector('.lfh');
+    var nav  = document.querySelector('nav');
+    box.textContent =
+      'standalone=' + (navigator.standalone ? 'yes' : 'no') +
+      '\ninnerH   =' + window.innerHeight +
+      '\nscreenH  =' + window.screen.height +
+      '\nclientH  =' + document.documentElement.clientHeight +
+      '\nsafeBot  =' + Math.round(probe.getBoundingClientRect().height) +
+      '\nbody.bot =' + bot(document.body) +
+      '\nroot.bot =' + bot(root) + '  h=' + hgt(root) +
+      '\nlfh.bot  =' + bot(lfh) +
+      '\nnav.bot  =' + bot(nav);
+  }
+  setInterval(upd, 500); upd();
+});
+</script>
+
 <!-- React + Babel -->
 <!-- production.min: build minificata (10KB+132KB vs 110KB+1MB dev), niente warning
      di sviluppo in console. Per debug locale si può tornare a *.development.js. -->
@@ -110,30 +142,30 @@
 <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js" crossorigin="anonymous"></script>
 <script>if (typeof Recharts !== 'undefined') window.Recharts = Recharts;</script>
 
-<!-- Core utilities (?v=20260714150517: versionato, bumpato a ogni deploy → niente cache stale) -->
-<script type="text/babel" src="storage.jsx?v=20260714150517"></script>
-<script type="text/babel" src="api.jsx?v=20260714150517"></script>
-<script type="text/babel" src="parser.jsx?v=20260714150517"></script>
+<!-- Core utilities (?v=20260714151010: versionato, bumpato a ogni deploy → niente cache stale) -->
+<script type="text/babel" src="storage.jsx?v=20260714151010"></script>
+<script type="text/babel" src="api.jsx?v=20260714151010"></script>
+<script type="text/babel" src="parser.jsx?v=20260714151010"></script>
 
 <!-- Components -->
-<script type="text/babel" src="i18n.jsx?v=20260714150517"></script>
-<script type="text/babel" src="icons.jsx?v=20260714150517"></script>
-<script type="text/babel" src="ui.jsx?v=20260714150517"></script>
-<script type="text/babel" src="anatomy.jsx?v=20260714150517"></script>
-<script type="text/babel" src="nav.jsx?v=20260714150517"></script>
+<script type="text/babel" src="i18n.jsx?v=20260714151010"></script>
+<script type="text/babel" src="icons.jsx?v=20260714151010"></script>
+<script type="text/babel" src="ui.jsx?v=20260714151010"></script>
+<script type="text/babel" src="anatomy.jsx?v=20260714151010"></script>
+<script type="text/babel" src="nav.jsx?v=20260714151010"></script>
 
 <!-- Screens -->
-<script type="text/babel" src="screens/onboarding.jsx?v=20260714150517"></script>
-<script type="text/babel" src="screens/dashboard.jsx?v=20260714150517"></script>
-<script type="text/babel" src="screens/scheda.jsx?v=20260714150517"></script>
-<script type="text/babel" src="screens/dieta.jsx?v=20260714150517"></script>
-<script type="text/babel" src="screens/spesa.jsx?v=20260714150517"></script>
-<script type="text/babel" src="screens/coach.jsx?v=20260714150517"></script>
-<script type="text/babel" src="screens/storico.jsx?v=20260714150517"></script>
-<script type="text/babel" src="screens/impostazioni.jsx?v=20260714150517"></script>
+<script type="text/babel" src="screens/onboarding.jsx?v=20260714151010"></script>
+<script type="text/babel" src="screens/dashboard.jsx?v=20260714151010"></script>
+<script type="text/babel" src="screens/scheda.jsx?v=20260714151010"></script>
+<script type="text/babel" src="screens/dieta.jsx?v=20260714151010"></script>
+<script type="text/babel" src="screens/spesa.jsx?v=20260714151010"></script>
+<script type="text/babel" src="screens/coach.jsx?v=20260714151010"></script>
+<script type="text/babel" src="screens/storico.jsx?v=20260714151010"></script>
+<script type="text/babel" src="screens/impostazioni.jsx?v=20260714151010"></script>
 
 <!-- App frame -->
-<script type="text/babel" src="app.jsx?v=20260714150517"></script>
+<script type="text/babel" src="app.jsx?v=20260714151010"></script>
 
 <!-- Mount: auto-detect device -->
 <script type="text/babel" data-presets="env,react">
