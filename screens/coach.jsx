@@ -11,7 +11,7 @@ const _QUICK_PROMPTS = [
   "Recupero ottimale",
 ];
 
-function _buildSystemPrompt({ activities, checkIn, hydration, bodyWeight, lang }) {
+function _buildSystemPrompt({ activities, checkIn, waterMl, bodyWeight, lang }) {
   const sess = window.getTodaySession ? window.getTodaySession() : null;
   const sessLabel = sess ? `${sess.label} (${sess.muscles.join(", ")})` : "Riposo";
   const _days = window.getSchedule ? (window.getSchedule().days || []) : [];
@@ -54,9 +54,9 @@ ESCLUDERE SEMPRE dalla dieta: pasta di ceci, lenticchie, piselli, bevanda di man
     }
   }
 
-  // ── Idratazione ────────────────────────────────────────────────────────────
-  if (typeof hydration === "number") {
-    prompt += `\nIdratazione: ${hydration}/12 (${(hydration * 0.25).toFixed(2)}L su 3L target).`;
+  // ── Idratazione (da Apple Salute) ───────────────────────────────────────────
+  if (typeof waterMl === "number") {
+    prompt += `\nIdratazione: ${(waterMl / 1000).toFixed(2)}L su 3L target.`;
   }
 
   // ── Cardio recente ─────────────────────────────────────────────────────────
@@ -163,7 +163,7 @@ const Bubble = ({ m }) => {
 };
 
 // ── Coach screen ───────────────────────────────────────────────────────────
-const Coach = ({ device, activities = [], checkIn, hydration, bodyWeight }) => {
+const Coach = ({ device, activities = [], checkIn, healthData, bodyWeight }) => {
   const isDesktop = device === "desktop";
   const t = useT();
   const { lang } = useLang();
@@ -214,7 +214,10 @@ const Coach = ({ device, activities = [], checkIn, hydration, bodyWeight }) => {
 
       const reply = await window.groqAPI.complete({
         messages: history,
-        systemPrompt: _buildSystemPrompt({ activities, checkIn, hydration, bodyWeight, lang }),
+        systemPrompt: _buildSystemPrompt({
+          activities, checkIn, bodyWeight, lang,
+          waterMl: (healthData && healthData.date === (window.todayKey ? window.todayKey() : "") && typeof healthData.waterMl === "number") ? healthData.waterMl : null,
+        }),
         model: "llama-3.3-70b-versatile",
         maxTokens: 512,
       });
