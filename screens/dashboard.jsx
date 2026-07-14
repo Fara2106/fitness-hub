@@ -92,40 +92,50 @@ const CheckScale = ({ label, value, onChange }) => (
   </div>
 );
 
-// ── Idratazione (retained) ─────────────────────────────────────────────────
-const HydrationCard = ({ hydration, setHydration }) => {
+// ── Idratazione (sola lettura da Apple Salute) ─────────────────────────────
+const HydrationCard = ({ healthData }) => {
   const t = useT();
-  const target = 12; // 3L / 0.25L = 12 drops
+  const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
+  const fresh = healthData && healthData.date === today && typeof healthData.waterMl === "number";
+  const waterMl = fresh ? healthData.waterMl : 0;
+  const upd = fresh && healthData.updatedAt
+    ? new Date(healthData.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
   return (
     <div className="ui-card">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <span className="ui-cap">{t("Idratazione")}</span>
-        <span className="tnum" style={{ fontSize: 13, fontWeight: 700 }}>
-          {hydration}<span style={{ color: "var(--text-2)", fontWeight: 500 }}>/{target}</span>
-          <span style={{ color: "var(--text-2)", fontSize: 11, fontWeight: 500 }}> · {(hydration * 0.25).toFixed(2)}L</span>
-        </span>
+        {fresh
+          ? <span className="tnum" style={{ fontSize: 13, fontWeight: 700 }}>
+              {(waterMl / 1000).toFixed(2)}<span style={{ color: "var(--text-2)", fontWeight: 500 }}> / 3.00 L</span>
+            </span>
+          : <span style={{ fontSize: 11, color: "var(--text-3)" }}>{t("Nessun dato da Salute oggi")}</span>}
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-        {Array.from({ length: target }).map((_, i) => {
-          const filled = i < hydration;
-          return (
-            <button key={i} onClick={() => setHydration(i < hydration ? i : i + 1)} aria-label={`Idratazione ${i + 1}`} style={{
-              width: `calc(${100 / 6}% - 4px)`, aspectRatio: "1 / 1.2", minHeight: 30,
-              background: "transparent", border: 0, padding: 0, cursor: "pointer",
-            }}>
-              <svg viewBox="0 0 24 28" width="100%" height="100%">
-                <path d="M12 2 C 6 10, 3 14, 3 19 a 9 9 0 0 0 18 0 c 0 -5 -3 -9 -9 -17 Z"
-                  fill={filled ? "var(--accent)" : "transparent"}
-                  stroke={filled ? "var(--accent)" : "var(--border-2)"}
-                  strokeWidth="1.4"
-                  style={{ transition: "fill 0.16s, stroke 0.16s" }}
-                />
-              </svg>
-            </button>
-          );
-        })}
+      {fresh && <div><UIProgress value={waterMl / 3000} /></div>}
+      <div style={{ marginTop: 8, fontSize: 10.5, color: "var(--text-3)" }}>
+        {upd ? `${t("da Apple Salute")} · ${t("agg.")} ${upd}` : t("Registra l'acqua in Apple Salute")}
       </div>
-      <div style={{ marginTop: 8 }}><UIProgress value={hydration / target} /></div>
+    </div>
+  );
+};
+
+// ── Calorie bruciate (sola lettura da Apple Salute) ────────────────────────
+const CalorieCard = ({ healthData }) => {
+  const t = useT();
+  const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
+  const fresh = healthData && healthData.date === today && typeof healthData.kcal === "number";
+  const upd = fresh && healthData.updatedAt
+    ? new Date(healthData.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
+  return (
+    <div className="ui-card">
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span className="ui-cap">{t("Calorie bruciate")}</span>
+        {fresh
+          ? <span className="tnum" style={{ fontSize: 15, fontWeight: 700 }}>
+              {Math.round(healthData.kcal)}<span style={{ color: "var(--text-2)", fontSize: 11, fontWeight: 500 }}> kcal</span>
+            </span>
+          : <span style={{ fontSize: 11, color: "var(--text-3)" }}>{t("Nessun dato da Salute oggi")}</span>}
+      </div>
+      {upd && <div style={{ marginTop: 6, fontSize: 10.5, color: "var(--text-3)" }}>{`${t("da Apple Salute")} · ${t("agg.")} ${upd}`}</div>}
     </div>
   );
 };
@@ -274,7 +284,7 @@ const ActivityLogger = ({ onClose, onSave, isDesktop }) => {
 };
 
 // ── Main Dashboard ─────────────────────────────────────────────────────────
-const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn, hydration, setHydration, bodyWeight, setBodyWeight }) => {
+const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn, healthData, bodyWeight, setBodyWeight }) => {
   const isDesktop = device === "desktop";
   const t = useT();
   const { lang } = useLang();
@@ -439,7 +449,8 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
       </div>
 
       {/* Secondarie */}
-      <HydrationCard hydration={hydration} setHydration={setHydration} />
+      <HydrationCard healthData={healthData} />
+      <CalorieCard healthData={healthData} />
       <MovimentoCard activities={activities} addActivity={addActivity} isDesktop={isDesktop} />
 
       {/* Riepilogo muscoli settimana (retained) */}
