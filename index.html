@@ -18,7 +18,7 @@
 <meta name="apple-mobile-web-app-title" content="Fitness Hub" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <link rel="manifest" href="manifest.json" />
-<link rel="stylesheet" href="styles.css?v=20260714151010" />
+<link rel="stylesheet" href="styles.css?v=20260714151926" />
 <style>
   /* Banda nera in basso su iOS standalone — CAUSA RADICE provata on-device con
      diagnostica a colori (banda = VERDE = body): #root con position:fixed NON arriva
@@ -106,22 +106,28 @@ window.addEventListener('load', function () {
   var box = document.createElement('div');
   box.style.cssText = 'position:fixed;top:calc(env(safe-area-inset-top) + 6px);left:8px;z-index:2147483647;background:rgba(220,0,0,.9);color:#fff;font:12px/1.45 ui-monospace,monospace;padding:8px 10px;border-radius:8px;pointer-events:none;white-space:pre;';
   document.body.appendChild(box);
+  // Barra magenta ancorata a bottom:0 → se raggiunge il fondo FISICO dello schermo,
+  // allora bottom:0 tocca il fondo (banda dipingibile); se resta una striscia nera
+  // SOTTO la magenta, quella striscia è fuori dal viewport (la dipinge iOS).
+  var bar = document.createElement('div');
+  bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;height:46px;background:magenta;z-index:2147483646;pointer-events:none;';
+  document.body.appendChild(bar);
   function bot(el){ return el ? Math.round(el.getBoundingClientRect().bottom) : -1; }
   function hgt(el){ return el ? Math.round(el.getBoundingClientRect().height) : -1; }
+  function uh(unit){ var e=document.createElement('div'); e.style.cssText='position:fixed;top:0;left:0;width:1px;visibility:hidden;height:'+unit+';'; document.body.appendChild(e); var h=Math.round(e.getBoundingClientRect().height); e.remove(); return h; }
   function upd(){
     var root = document.getElementById('root');
-    var lfh  = document.querySelector('.lfh');
     var nav  = document.querySelector('nav');
     box.textContent =
       'standalone=' + (navigator.standalone ? 'yes' : 'no') +
-      '\ninnerH   =' + window.innerHeight +
-      '\nscreenH  =' + window.screen.height +
-      '\nclientH  =' + document.documentElement.clientHeight +
-      '\nsafeBot  =' + Math.round(probe.getBoundingClientRect().height) +
-      '\nbody.bot =' + bot(document.body) +
-      '\nroot.bot =' + bot(root) + '  h=' + hgt(root) +
-      '\nlfh.bot  =' + bot(lfh) +
-      '\nnav.bot  =' + bot(nav);
+      '\ninnerH  =' + window.innerHeight +
+      '\nscreenH =' + window.screen.height +
+      '\nsafeBot =' + Math.round(probe.getBoundingClientRect().height) +
+      '\nvh =' + uh('100vh') + ' svh=' + uh('100svh') +
+      '\nlvh=' + uh('100lvh') + ' dvh=' + uh('100dvh') +
+      '\nroot.bot=' + bot(root) +
+      '\nnav.bot =' + bot(nav) +
+      '\nbar.bot =' + bot(bar) + ' (magenta)';
   }
   setInterval(upd, 500); upd();
 });
@@ -142,30 +148,30 @@ window.addEventListener('load', function () {
 <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js" crossorigin="anonymous"></script>
 <script>if (typeof Recharts !== 'undefined') window.Recharts = Recharts;</script>
 
-<!-- Core utilities (?v=20260714151010: versionato, bumpato a ogni deploy → niente cache stale) -->
-<script type="text/babel" src="storage.jsx?v=20260714151010"></script>
-<script type="text/babel" src="api.jsx?v=20260714151010"></script>
-<script type="text/babel" src="parser.jsx?v=20260714151010"></script>
+<!-- Core utilities (?v=20260714151926: versionato, bumpato a ogni deploy → niente cache stale) -->
+<script type="text/babel" src="storage.jsx?v=20260714151926"></script>
+<script type="text/babel" src="api.jsx?v=20260714151926"></script>
+<script type="text/babel" src="parser.jsx?v=20260714151926"></script>
 
 <!-- Components -->
-<script type="text/babel" src="i18n.jsx?v=20260714151010"></script>
-<script type="text/babel" src="icons.jsx?v=20260714151010"></script>
-<script type="text/babel" src="ui.jsx?v=20260714151010"></script>
-<script type="text/babel" src="anatomy.jsx?v=20260714151010"></script>
-<script type="text/babel" src="nav.jsx?v=20260714151010"></script>
+<script type="text/babel" src="i18n.jsx?v=20260714151926"></script>
+<script type="text/babel" src="icons.jsx?v=20260714151926"></script>
+<script type="text/babel" src="ui.jsx?v=20260714151926"></script>
+<script type="text/babel" src="anatomy.jsx?v=20260714151926"></script>
+<script type="text/babel" src="nav.jsx?v=20260714151926"></script>
 
 <!-- Screens -->
-<script type="text/babel" src="screens/onboarding.jsx?v=20260714151010"></script>
-<script type="text/babel" src="screens/dashboard.jsx?v=20260714151010"></script>
-<script type="text/babel" src="screens/scheda.jsx?v=20260714151010"></script>
-<script type="text/babel" src="screens/dieta.jsx?v=20260714151010"></script>
-<script type="text/babel" src="screens/spesa.jsx?v=20260714151010"></script>
-<script type="text/babel" src="screens/coach.jsx?v=20260714151010"></script>
-<script type="text/babel" src="screens/storico.jsx?v=20260714151010"></script>
-<script type="text/babel" src="screens/impostazioni.jsx?v=20260714151010"></script>
+<script type="text/babel" src="screens/onboarding.jsx?v=20260714151926"></script>
+<script type="text/babel" src="screens/dashboard.jsx?v=20260714151926"></script>
+<script type="text/babel" src="screens/scheda.jsx?v=20260714151926"></script>
+<script type="text/babel" src="screens/dieta.jsx?v=20260714151926"></script>
+<script type="text/babel" src="screens/spesa.jsx?v=20260714151926"></script>
+<script type="text/babel" src="screens/coach.jsx?v=20260714151926"></script>
+<script type="text/babel" src="screens/storico.jsx?v=20260714151926"></script>
+<script type="text/babel" src="screens/impostazioni.jsx?v=20260714151926"></script>
 
 <!-- App frame -->
-<script type="text/babel" src="app.jsx?v=20260714151010"></script>
+<script type="text/babel" src="app.jsx?v=20260714151926"></script>
 
 <!-- Mount: auto-detect device -->
 <script type="text/babel" data-presets="env,react">
