@@ -589,7 +589,7 @@ const WorkoutPlayer = ({
       </div>
 
       {restSecs != null && (
-        <TimerOverlay seconds={restSecs} onClose={() => { setRestSecs(null); advance(); }} />
+        <TimerOverlay seconds={restSecs} onClose={() => setRestSecs(null)} />
       )}
     </div>
   );
