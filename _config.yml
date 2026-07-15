@@ -5,6 +5,7 @@
 # App files (index.html, launch.html, *.jsx, *.css) have no front matter, so Jekyll
 # copies them verbatim and they are unaffected. We just keep Jekyll away from docs/.
 exclude:
+  - dev/
   - docs/
   - node_modules/
   - test/
