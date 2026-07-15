@@ -40,7 +40,7 @@ iOS service worker is "sticky" — after a code deploy, close the PWA from multi
 
 ## Architecture
 
-**Frontend** (`index.html` load order): React/Babel/Recharts CDNs → `storage.jsx`, `api.jsx`, `parser.jsx` → `i18n.jsx`, `icons.jsx`, `anatomy.jsx`, `nav.jsx` → `screens/*` → `app.jsx` → mount. Device is auto-detected (`mobile`/`desktop`) and passed as a `device` prop to all components.
+**Frontend** (`index.html` load order): React/Babel/Recharts CDNs → `storage.jsx`, `api.jsx`, `push.jsx`, `defaults.jsx`, `parser.jsx` → `i18n.jsx`, `icons.jsx`, `ui.jsx`, `anatomy.jsx`, `nav.jsx`, `schedaState.jsx` → `screens/*` → `app.jsx` → mount. Device is auto-detected (`mobile`/`desktop`) and passed as a `device` prop to all components. (`defaults.jsx` = testo grezzo di `scheda.txt`/`dieta.txt` come `window.SCHEDA_TXT_FALLBACK`/`DIETA_TXT_FALLBACK`, GENERATO da `dev/gen-defaults.mjs`, drift-test in `test/run.mjs`; `schedaState.jsx` = logica pura keyed-by-id della Scheda, `window.exId`/`getDayState`/`read`/`writeSchedaProg`.)
 
 - `app.jsx` — `AppFrame`: routing, global state, `StatusBar`, and the whole cloud-sync engine (`_cloudSync`, `_cloudPushMissing`, `_cloudPushAll`, `_saveSettingRetry`).
 - `api.jsx` — `window.sheetsAPI` (REST to the backend; **every GET appends `_cb=Date.now()` + `fetch(...,{cache:"no-store"})`** to defeat stale HTTP cache) and `window.groqAPI` (AI coach, `llama-3.3-70b-versatile`). Also `playBeep`, `todayKey`, `getTodaySession`. NB: `_setDefaults()` must run inside `window.storage.onReady()` (running before IndexedDB loads overwrites saved settings).
@@ -60,11 +60,11 @@ iOS service worker is "sticky" — after a code deploy, close the PWA from multi
 - Synced keys: `groqApiKey`, `schedaData`/`dietaData`, `spesaChecked2`, `spesaFreq`, `bodyWeight`, `onboardingDone`. (Mesociclo/`weekNum` and RPE were removed from the app on 2026-07-14; the Sheets `Settimana`/`RPE` columns remain physically but now receive 0.)
 - **Shopping list gotcha:** cloud key is `spesaChecked2` (the legacy `spesaChecked` caused duplicate rows); local key stays `spesaChecked`. Pull is back-compat: `s.spesaChecked2 || s.spesaChecked`.
 
-## Recurring bug family — "bleed between workout days"
+## Ex "bleed between workout days" — RISOLTO by construction (2026-07-15, keyed-by-id)
 
-In `screens/scheda.jsx`, several pieces of state are indexed **by position** within a workout (`completion`, `substitutions`, `occupied`, `pesosRef`). When switching tabs (Upper A → Lower → Upper B) **all of them must be replaced together** — done by `switchTo(tab)`, which loads the saved per-tab block from `schedaProg_<date>` (storage). Any new per-position state must be added to `switchTo` AND to the persisted block, or stale data (notably weights) lands on the wrong exercise and gets saved to Sheets.
+**Non più un bug family.** Lo stato per-esercizio della Scheda NON è più indicizzato per posizione. `screens/scheda.jsx` indicizza `completion`/`substitutions`/`occupied`/`pesosRef` per **id stabile** `window.exId(dayKey, pos)` = `` `${dayKey}#${pos}` `` (in `schedaState.jsx`), in una **mappa piatta valida per tutti i giorni insieme**. `switchTo(day)` cambia SOLO il giorno mostrato — non swappa più stato → leggere lo stato del giorno sbagliato è impossibile per costruzione. Regola per il futuro: **ogni nuovo stato per-esercizio si indicizza per `exId(scheda, i)`**, mai per intero grezzo. `ExerciseCard` usa `key={exId}` (remonta sul cambio giorno → local state corretto). Test isolamento in `test/run.mjs` (Suite schedaState).
 
-Workout progress (completion/substitutions/pesos) persists per day+tab in `schedaProg_<date>`: leaving the Scheda tab mid-workout no longer loses it. Closing a session also writes `gym_<date>` + `muscleSets_<date>` (real data for the Dashboard week card). Coach chat persists in `coachChat_<date>`. All per-day keys are swept after 90 days by `_cleanupOldDailyKeys()` in `app.jsx` (uses `storage.keys()`).
+Workout progress (completion/substitutions/pesos) persiste in `schedaProg_<date>` come **blocco piatto** `{completion,substitutions,pesos}` keyed-by-id (prima era annidato per-tab), via `window.readSchedaProg`/`writeSchedaProg`. Player e lista sono due proiezioni dello **stesso** stato condiviso. Chiudere la sessione scrive `gym_<date>` + `muscleSets_<date>` (dati reali per la card Settimana in Dashboard). Coach chat in `coachChat_<date>`. Tutte le chiavi per-giorno spazzate a 90 gg da `_cleanupOldDailyKeys()` in `app.jsx`.
 
 ## Domain reference
 
@@ -72,9 +72,13 @@ Workout progress (completion/substitutions/pesos) persists per day+tab in `sched
 - AI Coach (`screens/coach.jsx`, `_buildSystemPrompt`): feeds weight, today's session, check-in, hydration, recent cardio, day notes, `schedaData`/`dietaData` (≤3000 chars, hardcoded fallback). Replies in the app language (IT/EN). **Always excludes from diet: chickpea pasta, lentils, peas, almond drink.** (No RPE/mesociclo references — both removed 2026-07-14.)
 - Theme: default `"system"` (follows macOS/iOS via `prefers-color-scheme`, with anti-flash script in `index.html` `<head>`). Dark default; light adds `theme-light` on `<html>`. Use CSS vars (`--bg --card --text --border --accent --nav-bg --track …`); never hardcode colors. Anti-flash also updates `<meta name="theme-color">`.
 - i18n in `i18n.jsx` (IT/EN). Food names in Diet/Spesa stay Italian by design (plan data, not UI).
-- Local data files `scheda.txt` / `dieta.txt` are parsed by `parser.jsx`; both have hardcoded fallbacks if absent.
+- Local data files `scheda.txt` / `dieta.txt` are parsed by `parser.jsx`; il fallback quando lo storage è vuoto è il **testo grezzo** embedded in `defaults.jsx` (`SCHEDA_TXT_FALLBACK`/`DIETA_TXT_FALLBACK`, parsato dallo stesso parser, drift-test byte-identico ai `.txt`). Rigenera con `npm run gen:defaults` dopo aver modificato i `.txt`. (`_DEFAULT_DAYS` strutturato in `scheda.jsx` è stato ELIMINATO il 2026-07-15.)
 
-## Stato lavori — sessione Cowork 10-11/07/2026 (modifiche locali, NON ancora deployate)
+## Stato lavori
+
+**Scheda + Player + refactor keyed-by-id — IMPLEMENTATO 2026-07-15 (LOCAL main, NON pushato/deployato; QA Player on-device PENDENTE).** 5 commit `e4a6c43..adbe992`, eseguiti con subagent-driven-development (4 task, ogni task task-review + broad review finale opus = READY, zero Critical/Important). Spec: `docs/superpowers/specs/2026-07-15-scheda-player-refactor-design.md`; piano: `docs/superpowers/plans/2026-07-15-scheda-player-refactor.md`. Contenuto: (1) `defaults.jsx` (estrazione dati, vedi Architecture); (2) `schedaState.jsx` (modulo puro keyed-by-id); (3) refactor `scheda.jsx` a keyed-by-id (vedi sezione "Ex bleed"); (4) `WorkoutPlayer` — vista a schermo intero dentro `scheda.jsx`, un esercizio alla volta, peso gigante editabile, "Serie fatta" → auto-timer recupero (riusa `TimerOverlay`) → avanzamento serie/esercizio; ingresso da Home (`window._schedaIntent="player"`) o bottone lista; riusa `SubstitutePopover`; stato condiviso keyed-by-id con la lista; niente RPE. **Prima del deploy:** QA interattiva Player on-device (auto-recupero→avanzamento, ripresa sessione, salvataggio Sheets coi pesi giusti) + giro anti-bleed. Deploy = bump `CACHE_NAME`+`?v=` (tocca file app).
+
+### Sessione Cowork 10-11/07/2026 (modifiche locali)
 
 Tutte validate con Babel + giro QA interattivo (Playwright/Chromium, emulazione iPhone 390×844). Deploy: solo Lorenzo col suo script; dopo il deploy ricordare il SW sticky iOS.
 
