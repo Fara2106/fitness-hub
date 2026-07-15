@@ -140,6 +140,17 @@ const I18N_DICT = {
   "Ven -2": { en: "Fri -2" },
   "Ven -3": { en: "Fri -3" },
 
+  // Player
+  "Serie {n} di {m}": { en: "Set {n} of {m}" },
+  "Serie fatta": { en: "Set done" },
+  "L'ultima volta": { en: "Last time" },
+  "Dopo": { en: "Next" },
+  "Auto-recupero": { en: "Auto-rest" },
+  "Sessione completa": { en: "Session complete" },
+  "Chiudi e salva": { en: "Finish & save" },
+  "Esci dal player": { en: "Exit player" },
+  "Nessuno storico": { en: "No history" },
+
   // Exercise names (scheda di default / fallback)
   "Panca piana con bilanciere": { en: "Barbell bench press" },
   "Panca inclinata con manubri (30°)": { en: "Incline dumbbell press (30°)" },

@@ -455,6 +455,146 @@ const ExerciseCard = ({
   );
 };
 
+// ── Workout Player (vista a schermo intero, un esercizio alla volta) ────────
+const WorkoutPlayer = ({
+  dayKey, dayName, exercises, cursor, setCursor,
+  completion, substitutions, pesosRef, sheetsWeights,
+  autoRest, setAutoRest, onPatch, onClose, onFinish,
+}) => {
+  const t = useT();
+  const [showSubs, setShowSubs] = React.useState(false);
+  const [restSecs, setRestSecs] = React.useState(null);
+
+  const ex = exercises[cursor];
+  if (!ex) return null;
+  const id = window.exId(dayKey, cursor);
+  const done = completion[id] || new Array(ex.sets.length).fill(false);
+  // Serie corrente = prima non completata (o l'ultima se tutte fatte).
+  const rawIdx = done.findIndex(x => !x);
+  const curSet = rawIdx === -1 ? Math.max(0, ex.sets.length - 1) : rawIdx;
+  const allSetsDone = done.length > 0 && done.every(Boolean);
+
+  // Peso della serie corrente: pesi digitati oggi → Sheets → default scheda.
+  const savedP = pesosRef.current[id];
+  const pesoVal = (savedP && savedP[curSet] != null)
+    ? savedP[curSet]
+    : (() => {
+        const k = ex ? ex.name.toLowerCase() : "";
+        if (sheetsWeights && sheetsWeights[k] && sheetsWeights[k][curSet] != null) return String(sheetsWeights[k][curSet]);
+        return String(ex && ex.sets[curSet] ? ex.sets[curSet].peso || "" : "");
+      })();
+
+  const setPeso = (v) => {
+    const arr = (pesosRef.current[id] || ex.sets.map(s => String(s.peso || ""))).slice();
+    arr[curSet] = v;
+    pesosRef.current[id] = arr;
+    onPatch({ pesos: { [id]: arr } });
+  };
+
+  const advance = () => {
+    if (cursor < exercises.length - 1) setCursor(cursor + 1);
+    else onFinish(); // ultimo esercizio → schermata chiusura
+  };
+
+  const serieFatta = () => {
+    if (navigator.vibrate) navigator.vibrate([100]);
+    const arr = [...done];
+    arr[curSet] = true;
+    onPatch({ completion: { [id]: arr } });
+    const nowAllDone = arr.every(Boolean);
+    if (autoRest && !nowAllDone) setRestSecs(ex.rest || 90);
+    else if (nowAllDone) setTimeout(advance, 250);
+  };
+
+  const label = substitutions[id] ? t(substitutions[id]) : t(ex.name);
+  const next = exercises[cursor + 1];
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 9990,
+      background: "var(--bg)", display: "flex", flexDirection: "column",
+      padding: "max(env(safe-area-inset-top), 20px) 20px calc(env(safe-area-inset-bottom) + 20px)",
+    }}>
+      {/* Top bar */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <button className="btn ghost" style={{ padding: "8px 10px" }} title={t("Esci dal player")} onClick={onClose}>
+          <Icon name="x" size={16} />
+        </button>
+        <div className="muted" style={{ fontSize: 12, fontWeight: 600 }}>{dayName} · {cursor + 1}/{exercises.length}</div>
+        <button className="btn ghost" style={{ padding: "8px 10px", background: showSubs ? "rgba(10,132,255,0.18)" : "var(--card-2)" }} onClick={() => setShowSubs(s => !s)}>
+          <Icon name="refresh" size={16} />
+        </button>
+      </div>
+
+      {showSubs && (
+        <SubstitutePopover
+          alternatives={ex.alternatives}
+          current={substitutions[id]}
+          original={ex.name}
+          onPick={(name) => { onPatch({ substitutions: { [id]: name } }); setShowSubs(false); }}
+          onClose={() => setShowSubs(false)}
+        />
+      )}
+
+      {/* Centro: esercizio corrente */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", textAlign: "center", gap: 10 }}>
+        <div className="muted" style={{ fontSize: 12, fontWeight: 600, letterSpacing: 1, textTransform: "uppercase" }}>
+          {t("Serie {n} di {m}").replace("{n}", curSet + 1).replace("{m}", ex.sets.length)}
+        </div>
+        <h2 style={{ fontSize: 24, fontWeight: 600, letterSpacing: -0.02, maxWidth: 340 }}>{label}</h2>
+        {substitutions[id] && <div className="muted" style={{ fontSize: 12, textDecoration: "line-through", marginTop: -4 }}>{t(ex.name)}</div>}
+
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 8 }}>
+          <input
+            type="text" value={pesoVal} onChange={(e) => setPeso(e.target.value)}
+            placeholder={t("kg o elastico")} className="input num"
+            style={{ width: 150, textAlign: "center", fontSize: 40, fontWeight: 700, padding: "8px 10px", borderRadius: 14 }}
+          />
+          <span className="num" style={{ fontSize: 22, fontWeight: 600, color: "var(--text-2)" }}>× {ex.sets[curSet].rip}</span>
+        </div>
+
+        <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>
+          {(ex.history && ex.history.length)
+            ? `${t("L'ultima volta")}: ${ex.history[0].peso} kg × ${ex.history[0].rip}`
+            : t("Nessuno storico")}
+        </div>
+
+        {/* Puntini serie */}
+        <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+          {done.map((d, i) => (
+            <span key={i} style={{
+              width: 9, height: 9, borderRadius: "50%",
+              background: d ? "var(--success)" : (i === curSet ? "var(--accent)" : "var(--track)"),
+            }} />
+          ))}
+        </div>
+      </div>
+
+      {/* Peek prossimo */}
+      {next && (
+        <div className="muted" style={{ fontSize: 12.5, textAlign: "center", marginBottom: 10 }}>
+          {t("Dopo")}: {substitutions[window.exId(dayKey, cursor + 1)] ? t(substitutions[window.exId(dayKey, cursor + 1)]) : t(next.name)}
+        </div>
+      )}
+
+      {/* Azioni */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <button className="btn primary" style={{ width: "100%", padding: 16, fontSize: 16, fontWeight: 600 }} onClick={serieFatta}>
+          <Icon name="check" size={17} color="#fff" /> {allSetsDone ? t("Dopo") : t("Serie fatta")}
+        </button>
+        <label style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontSize: 12.5, color: "var(--text-2)" }}>
+          <input type="checkbox" checked={autoRest} onChange={(e) => setAutoRest(e.target.checked)} />
+          {t("Auto-recupero")} ({ex.rest || 90}s)
+        </label>
+      </div>
+
+      {restSecs != null && (
+        <TimerOverlay seconds={restSecs} onClose={() => { setRestSecs(null); advance(); }} />
+      )}
+    </div>
+  );
+};
+
 // ── Main Scheda screen ─────────────────────────────────────────────────────
 const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   const isDesktop = device === "desktop";
@@ -478,6 +618,19 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   // Ref pesi condiviso per il salvataggio Sheets, keyed-by-id.
   const pesosRef = React.useRef(null);
   if (pesosRef.current === null) pesosRef.current = Object.assign({}, prog.pesos);
+
+  const [mode, setMode] = React.useState("list");   // "list" | "player"
+  const [cursor, setCursor] = React.useState(0);      // indice esercizio nel player
+  const [autoRest, setAutoRest] = React.useState(true);
+
+  // Ingresso al player da Home (CTA "Inizia allenamento" imposta _schedaIntent).
+  React.useEffect(() => {
+    if (window._schedaIntent === "player") {
+      window._schedaIntent = null;
+      setCursor(0);
+      setMode("player");
+    }
+  }, []);
 
   // Persiste una patch nel blocco piatto e aggiorna lo stato locale.
   const patchProg = (patch) => {
@@ -684,6 +837,15 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
         })}
       </div>
 
+      {/* CTA player */}
+      <button
+        className="btn primary"
+        style={{ width: "100%", padding: 13, fontSize: 15, fontWeight: 600 }}
+        onClick={() => { setCursor(0); setMode("player"); }}
+      >
+        <Icon name="check" size={16} color="#fff" /> {t("Inizia allenamento")}
+      </button>
+
       {/* Intestazione giorno: Giorno N · Nome + focus */}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 8, padding: "0 2px" }}>
         <span style={{ fontWeight: 700, fontSize: 15 }}>{t("Giorno")} {current.num} · {current.name}</span>
@@ -784,6 +946,25 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
         <TimerOverlay seconds={timer} onClose={() => setTimer(null)} />
       )}
       {showConfetti && <Confetti />}
+
+      {mode === "player" && (
+        <WorkoutPlayer
+          dayKey={scheda}
+          dayName={current.name}
+          exercises={exercises}
+          cursor={cursor}
+          setCursor={setCursor}
+          completion={completion}
+          substitutions={substitutions}
+          pesosRef={pesosRef}
+          sheetsWeights={sheetsWeights}
+          autoRest={autoRest}
+          setAutoRest={setAutoRest}
+          onPatch={patchProg}
+          onClose={() => setMode("list")}
+          onFinish={() => setMode("list")}
+        />
+      )}
     </div>
   );
 };
