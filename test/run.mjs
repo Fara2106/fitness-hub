@@ -46,6 +46,30 @@ try {
 }
 const W = sandbox.window;
 
+// ---- Suite dati: defaults.jsx (fallback embedded) ----
+console.log("\nSuite dati — defaults.jsx allineato + fallback validi");
+try {
+  vm.runInContext(transform(join(ROOT, "defaults.jsx")), sandbox, { filename: "defaults.jsx" });
+  ok("defaults.jsx si carica sotto vm", true);
+} catch (e) {
+  ok("defaults.jsx si carica sotto vm — " + e.message.split("\n")[0], false);
+}
+ok("SCHEDA_TXT_FALLBACK === scheda.txt (no drift)",
+  W.SCHEDA_TXT_FALLBACK === readFileSync(join(ROOT, "scheda.txt"), "utf8"));
+ok("DIETA_TXT_FALLBACK === dieta.txt (no drift)",
+  W.DIETA_TXT_FALLBACK === readFileSync(join(ROOT, "dieta.txt"), "utf8"));
+if (typeof W.parseScheda === "function") {
+  const sf = W.parseScheda(W.SCHEDA_TXT_FALLBACK);
+  ok("fallback scheda: ≥1 giorno con esercizi",
+    sf.days.length >= 1 && sf.days.every(d => d.exercises.length > 0));
+  ok("getSchedule() senza storage → fallback non vuoto",
+    W.getSchedule().days.length >= 1);
+}
+if (typeof W.parseDieta === "function") {
+  const df = W.parseDieta(W.DIETA_TXT_FALLBACK);
+  ok("fallback dieta: sezione riposo presente", !!(df && df.riposo));
+}
+
 if (typeof W.parseScheda === "function") {
   const s = W.parseScheda(readFileSync(join(DIR, "fixtures", "scheda-ppl.txt"), "utf8"));
   ok("parseScheda: 3 giorni", s.days.length === 3);

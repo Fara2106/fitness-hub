@@ -17,6 +17,7 @@ const STATIC_ASSETS = [
   BASE + "/api.jsx",
   BASE + "/app.jsx",
   BASE + "/storage.jsx",
+  BASE + "/defaults.jsx",
   BASE + "/parser.jsx",
   BASE + "/i18n.jsx",
   BASE + "/icons.jsx",

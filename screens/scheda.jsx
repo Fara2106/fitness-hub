@@ -1,56 +1,13 @@
 // scheda.jsx — Workout tracker: sets, timer, vibration, Sheets sync
 
-// ── Fallback schedule (used when scheda.txt not loaded) ──────────────────
-const _DEFAULT_DAYS = [
-  { num: 1, key: "Upper A", name: "Upper A", focus: ["Petto", "Schiena", "Bicipiti"], altMap: {}, exercises: [
-    { name:"Panca piana con bilanciere", muscles:["petto","tricipiti","spalle"], sets:[{peso:80,rip:9},{peso:82.5,rip:9},{peso:82.5,rip:8},{peso:82.5,rip:8}], rest:90, ripRange:"8-10", history:[], alternatives:["Push-up zavorrati","Push-up con piedi rialzati"] },
-    { name:"Panca inclinata con manubri (30°)", muscles:["petto","spalle"], sets:[{peso:30,rip:11},{peso:30,rip:11},{peso:30,rip:10},{peso:30,rip:10}], rest:90, ripRange:"10-12", history:[], alternatives:["Push-up con piedi su sedia"] },
-    { name:"Croci ai cavi bassi (chest fly)", muscles:["petto"], sets:[{peso:15,rip:13},{peso:15,rip:13},{peso:15,rip:12}], rest:75, ripRange:"12-15", history:[], alternatives:["Croci con elastico"] },
-    { name:"Dips alle parallele", muscles:["petto","tricipiti"], sets:[{peso:0,rip:10},{peso:0,rip:9},{peso:0,rip:8}], rest:90, ripRange:"8-12", history:[], alternatives:["Dips su sedia"] },
-    { name:"Lat machine presa larga (pull-down)", muscles:["schiena","bicipiti"], sets:[{peso:55,rip:11},{peso:60,rip:10},{peso:60,rip:10},{peso:60,rip:9}], rest:90, ripRange:"10-12", history:[], alternatives:["Trazioni","Inverted row su tavolo"] },
-    { name:"Rematore con manubrio su panca (1 braccio)", muscles:["schiena","bicipiti"], sets:[{peso:32,rip:11},{peso:34,rip:10},{peso:34,rip:10}], rest:75, ripRange:"10-12", history:[], alternatives:["Row con zaino zavorrato","Elastico"] },
-    { name:"Alzate laterali con manubri", muscles:["spalle"], sets:[{peso:10,rip:13},{peso:10,rip:12},{peso:10,rip:12}], rest:75, ripRange:"12-15", history:[], alternatives:["Alzate con bottiglie d'acqua"] },
-    { name:"Curl con bilanciere EZ", muscles:["bicipiti"], sets:[{peso:25,rip:11},{peso:27.5,rip:10},{peso:27.5,rip:10}], rest:75, ripRange:"10-12", history:[], alternatives:["Curl con bottiglie"] },
-    { name:"Curl con manubri alternati (martello)", muscles:["bicipiti"], sets:[{peso:14,rip:11},{peso:14,rip:10},{peso:14,rip:10}], rest:75, ripRange:"10-12", history:[], alternatives:["Curl neutrale con bottiglie"] },
-  ] },
-  { num: 2, key: "Lower", name: "Lower", focus: ["Gambe", "Glutei", "Core"], altMap: {}, exercises: [
-    { name:"Squat con bilanciere (back squat)", muscles:["quadricipiti","glutei"], sets:[{peso:100,rip:9},{peso:105,rip:8},{peso:105,rip:8},{peso:105,rip:8}], rest:120, ripRange:"8-10", history:[], alternatives:["Squat con zaino zavorrato","Bulgarian split squat"] },
-    { name:"Leg press 45°", muscles:["quadricipiti","glutei"], sets:[{peso:120,rip:13},{peso:130,rip:12},{peso:130,rip:12}], rest:90, ripRange:"12-15", history:[], alternatives:["Squat sumo","Wall sit"] },
-    { name:"Romanian Deadlift (RDL) con bilanciere", muscles:["femorali","glutei"], sets:[{peso:90,rip:11},{peso:95,rip:10},{peso:95,rip:10},{peso:95,rip:10}], rest:90, ripRange:"10-12", history:[], alternatives:["Stacco a una gamba corpo libero"] },
-    { name:"Affondi con manubri (camminata)", muscles:["quadricipiti","glutei"], sets:[{peso:20,rip:10},{peso:22,rip:10},{peso:22,rip:10}], rest:90, ripRange:"10/gamba", history:[], alternatives:["Affondi statici","Reverse lunge"] },
-    { name:"Leg curl sdraiato (macchina)", muscles:["femorali"], sets:[{peso:50,rip:13},{peso:55,rip:12},{peso:55,rip:12}], rest:75, ripRange:"12-15", history:[], alternatives:["Nordic curl","Leg curl con elastico"] },
-    { name:"Calf raise in piedi (macchina o scalino)", muscles:["polpacci"], sets:[{peso:80,rip:17},{peso:80,rip:17},{peso:80,rip:16},{peso:80,rip:16}], rest:60, ripRange:"15-20", history:[], alternatives:["Calf raise su scalino"] },
-    { name:"Crunch inverso a terra", muscles:["addome"], sets:[{peso:0,rip:17},{peso:0,rip:17},{peso:0,rip:17}], rest:60, ripRange:"15-20", history:[], alternatives:["Leg raise sdraiato"] },
-    { name:"Plank isometrico", muscles:["addome"], sets:[{peso:0,rip:45},{peso:0,rip:50},{peso:0,rip:50}], rest:60, ripRange:"45-60 sec", history:[], alternatives:[] },
-    { name:"Back extension (macchina o panca lombare)", muscles:["schiena"], sets:[{peso:20,rip:13},{peso:25,rip:12},{peso:25,rip:12}], rest:60, ripRange:"12-15", history:[], alternatives:[] },
-  ] },
-  { num: 3, key: "Upper B", name: "Upper B", focus: ["Schiena", "Spalle", "Tricipiti"], altMap: {}, exercises: [
-    { name:"Military press (bilanciere)", muscles:["spalle","tricipiti"], sets:[{peso:50,rip:8},{peso:52.5,rip:7},{peso:52.5,rip:6}], rest:120, ripRange:"6-10", history:[], alternatives:["Lento manubri","Push press"] },
-    { name:"Trazioni o Lat machine presa stretta", muscles:["schiena","bicipiti"], sets:[{peso:-20,rip:10},{peso:-15,rip:8},{peso:-10,rip:7}], rest:120, ripRange:"8-12", history:[], alternatives:["Lat machine presa stretta","Pulley alto"] },
-    { name:"Rematore con bilanciere (pendlay row)", muscles:["schiena"], sets:[{peso:70,rip:8},{peso:72.5,rip:8},{peso:72.5,rip:7}], rest:90, ripRange:"6-10", history:[], alternatives:["Rematore T-bar","Chest-supported row"] },
-    { name:"Panca stretta (tricipiti)", muscles:["tricipiti","petto"], sets:[{peso:60,rip:10},{peso:62.5,rip:9},{peso:62.5,rip:8}], rest:90, ripRange:"8-12", history:[], alternatives:["Push-up presa stretta","Dips verticali"] },
-    { name:"Face pull (cavo alto)", muscles:["spalle","trapezi"], sets:[{peso:25,rip:15},{peso:27.5,rip:13},{peso:27.5,rip:13}], rest:75, ripRange:"12-15", history:[], alternatives:["Alzate posteriori manubri"] },
-    { name:"Alzate laterali con manubri", muscles:["spalle"], sets:[{peso:10,rip:13},{peso:10,rip:13},{peso:10,rip:12}], rest:75, ripRange:"12-15", history:[], alternatives:["Alzate laterali cavo","Alzate con bottiglie"] },
-    { name:"Skull crusher (EZ barra)", muscles:["tricipiti"], sets:[{peso:30,rip:11},{peso:32.5,rip:10},{peso:32.5,rip:10}], rest:75, ripRange:"10-12", history:[], alternatives:["Push-down cavo"] },
-    { name:"Curl con manubri alternati", muscles:["bicipiti"], sets:[{peso:14,rip:11},{peso:14,rip:10},{peso:14,rip:10}], rest:75, ripRange:"10-12", history:[], alternatives:["Curl EZ","Curl cavo"] },
-    { name:"Shrug con manubri o bilanciere", muscles:["trapezi"], sets:[{peso:30,rip:13},{peso:32.5,rip:12},{peso:32.5,rip:12}], rest:75, ripRange:"12-15", history:[], alternatives:[] },
-    { name:"Crunch inverso a terra", muscles:["addome"], sets:[{peso:0,rip:17},{peso:0,rip:17},{peso:0,rip:16}], rest:60, ripRange:"15-20", history:[], alternatives:["Leg raise sdraiato"] },
-    { name:"Plank isometrico", muscles:["addome"], sets:[{peso:0,rip:45},{peso:0,rip:50},{peso:0,rip:50}], rest:60, ripRange:"45-60 sec", history:[], alternatives:[] },
-  ] },
-];
-
-// Costruisce la lista ordinata di giorni dal file (o fallback ai default).
+// Lista ordinata dei giorni: sempre da getSchedule() (che ha il fallback
+// testuale embedded in defaults.jsx quando storage è vuoto).
 function _buildSchedule() {
   const sched = window.getSchedule ? window.getSchedule() : { days: [] };
   const days = (sched && sched.days) || [];
-  if (!days.length) return _DEFAULT_DAYS;
   return days.map(d => ({
     ...d,
-    exercises: (d.exercises || []).map(ex => ({
-      ...ex,
-      alternatives: (ex.alternatives && ex.alternatives.length) ? ex.alternatives : (ex.alternatives || []),
-      history: ex.history || [],
-    })),
+    exercises: (d.exercises || []).map(ex => ({ ...ex, history: ex.history || [] })),
   }));
 }
 

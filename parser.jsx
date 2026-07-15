@@ -143,7 +143,7 @@ window._musclesFromExercises = _musclesFromExercises;
 // Schedule corrente dal file salvato (unica fonte di verità per tutti i consumer).
 window.getSchedule = function () {
   const st = window.storage;
-  const text = st ? st.get("schedaData", null) : null;
+  const text = (st ? st.get("schedaData", null) : null) || window.SCHEDA_TXT_FALLBACK || null;
   if (!text) return { days: [] };
   try { return window.parseScheda(text); } catch (_) { return { days: [] }; }
 };

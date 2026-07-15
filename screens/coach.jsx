@@ -27,8 +27,8 @@ function _buildSystemPrompt({ activities, checkIn, bodyWeight, lang }) {
 
   // File caricati dall'utente
   const st = window.storage;
-  const schedaData = st ? st.get("schedaData", null) : null;
-  const dietaData  = st ? st.get("dietaData",  null) : null;
+  const schedaData = (st ? st.get("schedaData", null) : null) || window.SCHEDA_TXT_FALLBACK || null;
+  const dietaData  = (st ? st.get("dietaData",  null) : null) || window.DIETA_TXT_FALLBACK  || null;
 
   // Check-in e note sessione di oggi
   const today = window.todayKey ? window.todayKey() : now.toISOString().slice(0, 10);
