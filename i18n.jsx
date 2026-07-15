@@ -146,8 +146,6 @@ const I18N_DICT = {
   "L'ultima volta": { en: "Last time" },
   "Dopo": { en: "Next" },
   "Auto-recupero": { en: "Auto-rest" },
-  "Sessione completa": { en: "Session complete" },
-  "Chiudi e salva": { en: "Finish & save" },
   "Esci dal player": { en: "Exit player" },
   "Nessuno storico": { en: "No history" },
 

@@ -466,7 +466,7 @@ const WorkoutPlayer = ({
   const [restSecs, setRestSecs] = React.useState(null);
 
   const ex = exercises[cursor];
-  if (!ex) return null;
+  if (!ex || !ex.sets || !ex.sets.length) return null;
   const id = window.exId(dayKey, cursor);
   const done = completion[id] || new Array(ex.sets.length).fill(false);
   // Serie corrente = prima non completata (o l'ultima se tutte fatte).
