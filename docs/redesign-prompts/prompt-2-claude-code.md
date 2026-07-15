@@ -24,15 +24,15 @@ Il mockup cambia **solo l'aspetto**. Non cambiare quali schermate esistono, la n
 ## Backend e sync — INTOCCABILI
 
 - **Non modificare** `api.jsx` (endpoint/logica di `sheetsAPI`/`groqAPI`), `storage.jsx`, `google-apps-script.gs`, `cloudflare-worker.js`. Il backend Google Sheets funziona: lascialo così.
-- Non rinominare né rimuovere le **chiavi di sync**: `groqApiKey`, `schedaData`/`dietaData`, `spesaChecked2`, `spesaFreq`, `bodyWeight`, `weekNum`, `onboardingDone`. (Gotcha spesa: chiave cloud `spesaChecked2`, chiave locale `spesaChecked` — non toccare.)
+- Non rinominare né rimuovere le **chiavi di sync**: `groqApiKey`, `schedaData`/`dietaData`, `spesaChecked2`, `spesaFreq`, `bodyWeight`, `onboardingDone`. (Gotcha spesa: chiave cloud `spesaChecked2`, chiave locale `spesaChecked` — non toccare.)
 - Non toccare le chiavi per-giorno né la loro pulizia: `schedaProg_<date>`, `gym_<date>`, `muscleSets_<date>`, `coachChat_<date>`, `_cleanupOldDailyKeys()`.
 
 ## Gotcha da preservare (non introdurre regressioni)
 
-- **`screens/scheda.jsx` — bleed tra i giorni**: `completion`, `substitutions`, `occupied`, `pesosRef` sono indicizzati **per posizione** e vanno sostituiti **tutti insieme** in `switchTo(tab)`, caricando il blocco per-tab da `schedaProg_<date>`. Qualsiasi nuovo stato per-posizione va aggiunto a `switchTo` **e** al blocco persistito. Non reintrodurre il bug dei pesi che finiscono sull'esercizio sbagliato.
+- **`screens/scheda.jsx` — stato keyed-by-id (ex bleed tra i giorni, ora RISOLTO)**: `completion`, `substitutions`, `occupied`, `pesosRef` sono indicizzati per **id stabile** `window.exId(dayKey, pos)` (modulo `schedaState.jsx`), in una mappa piatta valida per tutti i giorni; `switchTo` cambia solo il giorno mostrato. **Non reintrodurre l'indicizzazione per posizione** (era la causa storica del "bleed" — pesi sull'esercizio sbagliato). Qualsiasi nuovo stato per-esercizio va indicizzato per `exId(scheda, i)`, mai per intero grezzo. `schedaProg_<date>` è un blocco piatto `{completion,substitutions,pesos}`.
 - **Recharts (Storico)** richiede il `<script>` di `prop-types` caricato **prima** di Recharts in `index.html`. Non rimuoverlo.
 - **Rest timer** (`TimerOverlay`) è timestamp-based (`endRef`) + Wake Lock. Non tornare a un contatore `setInterval`.
-- **Shell iOS**: non toccare i due `<meta name="theme-color" media=…>` (dark `#0b0b0f` / light `#f7f7fa`), il `#root { position:fixed; inset:0 }`, né `--statusbar-bg`. Sono fix hard-won della safe-area iOS.
+- **Shell iOS (fix hard-won della safe-area — non toccare)**: i due `<meta name="theme-color" media=…>` (dark `#0b0b0f` / light `#f7f7fa`); il viewport con `maximum-scale=1, user-scalable=no`; l'altezza di `html`+`body` a `100vh; 100lvh` con `body` flex-column e `#root { flex:1 }` (è ciò che elimina la fascia nera in fondo su iOS standalone — **non** rimettere `#root { position:fixed; inset:0 }`/`height:100dvh`, sono dead-end provati); `--statusbar-bg` per l'orario leggibile in light.
 
 ## Metodo di lavoro (in quest'ordine)
 
@@ -41,9 +41,9 @@ Il mockup cambia **solo l'aspetto**. Non cambiare quali schermate esistono, la n
 3. **Schermata per schermata**, una alla volta, in `screens/`: `dashboard, scheda, dieta, spesa, coach, storico, impostazioni, onboarding`. Applica il nuovo look riusando i componenti `UI*`. Ferma e mostrami il risultato dopo ognuna prima di passare alla successiva.
 4. Se aggiungi un file nuovo, aggiungilo a `index.html` nell'ordine corretto.
 
-## Validazione (non c'è test runner)
+## Validazione (`npm test`)
 
-Dopo ogni file modificato, verifica che transpili:
+Dopo ogni file modificato lancia `npm test` (harness Node: smoke Babel su ogni `.jsx` + unit del parser + suite `schedaState`). Per verificare un singolo file:
 
 ```bash
 cd ~/Documents/Web\ Apps/Fitness\ App

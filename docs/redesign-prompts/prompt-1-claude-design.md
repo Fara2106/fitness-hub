@@ -48,10 +48,10 @@ Header con avatar "LF", Card, Row (riga lista), Segmented control, Chip, Progres
 
 ## Le 8 schermate (stessa struttura, nuovo look)
 
-Navigazione: **tab bar in basso** con Dashboard · Scheda · Dieta · Coach · Impostazioni (Spesa e Storico raggiunte da dentro le altre schermate — non in tab bar).
+Navigazione: **tab bar in basso** con Dashboard · Scheda · Dieta · Spesa · Coach · Impostazioni (Storico raggiunto da Impostazioni → Progressi — non in tab bar).
 
-1. **Dashboard (Home)** — header con avatar LF + badge di sync; hero "Oggi" (sessione di allenamento del giorno o "riposo", chip informative, CTA grande "Inizia allenamento"); riga "Prossimo pasto"; check-in rapido (Sonno ed Energia a 5 tacche, "Fastidi" espandibile); due StatTile affiancate (Peso, Mesociclo settimana 1–8); card secondarie: Idratazione, Movimento/cardio, riepilogo muscoli allenati nella settimana.
-2. **Scheda (allenamento)** — split Upper/Lower con **tab dei giorni** in alto (es. Upper A / Lower / Upper B, o G1…G5); lista esercizi con spunta di completamento, serie/ripetizioni/peso, possibilità di sostituzione esercizio; overlay **timer di recupero** a schermo pieno. È la schermata più densa: rendila leggibile e "da palestra" (target grandi, leggibile a distanza).
+1. **Dashboard (Home)** — header con avatar LF + badge di sync; hero "Oggi" (sessione di allenamento del giorno o "riposo", chip informative, CTA grande "Inizia allenamento"); riga "Prossimo pasto"; check-in rapido (Sonno ed Energia a 5 tacche, "Fastidi" espandibile); StatTile Peso (tap = log rapido); card secondarie: Idratazione, Movimento/cardio, riepilogo muscoli allenati nella settimana.
+2. **Scheda (allenamento)** — **tab dei giorni** dinamici in alto (G1…G5, nomi dal piano, es. Push / Pull / Legs); lista esercizi con spunta di completamento, serie/ripetizioni/peso, sostituzione esercizio; overlay **timer di recupero** a schermo pieno; più un **Player a schermo intero** (un esercizio alla volta, "Serie fatta" → auto-recupero → avanzamento). È la schermata più densa: rendila leggibile e "da palestra" (target grandi, leggibile a distanza).
 3. **Dieta** — sezioni per pasto con lista alimenti (i **nomi dei cibi restano in italiano**, sono dati del piano); varianti giorno-allenamento vs giorno-riposo.
 4. **Spesa (lista della spesa)** — lista con spunte, raggruppata; controllo frequenza.
 5. **Coach (AI)** — interfaccia chat con l'allenatore AI (bolle utente/coach, campo input, stato "sta scrivendo").
@@ -61,7 +61,7 @@ Navigazione: **tab bar in basso** con Dashboard · Scheda · Dieta · Coach · I
 
 ## Dominio (per rendere i mockup credibili)
 
-App fitness personale, split Upper/Lower 3×/settimana su mesociclo di 8 settimane (Upper A lun, Lower mer, Upper B ven), cardio nei giorni di riposo. C'è un coach AI, tracking peso corporeo, dieta e lista spesa.
+App fitness personale, allenamento 3×/settimana a **giorni dinamici** dal piano (es. Push/Pull/Legs, o Upper/Lower), cardio nei giorni di riposo. C'è un coach AI, tracking peso corporeo, dieta e lista spesa. (Niente mesociclo/settimane né RPE — rimossi dall'app.)
 
 ## Regole finali
 
