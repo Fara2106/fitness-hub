@@ -137,7 +137,7 @@ const Onboarding = ({ device, onDone }) => {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div style={{
             width: 28, height: 28, borderRadius: 8,
-            background: "linear-gradient(135deg, #0A84FF 0%, #5e5ce6 100%)",
+            background: "var(--brand-grad)",
             display: "flex", alignItems: "center", justifyContent: "center",
             fontFamily: "var(--display)", fontWeight: 700, fontSize: 13, color: "#fff",
           }}>LF</div>

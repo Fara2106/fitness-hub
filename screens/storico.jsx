@@ -330,8 +330,8 @@ const Storico = ({ device, onNav }) => {
         </div>
       )}
 
-      {/* Tab selector */}
-      <div className="tab-pills" style={{ alignSelf: "flex-start" }}>
+      {/* Tab selector — segmented control iOS, coerente con Dieta/Impostazioni */}
+      <div className="segmented">
         {[
           { id: "peso",     label: `⚖️ ${t("Peso")}` },
           { id: "cardio",   label: `🏃 ${t("Cardio")}` },
