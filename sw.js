@@ -37,11 +37,13 @@ const STATIC_ASSETS = [
 ];
 
 // ── Install: pre-cacha tutti i file statici ──────────────────────────────────
+// NB: NIENTE self.skipWaiting() → il nuovo SW resta "waiting" finché l'utente
+// non tocca "Aggiorna" nel banner (vedi index.html + app.jsx). Così l'update
+// non si applica in modo silenzioso/imprevedibile.
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
   );
-  self.skipWaiting();
 });
 
 // ── Activate: elimina vecchie cache ─────────────────────────────────────────
@@ -56,6 +58,11 @@ self.addEventListener("activate", (event) => {
     )
   );
   self.clients.claim();
+});
+
+// ── Message: il banner "Aggiorna" chiede di attivare subito questo SW ─────────
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 // ── Fetch: strategia per tipo di richiesta ───────────────────────────────────

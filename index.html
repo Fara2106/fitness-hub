@@ -155,7 +155,8 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 <!-- Service Worker (PWA offline support) -->
 <script>
 if ('serviceWorker' in navigator) {
-  // Rileva quando un nuovo SW prende il controllo → ricarica per avere codice aggiornato
+  // Ricarica quando un nuovo SW prende il controllo (scatta DOPO che l'utente
+  // tocca "Aggiorna" → SKIP_WAITING → il nuovo SW si attiva). Guard anti-loop.
   let _refreshing = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (_refreshing) return;
@@ -163,6 +164,17 @@ if ('serviceWorker' in navigator) {
     console.log('[SW] Nuovo SW attivo, ricarico...');
     window.location.reload();
   });
+
+  // Ponte verso React: segnala che c'è un update pronto e come applicarlo.
+  // Stesso schema del ponte sync ("lfh-sync"). _swUpdateReady copre il caso in
+  // cui React monti DOPO l'evento (lo stato iniziale lo rilegge).
+  function _promptUpdate(worker) {
+    if (!worker) return;
+    window._swApplyUpdate = () => worker.postMessage({ type: 'SKIP_WAITING' });
+    window._swUpdateReady = true;
+    try { window.dispatchEvent(new Event('lfh-sw-update')); } catch (_) {}
+    console.log('[SW] Update disponibile, banner mostrato.');
+  }
 
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js')
@@ -174,6 +186,19 @@ if ('serviceWorker' in navigator) {
         // Controlla aggiornamenti subito e poi ogni 60s
         reg.update().catch(() => {});
         setInterval(() => reg.update().catch(() => {}), 60000);
+
+        // Se un worker è già in attesa al load → update pronto.
+        if (reg.waiting && navigator.serviceWorker.controller) _promptUpdate(reg.waiting);
+
+        // Nuovo worker trovato: quando è "installed" E c'è già un controller
+        // (= aggiornamento, non prima installazione) → mostra il banner.
+        reg.addEventListener('updatefound', () => {
+          const nw = reg.installing;
+          if (!nw) return;
+          nw.addEventListener('statechange', () => {
+            if (nw.state === 'installed' && navigator.serviceWorker.controller) _promptUpdate(nw);
+          });
+        });
       })
       .catch(err => console.warn('[SW] Registrazione non riuscita (normale se l\'ambiente blocca i service worker):', err && err.message ? err.message : err));
   });
