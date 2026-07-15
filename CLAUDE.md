@@ -13,11 +13,13 @@ This project has no build step. Breaking these turns the app into a blank page.
 - **Persistence is `window.storage` only** (IndexedDB-backed, reads sync after init). **Never** use `localStorage`/`sessionStorage`.
 - **No `<form>` tags** — wire `onClick`/`onChange` directly.
 - **No bundler.** JSX files are loaded in a fixed order by `index.html` via `<script type="text/babel" src="...?v=BUILD">`. A new file must be added to that list (load order matters: a global must be defined before a file that uses it).
-- After any edit, the only "compile" check available is the Babel preset; there is no test suite.
+- After any edit, run `npm test` (Node harness, see below) and/or the Babel preset check. No browser test suite — verification is compile-check + parser unit tests + on-device QA.
 
-## Validate changes (no test runner)
+## Validate changes (`npm test` + Babel)
 
-Verify every JSX file still transforms with `@babel/preset-react` before considering work done:
+**`npm test`** runs a zero-dependency Node harness (`test/run.mjs`, uses only `@babel/core` + `node:vm`): a **smoke suite** that Babel-transforms every `.jsx` in root/`screens`/`dev` (fails loudly on any syntax error) and **parser unit tests** that run `parser.jsx` in a `window`-shim sandbox and assert `parseScheda`/`parseDieta`/`foodEmoji` against fixtures in `test/fixtures/`. Run it after any edit. (`test/` and `dev/` are excluded from the Pages build.)
+
+Single-file check (subset of the smoke suite, when you want just one file):
 ```bash
 cd ~/Documents/Web\ Apps/Fitness\ App
 node -e "require('@babel/core').transformFileSync('<file>.jsx', {presets:['@babel/preset-react']})"   # npx @babel/core NON funziona (nessun bin); vale anche per screens/*.jsx
