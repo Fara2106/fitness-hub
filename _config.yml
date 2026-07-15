@@ -7,5 +7,6 @@
 exclude:
   - docs/
   - node_modules/
+  - test/
   - "*.command"
   - Deploy GitHub Pages.command

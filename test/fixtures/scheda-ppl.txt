@@ -1,0 +1,17 @@
+# PUSH - Giorno 1
+# Focus: Pettorali · Spalle · Tricipiti
+Esercizio | Serie | Ripetizioni | Recupero | Note
+Panca piana | 4 | 8-10 | 90 | pettorali
+Alzate laterali | 3 | 12-15 | 60 | spalle
+
+# PULL - Giorno 2
+# Focus: Dorso · Bicipiti
+Esercizio | Serie | Ripetizioni | Recupero | Note
+Trazioni | 4 | 6-8 | 120 | dorso
+Curl bilanciere | 3 | 10-12 | 60 | bicipiti
+
+# LEGS - Giorno 3
+# Focus: Quadricipiti · Femorali · Polpacci
+Esercizio | Serie | Ripetizioni | Recupero | Note
+Squat | 4 | 6-8 | 150 | quadricipiti
+Stacco rumeno | 3 | 8-10 | 120 | femorali
