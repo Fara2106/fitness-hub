@@ -24,6 +24,7 @@ const STATIC_ASSETS = [
   BASE + "/anatomy.jsx",
   BASE + "/ui.jsx",
   BASE + "/nav.jsx",
+  BASE + "/schedaState.jsx",
   BASE + "/screens/dashboard.jsx",
   BASE + "/screens/scheda.jsx",
   BASE + "/screens/dieta.jsx",

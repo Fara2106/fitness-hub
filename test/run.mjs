@@ -91,6 +91,42 @@ if (typeof W.foodEmoji === "function") {
   ok("foodEmoji('pollo') non vuoto", typeof W.foodEmoji("pollo") === "string" && W.foodEmoji("pollo").length > 0);
 } else ok("foodEmoji esiste", false);
 
+// ---- Suite schedaState (modulo puro, sandbox vm) ----
+console.log("\nSuite schedaState — id + persistenza keyed-by-id");
+try {
+  vm.runInContext(transform(join(ROOT, "schedaState.jsx")), sandbox, { filename: "schedaState.jsx" });
+  ok("schedaState.jsx si carica sotto vm", true);
+} catch (e) {
+  ok("schedaState.jsx si carica sotto vm — " + e.message.split("\n")[0], false);
+}
+if (typeof W.exId === "function") {
+  ok("exId compone dayKey#pos", W.exId("Upper A", 3) === "Upper A#3");
+  ok("exId distingue giorni alla stessa posizione", W.exId("Upper A", 0) !== W.exId("Lower", 0));
+
+  // Bleed simulation: la mappa piatta isola i giorni per costruzione.
+  const completion = {};
+  completion[W.exId("Upper A", 0)] = [true, true, false];
+  completion[W.exId("Lower", 0)]   = [false];
+  const upA = W.getDayState(completion, "Upper A", 1);
+  const low = W.getDayState(completion, "Lower", 1);
+  ok("getDayState: Upper A legge solo i suoi id", JSON.stringify(upA[0]) === JSON.stringify([true, true, false]));
+  ok("getDayState: scrivere Lower non tocca Upper A", JSON.stringify(low[0]) === JSON.stringify([false]));
+  ok("getDayState: posizione assente → undefined", W.getDayState(completion, "Upper A", 2)[1] === undefined);
+}
+if (typeof W.readSchedaProg === "function") {
+  // Fake storage sincrono in stile window.storage.
+  const fake = { _d: {}, get(k, d) { return k in this._d ? this._d[k] : d; }, set(k, v) { this._d[k] = v; } };
+  const empty = W.readSchedaProg(fake, "2026-07-15");
+  ok("readSchedaProg: blocco vuoto ha completion/substitutions/pesos",
+    empty && empty.completion && empty.substitutions && empty.pesos);
+  W.writeSchedaProg(fake, "2026-07-15", { completion: { "Upper A#0": [true] } });
+  W.writeSchedaProg(fake, "2026-07-15", { pesos: { "Upper A#0": ["80"] } });
+  const merged = W.readSchedaProg(fake, "2026-07-15");
+  ok("writeSchedaProg: merge preserva chiavi precedenti",
+    merged.completion["Upper A#0"][0] === true && merged.pesos["Upper A#0"][0] === "80");
+  ok("schedaProgKey usa la data", W.schedaProgKey("2026-07-15") === "schedaProg_2026-07-15");
+}
+
 // ---- Esito ----
 console.log("\n" + pass + " pass, " + fail + " fail");
 process.exit(fail === 0 ? 0 : 1);
