@@ -11,24 +11,9 @@ function _buildSchedule() {
   }));
 }
 
-// ── Persistenza progressi di giornata (per giorno + sessione) ─────────────
-// Senza, uscire dalla tab Scheda a metà allenamento perdeva serie completate,
-// pesi digitati e sostituzioni (lo stato viveva solo nel componente montato).
-// NB: le chiavi restano indicizzate per posizione → il reset tra tab (bleed)
-// è gestito caricando SEMPRE il blocco salvato della tab di destinazione.
-function _progKey() {
-  return `schedaProg_${window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10)}`;
-}
-function _loadProg(tab) {
-  const all = window.storage ? window.storage.get(_progKey(), {}) : {};
-  return (all && all[tab]) || { completion: {}, substitutions: {}, pesos: {} };
-}
-function _saveProg(tab, patch) {
-  if (!window.storage) return;
-  const key = _progKey();
-  const all = window.storage.get(key, {}) || {};
-  all[tab] = Object.assign({}, all[tab], patch);
-  window.storage.set(key, all);
+// Chiave giorno per la persistenza dei progressi (schedaProg_<date>).
+function _todayK() {
+  return window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
 }
 
 // ── Timer overlay ──────────────────────────────────────────────────────────
@@ -475,43 +460,46 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   const isDesktop = device === "desktop";
   const t = useT();
 
-  const [days]        = React.useState(() => _buildSchedule());
-  const current       = days.find(d => d.key === scheda) || days[0] || { key: "", num: 0, name: "", focus: [], exercises: [] };
-  const [completion, setCompletion]   = React.useState(() => _loadProg(scheda).completion || {});
-  const [timer, setTimer]             = React.useState(null);
-  const [occupied, setOccupied]       = React.useState({});
-  const [showConfetti, setShowConfetti] = React.useState(false);
-  const [substitutions, setSubstitutions] = React.useState(() => _loadProg(scheda).substitutions || {});
-  const [notes, setNotes]             = React.useState(() => window.storage ? window.storage.get(`notes_${window.todayKey ? window.todayKey() : ""}`, "") : "");
-  const [sheetsWeights, setSheetsWeights] = React.useState(null);
-  const [saving, setSaving]           = React.useState(false);
-  const [saveMsg, setSaveMsg]         = React.useState("");
-  const prevDoneRef                   = React.useRef(null); // null = da inizializzare al primo render
-  // Ref condiviso: ogni ExerciseCard scrive i propri pesos qui per il salvataggio su Sheets
-  const pesosRef = React.useRef(null);
-  if (pesosRef.current === null) pesosRef.current = Object.assign({}, _loadProg(scheda).pesos);
+  const [days]  = React.useState(() => _buildSchedule());
+  const current = days.find(d => d.key === scheda) || days[0] || { key: "", num: 0, name: "", focus: [], exercises: [] };
 
-  // Cambia tab caricando i progressi salvati di QUELLA tab: tutti gli stati
-  // per-posizione (completion/substitutions/occupied/pesos) vanno sostituiti
-  // insieme per evitare il bleed tra giorni diversi.
-  const switchTo = (k) => {
-    const saved = _loadProg(k);
-    const exs = (days.find(d => d.key === k) || {}).exercises || [];
-    const tot  = exs.reduce((n, ex) => n + ex.sets.length, 0);
-    const done = exs.reduce((n, ex, i) => n + ((saved.completion || {})[i] || []).filter(Boolean).length, 0);
-    setScheda(k);
-    if (window.storage) window.storage.set("schedaSelectedDay", k);
-    setCompletion(saved.completion || {});
-    setSubstitutions(saved.substitutions || {});
-    setOccupied({});
-    pesosRef.current = Object.assign({}, saved.pesos);
-    prevDoneRef.current = tot > 0 && done === tot; // niente confetti ri-entrando in una sessione già completa
+  // Blocco progressi di giornata (piatto, keyed-by-id, valido per TUTTI i giorni).
+  const [prog, setProg] = React.useState(() => window.readSchedaProg(window.storage, _todayK()));
+  const completion    = prog.completion;      // { "Day#pos": [bool,…] }
+  const substitutions = prog.substitutions;   // { "Day#pos": "nome alt" }
+  const [timer, setTimer]   = React.useState(null);
+  const [occupied, setOccupied] = React.useState({}); // effimero, keyed-by-id
+  const [showConfetti, setShowConfetti] = React.useState(false);
+  const [notes, setNotes]   = React.useState(() => window.storage ? window.storage.get(`notes_${_todayK()}`, "") : "");
+  const [sheetsWeights, setSheetsWeights] = React.useState(null);
+  const [saving, setSaving] = React.useState(false);
+  const [saveMsg, setSaveMsg] = React.useState("");
+  const prevDoneRef = React.useRef(null); // null = da inizializzare al primo render
+  // Ref pesi condiviso per il salvataggio Sheets, keyed-by-id.
+  const pesosRef = React.useRef(null);
+  if (pesosRef.current === null) pesosRef.current = Object.assign({}, prog.pesos);
+
+  // Persiste una patch nel blocco piatto e aggiorna lo stato locale.
+  const patchProg = (patch) => {
+    window.writeSchedaProg(window.storage, _todayK(), patch);
+    setProg(p => ({
+      completion:    Object.assign({}, p.completion,    patch.completion),
+      substitutions: Object.assign({}, p.substitutions, patch.substitutions),
+      pesos:         Object.assign({}, p.pesos,          patch.pesos),
+    }));
   };
 
-  // Persisti i progressi a ogni modifica (le note hanno già la loro chiave)
-  React.useEffect(() => {
-    _saveProg(scheda, { completion, substitutions });
-  }, [completion, substitutions, scheda]);
+  // Cambia SOLO il giorno mostrato. Lo stato è keyed-by-id e vive per tutti i
+  // giorni insieme → niente swap, niente bleed.
+  const switchTo = (k) => {
+    setScheda(k);
+    if (window.storage) window.storage.set("schedaSelectedDay", k);
+    const exs = (days.find(d => d.key === k) || {}).exercises || [];
+    const tot = exs.reduce((n, ex) => n + ex.sets.length, 0);
+    const done = exs.reduce((n, ex, i) => n + ((completion[window.exId(k, i)] || []).filter(Boolean).length), 0);
+    setOccupied({});
+    prevDoneRef.current = tot > 0 && done === tot; // no confetti rientrando in sessione completa
+  };
 
   // Load last weights from Sheets on mount
   React.useEffect(() => {
@@ -534,7 +522,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   const exercises = current.exercises || [];
   const totalSets = exercises.reduce((n, ex) => n + ex.sets.length, 0);
   const completedSets = exercises.reduce(
-    (n, ex, i) => n + (completion[i] || []).filter(Boolean).length, 0
+    (n, ex, i) => n + ((completion[window.exId(scheda, i)] || []).filter(Boolean).length), 0
   );
   const pct = totalSets ? (completedSets / totalSets) * 100 : 0;
   const allDone = completedSets > 0 && completedSets === totalSets;
@@ -555,13 +543,11 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
 
   const toggleSet = (exIdx, setIdx) => {
     if (navigator.vibrate) navigator.vibrate([100]);
-    let wasCompleted = false;
-    setCompletion(c => {
-      const arr = [...(c[exIdx] || new Array(exercises[exIdx].sets.length).fill(false))];
-      wasCompleted = arr[setIdx];
-      arr[setIdx] = !arr[setIdx];
-      return { ...c, [exIdx]: arr };
-    });
+    const id = window.exId(scheda, exIdx);
+    const arr = [...(completion[id] || new Array(exercises[exIdx].sets.length).fill(false))];
+    const wasCompleted = arr[setIdx];
+    arr[setIdx] = !arr[setIdx];
+    patchProg({ completion: { [id]: arr } });
     // Auto-start rest timer when marking a set as DONE (not when unchecking)
     if (!wasCompleted) {
       const restSecs = exercises[exIdx]?.rest || 90;
@@ -588,7 +574,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
         };
         const daily = {};
         exercises.forEach((ex, exIdx) => {
-          const done = (completion[exIdx] || []).filter(Boolean).length;
+          const done = (completion[window.exId(scheda, exIdx)] || []).filter(Boolean).length;
           if (!done) return;
           const g = GROUP[(ex.muscles && ex.muscles[0]) || ""] || "Altro";
           daily[g] = (daily[g] || 0) + done;
@@ -609,9 +595,10 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
         // 2. Salva ogni serie completata su SerieAllenamento
         const savePromises = [];
         exercises.forEach((ex, exIdx) => {
-          const exCompletion = completion[exIdx] || [];
-          const exName = substitutions[exIdx] || ex.name;
-          const exPesos = pesosRef.current[exIdx] || ex.sets.map(s => String(s.peso));
+          const id = window.exId(scheda, exIdx);
+          const exCompletion = completion[id] || [];
+          const exName = substitutions[id] || ex.name;
+          const exPesos = pesosRef.current[id] || ex.sets.map(s => String(s.peso));
           ex.sets.forEach((s, setIdx) => {
             if (!exCompletion[setIdx]) return; // salta serie non completate
             // Testo libero: peso può essere un numero (kg) o una parola (es. elastico
@@ -719,26 +706,29 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
 
       {/* Exercise grid */}
       <div style={{ display: "grid", gridTemplateColumns: isDesktop ? "1fr 1fr" : "1fr", gap: isDesktop ? 18 : 12 }}>
-        {exercises.map((ex, i) => (
-          <ExerciseCard
-            key={ex.name + i}
-            ex={ex}
-            isDesktop={isDesktop}
-            completed={completion[i] || new Array(ex.sets.length).fill(false)}
-            onToggleSet={(j) => toggleSet(i, j)}
-            onRest={(s) => setTimer(s)}
-            occupied={occupied[i]}
-            onOccupied={() => setOccupied(o => ({ ...o, [i]: !o[i] }))}
-            substituted={substitutions[i]}
-            onSubstitute={(name) => setSubstitutions(s => ({ ...s, [i]: name }))}
-            sheetsWeights={sheetsWeights}
-            savedPesos={pesosRef.current[i]}
-            onPesosChange={(pesos) => {
-              pesosRef.current[i] = pesos;
-              _saveProg(scheda, { pesos: Object.assign({}, pesosRef.current) });
-            }}
-          />
-        ))}
+        {exercises.map((ex, i) => {
+          const id = window.exId(scheda, i);
+          return (
+            <ExerciseCard
+              key={id}
+              ex={ex}
+              isDesktop={isDesktop}
+              completed={completion[id] || new Array(ex.sets.length).fill(false)}
+              onToggleSet={(j) => toggleSet(i, j)}
+              onRest={(s) => setTimer(s)}
+              occupied={occupied[id]}
+              onOccupied={() => setOccupied(o => ({ ...o, [id]: !o[id] }))}
+              substituted={substitutions[id]}
+              onSubstitute={(name) => patchProg({ substitutions: { [id]: name } })}
+              sheetsWeights={sheetsWeights}
+              savedPesos={pesosRef.current[id]}
+              onPesosChange={(pesos) => {
+                pesosRef.current[id] = pesos;
+                patchProg({ pesos: { [id]: pesos } });
+              }}
+            />
+          );
+        })}
       </div>
 
       {/* Session notes */}
