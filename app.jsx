@@ -326,6 +326,30 @@ function _cleanupOldDailyKeys() {
 }
 
 // ── AppFrame ───────────────────────────────────────────────────────────────
+// ── Banner "Aggiorna": persistente in alto quando c'è un nuovo SW in attesa ──
+const UpdateBanner = ({ onApply }) => {
+  const t = useT();
+  return (
+    <div style={{
+      position: "fixed", top: 0, left: 0, right: 0, zIndex: 9995,
+      display: "flex", alignItems: "center", justifyContent: "center", gap: 12,
+      padding: "calc(env(safe-area-inset-top) + 9px) 16px 9px",
+      background: "var(--accent)", color: "#fff",
+      fontSize: 13.5, fontWeight: 600,
+      boxShadow: "0 2px 12px rgba(0,0,0,0.28)",
+    }}>
+      <span>🔄 {t("Nuova versione disponibile")}</span>
+      <button
+        onClick={onApply}
+        style={{
+          background: "rgba(255,255,255,0.22)", color: "#fff", border: 0,
+          borderRadius: 8, padding: "6px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer",
+        }}
+      >{t("Aggiorna")}</button>
+    </div>
+  );
+};
+
 const AppFrame = ({ device, initialScreen, chromeless }) => {
   const [storageReady, setStorageReady] = React.useState(window.storage ? window.storage.isReady() : false);
 
@@ -355,6 +379,12 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
   const [state, setStateRaw] = React.useState({ screen: initialScreen, scheda: "Upper A", isHome: false, activities: [], checkIn: { sleep: 4, energy: 4, ailments: "" }, bodyWeight: 100, theme: "system", spesaChecked: {}, spesaFreq: 1 });
   const [lang, setLang] = React.useState(window.storage ? window.storage.get("lang", "it") : "it");
   const [initialized, setInitialized] = React.useState(false);
+  const [updateReady, setUpdateReady] = React.useState(() => !!window._swUpdateReady);
+  React.useEffect(() => {
+    const onUpd = () => setUpdateReady(true);
+    window.addEventListener("lfh-sw-update", onUpd);
+    return () => window.removeEventListener("lfh-sw-update", onUpd);
+  }, []);
 
   React.useEffect(() => {
     if (!storageReady || initialized) return;
@@ -457,6 +487,7 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
 
   const wrap = (content) => (
     <LangContext.Provider value={{ lang, setLang: globalCtx.setLang }}>
+      {updateReady && <UpdateBanner onApply={() => window._swApplyUpdate && window._swApplyUpdate()} />}
       {content}
     </LangContext.Provider>
   );

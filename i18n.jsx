@@ -149,6 +149,10 @@ const I18N_DICT = {
   "Esci dal player": { en: "Exit player" },
   "Nessuno storico": { en: "No history" },
 
+  // Update
+  "Nuova versione disponibile": { en: "New version available" },
+  "Aggiorna": { en: "Update" },
+
   // Exercise names (scheda di default / fallback)
   "Panca piana con bilanciere": { en: "Barbell bench press" },
   "Panca inclinata con manubri (30°)": { en: "Incline dumbbell press (30°)" },
