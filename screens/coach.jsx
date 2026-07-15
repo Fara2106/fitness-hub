@@ -121,7 +121,7 @@ const Bubble = ({ m }) => {
       <div className="fade-up" style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
         <div style={{
           maxWidth: "78%", padding: "10px 14px",
-          background: "var(--accent)", color: "#fff",
+          background: "var(--brand-grad)", color: "#fff",
           borderRadius: 18, borderBottomRightRadius: 4,
           fontSize: 14, lineHeight: 1.45, fontWeight: 500, letterSpacing: -0.005,
         }}>{m.text}</div>
@@ -158,7 +158,7 @@ const Bubble = ({ m }) => {
 };
 
 // ── Coach screen ───────────────────────────────────────────────────────────
-const Coach = ({ device, activities = [], checkIn, bodyWeight }) => {
+const Coach = ({ device, onNav, activities = [], checkIn, bodyWeight }) => {
   const isDesktop = device === "desktop";
   const t = useT();
   const { lang } = useLang();
@@ -236,137 +236,178 @@ const Coach = ({ device, activities = [], checkIn, bodyWeight }) => {
     }
   };
 
+  // API key presente? (letta una volta al mount; il cambio tab rimonta Coach → si aggiorna)
+  const hasKey = React.useMemo(
+    () => !!(window.storage && (window.storage.get("groqApiKey", "") || "").trim()),
+    []
+  );
+
+  // Chip di contesto reali (sessione · peso · check-in), derivate dai dati veri
+  const ctxChips = [{ emoji: sess ? "🏋️" : "🛌", label: sess ? `${t("Oggi")} · ${sess.label}` : t("Riposo") }];
+  if (bodyWeight) ctxChips.push({ emoji: "⚖️", label: `${bodyWeight} kg` });
+  if (checkIn)    ctxChips.push({ emoji: "✅", label: t("Check-in ok") });
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
 
-      {/* Header */}
+      {/* Header compatto: avatar · titolo · stato · Nuova chat */}
       <div style={{
-        padding: isDesktop ? "22px 40px 16px" : "14px 16px 10px",
+        padding: isDesktop ? "20px 40px 12px" : "12px 16px 10px",
         borderBottom: "1px solid var(--border)",
         background: "var(--bg-2)",
-        flexShrink: 0,
+        flexShrink: 0, display: "flex", flexDirection: "column", gap: 12,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <CoachAvatar />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: isDesktop ? 18 : 16, fontWeight: 600, letterSpacing: -0.015 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: isDesktop ? 19 : 17, fontWeight: 600, letterSpacing: -0.015 }}>
               {t("AI Coach")}
             </div>
-            <div className="muted" style={{ fontSize: 11.5 }}>
+            <div style={{ fontSize: 11.5, minHeight: 14, display: "flex", alignItems: "center", gap: 6, color: busy ? "var(--accent)" : "var(--text-2)" }}>
               {busy
                 ? <><TypingDots /> {t("Sta scrivendo…")}</>
-                : t("Groq · llama-3.3-70b-versatile")}
+                : (hasKey ? t("Pronto ad aiutarti") : t("Non configurato"))}
             </div>
           </div>
-          {bodyWeight && (
-            <span className="pill num" style={{ fontSize: 11, background: "rgba(48,209,88,0.15)", color: "var(--success)" }}>
-              {bodyWeight}kg
-            </span>
-          )}
           {messages.length > 1 && (
             <button
               onClick={resetChat}
               title={t("Nuova chat")}
               disabled={busy}
               style={{
-                width: 28, height: 28, borderRadius: 999, border: "1px solid var(--border)",
-                background: "var(--card-2)", color: "var(--text-2)", cursor: busy ? "default" : "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                display: "flex", alignItems: "center", gap: 6, flexShrink: 0,
+                background: "var(--card)", border: "1px solid var(--border)", color: "var(--text)",
+                borderRadius: 999, padding: "7px 12px", fontSize: 12, fontWeight: 600,
+                cursor: busy ? "default" : "pointer",
               }}
             >
-              <Icon name="refresh" size={13} strokeWidth={2} />
+              <Icon name="plus" size={13} strokeWidth={2.2} />
+              {t("Nuova chat")}
             </button>
           )}
         </div>
 
-        {/* Quick prompts */}
-        <div className="hscroll" style={{ marginLeft: 0, marginRight: 0, paddingLeft: 0, paddingRight: 0, marginTop: 12 }}>
-          {_QUICK_PROMPTS.map(p => (
-            <button
-              key={p}
-              onClick={() => send(p)}
-              disabled={busy}
-              style={{
-                display: "inline-flex", alignItems: "center",
-                padding: "6px 12px", border: "1px solid var(--border)",
-                background: "var(--card-2)", borderRadius: 999,
-                fontSize: 12.5, fontWeight: 500,
-                cursor: busy ? "default" : "pointer",
-                whiteSpace: "nowrap", marginRight: 6,
-                color: busy ? "var(--text-3)" : "var(--text)",
-                opacity: busy ? 0.5 : 1,
-                transition: "all 0.14s",
-              }}
-            >{t(p)}</button>
+        {/* Chip di contesto */}
+        <div className="hscroll" style={{ display: "flex", gap: 7 }}>
+          {ctxChips.map((c, i) => (
+            <span key={i} style={{
+              flex: "none", display: "inline-flex", alignItems: "center", gap: 5,
+              background: "var(--card-2)", border: "1px solid var(--border)", borderRadius: 999,
+              padding: "6px 11px", fontSize: 11.5, fontWeight: 500, color: "var(--text-2)", whiteSpace: "nowrap",
+            }}><span>{c.emoji}</span>{c.label}</span>
           ))}
         </div>
       </div>
 
-      {/* Messages list */}
-      <div
-        ref={scrollRef}
-        style={{
-          flex: 1, overflowY: "auto", padding: isDesktop ? "20px 40px" : "14px 16px",
-          display: "flex", flexDirection: "column", gap: 2,
-          scrollbarWidth: "none",
-        }}
-      >
-        {messages.map((m, i) => <Bubble key={i} m={m} />)}
-        {busy && (
-          <div className="fade-up" style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-            <CoachAvatar small />
-            <div style={{
-              padding: "10px 14px",
-              background: "var(--card)", borderRadius: 18, borderBottomLeftRadius: 4,
-              border: "1px solid var(--border)",
-            }}>
-              <TypingDots />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Input bar — NO <form> tag */}
-      <div style={{
-        padding: isDesktop ? "12px 40px 24px" : "10px 16px 20px",
-        display: "flex", gap: 8, alignItems: "center",
-        borderTop: "1px solid var(--border)",
-        background: "var(--nav-bg)", // theme-aware: si adatta a dark/light
-        backdropFilter: "blur(20px)",
-        WebkitBackdropFilter: "blur(20px)",
-        flexShrink: 0,
-      }}>
-        <div style={{
-          flex: 1, display: "flex", alignItems: "center", gap: 8,
-          background: "var(--card)", borderRadius: 999, padding: "4px 6px 4px 18px",
-          border: "1px solid var(--border)",
-        }}>
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={t("Chiedi al coach…")}
-            disabled={busy}
+      {hasKey ? (
+        <>
+          {/* Lista messaggi */}
+          <div
+            ref={scrollRef}
             style={{
-              flex: 1, background: "transparent", border: 0, outline: "none",
-              color: "var(--text)", fontSize: 14, padding: "10px 0", fontFamily: "inherit",
-            }}
-          />
-          <button
-            disabled={busy || !input.trim()}
-            onClick={() => send()}
-            style={{
-              width: 34, height: 34, borderRadius: 999,
-              background: (input.trim() && !busy) ? "var(--accent)" : "var(--card-2)",
-              color: "#fff", border: 0, display: "flex", alignItems: "center", justifyContent: "center",
-              cursor: (input.trim() && !busy) ? "pointer" : "default",
-              transition: "background 0.16s",
+              flex: 1, overflowY: "auto", padding: isDesktop ? "18px 40px" : "14px 16px",
+              display: "flex", flexDirection: "column", gap: 2, scrollbarWidth: "none",
             }}
           >
-            <Icon name="send" size={15} strokeWidth={2} />
-          </button>
+            <div style={{ textAlign: "center", fontSize: 11, fontWeight: 600, color: "var(--text-3)", margin: "2px 0 8px" }}>{t("Oggi")}</div>
+            {messages.map((m, i) => <Bubble key={i} m={m} />)}
+            {busy && (
+              <div className="fade-up" style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                <CoachAvatar small />
+                <div style={{
+                  padding: "10px 14px",
+                  background: "var(--card)", borderRadius: 18, borderBottomLeftRadius: 4,
+                  border: "1px solid var(--border)",
+                }}>
+                  <TypingDots />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Suggerimenti + input — NO <form> tag */}
+          <div style={{
+            padding: isDesktop ? "10px 40px 24px" : "8px 16px 20px",
+            display: "flex", flexDirection: "column", gap: 9,
+            borderTop: "1px solid var(--border)",
+            background: "var(--nav-bg)", // theme-aware
+            backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
+            flexShrink: 0,
+          }}>
+            <div className="hscroll" style={{ display: "flex", gap: 7 }}>
+              {_QUICK_PROMPTS.map(p => (
+                <button
+                  key={p}
+                  onClick={() => send(p)}
+                  disabled={busy}
+                  style={{
+                    flex: "none", background: "rgba(10,132,255,0.14)", border: "1px solid var(--border)",
+                    borderRadius: 999, padding: "7px 12px", fontSize: 12, fontWeight: 500,
+                    color: "var(--accent)", whiteSpace: "nowrap",
+                    cursor: busy ? "default" : "pointer", opacity: busy ? 0.5 : 1,
+                  }}
+                >{t(p)}</button>
+              ))}
+            </div>
+            <div style={{
+              display: "flex", alignItems: "center", gap: 8,
+              background: "var(--card)", borderRadius: 999, padding: "4px 6px 4px 18px",
+              border: "1px solid var(--border)",
+            }}>
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={t("Chiedi al coach…")}
+                disabled={busy}
+                style={{
+                  flex: 1, background: "transparent", border: 0, outline: "none",
+                  color: "var(--text)", fontSize: 14, padding: "10px 0", fontFamily: "inherit",
+                }}
+              />
+              <button
+                disabled={busy || !input.trim()}
+                onClick={() => send()}
+                style={{
+                  width: 38, height: 38, borderRadius: 999,
+                  background: (input.trim() && !busy) ? "var(--brand-grad)" : "var(--card-2)",
+                  color: "#fff", border: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                  cursor: (input.trim() && !busy) ? "pointer" : "default",
+                  transition: "background 0.16s",
+                }}
+              >
+                <Icon name="send" size={16} strokeWidth={2.2} />
+              </button>
+            </div>
+          </div>
+        </>
+      ) : (
+        /* Empty state — nessuna API key: CTA diretta al profilo */
+        <div style={{
+          flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          gap: 16, padding: "40px 34px", textAlign: "center",
+        }}>
+          <div style={{
+            width: 66, height: 66, borderRadius: 20,
+            background: "var(--card)", border: "1px solid var(--border)",
+            display: "flex", alignItems: "center", justifyContent: "center", color: "var(--warning)",
+          }}>
+            <Icon name="key" size={28} strokeWidth={1.8} />
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 600 }}>{t("Coach non configurato")}</div>
+          <div className="muted" style={{ fontSize: 13.5, maxWidth: 250, lineHeight: 1.5 }}>
+            {t("Serve una API key per parlare con l'allenatore AI. Configurala nel profilo per iniziare.")}
+          </div>
+          <button
+            onClick={() => onNav && onNav("impostazioni")}
+            style={{
+              border: "none", borderRadius: "var(--r)", background: "var(--brand-grad)", color: "#fff",
+              fontSize: 16, fontWeight: 600, padding: "14px 22px", cursor: "pointer",
+              boxShadow: "0 12px 28px -12px rgba(10,132,255,0.7)",
+            }}
+          >{t("Configura in Profilo")}</button>
         </div>
-      </div>
+      )}
     </div>
   );
 };

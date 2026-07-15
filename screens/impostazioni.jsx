@@ -323,7 +323,7 @@ const SyncStatusRow = () => {
   );
 };
 
-// ── Reset confirmation modal ───────────────────────────────────────────────
+// ── Reset confirmation — bottom sheet ──────────────────────────────────────
 const ResetModal = ({ onConfirm, onCancel }) => {
   const t = useT();
   return (
@@ -331,26 +331,29 @@ const ResetModal = ({ onConfirm, onCancel }) => {
       onClick={onCancel}
       style={{
         position: "fixed", inset: 0, zIndex: 300,
-        background: "rgba(0,0,0,0.65)",
-        backdropFilter: "blur(10px)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        padding: 24,
+        background: "rgba(0,0,0,0.5)",
+        backdropFilter: "blur(2px)", WebkitBackdropFilter: "blur(2px)",
+        display: "flex", alignItems: "flex-end",
       }}
     >
       <div onClick={(e) => e.stopPropagation()} className="pop-in" style={{
-        background: "var(--card)", borderRadius: 18, border: "1px solid var(--border)",
-        padding: 28, maxWidth: 380, width: "100%",
-        boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
-        textAlign: "center",
+        width: "100%", background: "var(--bg-2)",
+        borderTopLeftRadius: "var(--r-xl)", borderTopRightRadius: "var(--r-xl)",
+        borderTop: "1px solid var(--border)", padding: "10px 22px 30px",
+        display: "flex", flexDirection: "column", gap: 16,
+        boxShadow: "0 -20px 60px rgba(0,0,0,0.5)",
       }}>
-        <div style={{ fontSize: 40, marginBottom: 14 }}>⚠️</div>
-        <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 8 }}>{t("Reset completo")}</h2>
-        <p className="muted" style={{ fontSize: 14, lineHeight: 1.5, marginBottom: 22 }}>
-          {t("Tutti i dati verranno eliminati: check-in, storico pesi, attività, impostazioni e file importati. Questa operazione non è reversibile.")}
-        </p>
-        <div style={{ display: "flex", gap: 10 }}>
-          <button className="btn" style={{ flex: 1 }} onClick={onCancel}>{t("Annulla")}</button>
-          <button className="btn danger" style={{ flex: 1 }} onClick={onConfirm}>{t("Resetta tutto")}</button>
+        <div style={{ width: 40, height: 5, borderRadius: 3, background: "var(--border-2)", alignSelf: "center", marginBottom: 4 }} />
+        <div style={{ width: 52, height: 52, borderRadius: 999, background: "rgba(255,69,58,0.14)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, alignSelf: "center" }}>⚠️</div>
+        <div style={{ textAlign: "center", display: "flex", flexDirection: "column", gap: 6 }}>
+          <h2 style={{ fontSize: 20, fontWeight: 600 }}>{t("Reset completo")}?</h2>
+          <p className="muted" style={{ fontSize: 13.5, lineHeight: 1.5 }}>
+            {t("Tutti i dati verranno eliminati: check-in, storico pesi, attività, impostazioni e file importati. Questa operazione non è reversibile.")}
+          </p>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 9, marginTop: 4 }}>
+          <button className="btn danger" style={{ padding: 15, fontSize: 16 }} onClick={onConfirm}>{t("Resetta tutto")}</button>
+          <button className="btn" style={{ padding: 15, fontSize: 16 }} onClick={onCancel}>{t("Annulla")}</button>
         </div>
       </div>
     </div>
@@ -441,7 +444,6 @@ const Impostazioni = ({ device, onNav, theme, setTheme, bodyWeight, setBodyWeigh
   const t = useT();
   const { lang, setLang } = useLang();
 
-  const [weightInput, setWeightInput] = React.useState(() => String(bodyWeight || 77.5));
   const [profile, setProfile]         = React.useState(() => window.storage ? window.storage.get("profile", { name: "Lorenzo", height: "178", age: "28", program: "Powerbuilding" }) : { name: "Lorenzo", height: "178", age: "28", program: "Powerbuilding" });
   const [editing, setEditing]         = React.useState(false);
   const [showReset, setShowReset]     = React.useState(false);
@@ -452,26 +454,6 @@ const Impostazioni = ({ device, onNav, theme, setTheme, bodyWeight, setBodyWeigh
   const handleTheme = (label) => {
     const val = label === "Dark" ? "dark" : label === "Light" ? "light" : "system";
     setTheme(val);
-  };
-
-  const handleWeightSave = () => {
-    const n = parseFloat(weightInput);
-    if (!isNaN(n) && n > 0) {
-      setBodyWeight(n);
-      // Also log to weightLog
-      if (window.storage) {
-        const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0,10);
-        const log = window.storage.get("weightLog", []);
-        const idx = log.findIndex(e => e.date === today);
-        if (idx >= 0) { log[idx].weight = n; } else { log.push({ date: today, weight: n }); }
-        window.storage.set("weightLog", log);
-      }
-      // Also save to Sheets (fire and forget)
-      if (window.sheetsAPI) {
-        const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0,10);
-        window.sheetsAPI.savePesoCorporeo({ date: today, weight: n }).catch(() => {});
-      }
-    }
   };
 
   const handleProfileSave = (p) => {
@@ -489,27 +471,35 @@ const Impostazioni = ({ device, onNav, theme, setTheme, bodyWeight, setBodyWeigh
     <div className="fade-up" style={{ padding: isDesktop ? "32px 40px" : "10px 16px 24px", display: "flex", flexDirection: "column", gap: isDesktop ? 22 : 18, maxWidth: 760, margin: isDesktop ? "0 auto" : 0 }}>
 
       <div>
-        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)", letterSpacing: 0.5, textTransform: "uppercase" }}>{t("Configurazione")}</div>
+        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)", letterSpacing: 0.5, textTransform: "uppercase" }}>{t("Profilo")}</div>
         <h1 style={{ fontSize: isDesktop ? 28 : 24, fontWeight: 600 }}>{t("Impostazioni")}</h1>
       </div>
 
-      {/* Profile card */}
-      <div className="card" style={{ padding: 16, display: "flex", alignItems: "center", gap: 14 }}>
+      {/* Profile hero — gradiente di marca */}
+      <div style={{
+        position: "relative", borderRadius: "var(--r-lg)", padding: 20, overflow: "hidden",
+        background: "var(--brand-grad)", boxShadow: "0 16px 34px -16px rgba(10,132,255,0.6)",
+        display: "flex", alignItems: "center", gap: 14,
+      }}>
         <div style={{
-          width: 56, height: 56, borderRadius: 999,
-          background: "linear-gradient(135deg, #FF9F0A 0%, #FF453A 100%)",
+          width: 54, height: 54, borderRadius: 999, flexShrink: 0,
+          background: "rgba(255,255,255,0.2)", border: "1.5px solid rgba(255,255,255,0.4)",
           display: "flex", alignItems: "center", justifyContent: "center",
-          fontFamily: "var(--display)", fontWeight: 700, fontSize: 22, color: "#1a0a04",
-        }}>{profile.name.slice(0, 1).toUpperCase()}</div>
+          fontWeight: 700, fontSize: 20, color: "#fff",
+        }}>{profile.name.slice(0, 1).toUpperCase() || "?"}</div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 17, fontWeight: 600 }}>{profile.name}</div>
-          <div className="muted" style={{ fontSize: 13 }}>
+          <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>{profile.name}</div>
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.85)", marginTop: 2 }}>
             <span className="num">{profile.height}</span> cm · <span className="num">{profile.age}</span> {t("anni")} · {t(profile.program)}
           </div>
         </div>
-        <button className="btn ghost" style={{ padding: "6px 10px", fontSize: 12, color: "var(--accent)" }} onClick={() => setEditing(true)}>
-          {t("Modifica")}
-        </button>
+        <button
+          onClick={() => setEditing(true)}
+          style={{
+            flexShrink: 0, background: "rgba(255,255,255,0.2)", border: "1px solid rgba(255,255,255,0.35)",
+            color: "#fff", borderRadius: 999, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+          }}
+        >{t("Modifica")}</button>
       </div>
 
       {editing && (
@@ -559,37 +549,6 @@ const Impostazioni = ({ device, onNav, theme, setTheme, bodyWeight, setBodyWeigh
         </IRow>
       </ISection>
 
-      {/* — Dati personali — */}
-      <ISection title={t("Dati personali")}>
-        <div className="row">
-          <div className="icon-wrap" style={{ background: "#30D158", color: "#fff" }}>
-            <Icon name="scale" size={15} strokeWidth={2} />
-          </div>
-          <div className="row-main">
-            <div className="row-title">{t("Peso corporeo")}</div>
-            <div className="row-sub">{t("Aggiorna peso odierno")}</div>
-          </div>
-          <div className="row-trailing" style={{ gap: 6 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 4, background: "var(--card-2)", borderRadius: 8, padding: "5px 8px", border: "1px solid var(--border)" }}>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={weightInput}
-                onChange={(e) => setWeightInput(e.target.value)}
-                onBlur={handleWeightSave}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.target.blur(); handleWeightSave(); } }}
-                className="input-mono"
-                style={{ width: 52, background: "transparent", border: 0, outline: "none", color: "var(--text)", fontSize: 14, fontWeight: 600, textAlign: "right" }}
-              />
-              <span style={{ fontSize: 12, color: "var(--text-2)" }}>kg</span>
-            </div>
-            <button className="btn" style={{ padding: "5px 10px", fontSize: 12 }} onClick={handleWeightSave}>
-              {t("Log")}
-            </button>
-          </div>
-        </div>
-      </ISection>
-
       {/* — Connessioni — */}
       <ISection title={t("Connessioni")} subtitle={t("API key e sorgenti dati")}>
         <ApiKeyRow
@@ -612,8 +571,8 @@ const Impostazioni = ({ device, onNav, theme, setTheme, bodyWeight, setBodyWeigh
         />
       </ISection>
 
-      {/* — Importa file — */}
-      <ISection title={t("File di testo")} subtitle={t("Importa scheda.txt e dieta.txt")}>
+      {/* — Piani (scheda/dieta importate) — */}
+      <ISection title={t("Piani")} subtitle={t("Importa scheda.txt e dieta.txt")}>
         <FileImporter
           label={t("Importa scheda (.txt)")}
           icon="dumbbell"
@@ -631,19 +590,20 @@ const Impostazioni = ({ device, onNav, theme, setTheme, bodyWeight, setBodyWeigh
         </IRow>
       </ISection>
 
-      {/* — Sync & Dati — */}
-      <ISection title={t("Sincronizzazione & Dati")}>
-        <SyncNowRow />
+      {/* — Sincronizzazione — */}
+      <ISection title={t("Sincronizzazione")}>
         <SyncStatusRow />
-        <IRow
-          icon="refresh"
-          iconBg="#FF453A"
-          title={t("Reset completo")}
-          sub={t("Elimina tutti i dati e ricomincia")}
-          onClick={() => setShowReset(true)}
-          trailing={<Icon name="chevron" size={13} color="var(--danger)" />}
-        />
+        <SyncNowRow />
       </ISection>
+
+      {/* — Reset: azione distruttiva, isolata e in evidenza — */}
+      <button
+        onClick={() => setShowReset(true)}
+        style={{
+          background: "none", border: "1px solid rgba(255,69,58,0.35)", color: "var(--danger)",
+          borderRadius: "var(--r)", padding: 14, fontSize: 15, fontWeight: 600, cursor: "pointer", marginTop: 4,
+        }}
+      >{t("Reset completo")}</button>
 
       <div style={{ textAlign: "center", color: "var(--text-3)", fontSize: 11.5, padding: "8px 0 24px" }}>
         Lorenzo Fitness Hub · v2.7.0 · build 2026.07

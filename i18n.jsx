@@ -374,6 +374,12 @@ const I18N_DICT = {
   "Posso aumentare il peso?": { en: "Can I add weight?" },
   "Riposo o cardio?": { en: "Rest or cardio?" },
   "Recupero ottimale": { en: "Optimal recovery" },
+  "Pronto ad aiutarti": { en: "Ready to help" },
+  "Non configurato": { en: "Not set up" },
+  "Check-in ok": { en: "Check-in ok" },
+  "Coach non configurato": { en: "Coach not set up" },
+  "Serve una API key per parlare con l'allenatore AI. Configurala nel profilo per iniziare.": { en: "You need an API key to chat with the AI coach. Set it up in your profile to get started." },
+  "Configura in Profilo": { en: "Set up in Profile" },
 
   // Storico
   "Caricamento grafico…": { en: "Loading chart…" },
@@ -406,6 +412,9 @@ const I18N_DICT = {
   "Altezza (cm)": { en: "Height (cm)" },
   "Età": { en: "Age" },
   "anni": { en: "years" },
+  "Profilo": { en: "Profile" },
+  "Piani": { en: "Plans" },
+  "Sincronizzazione": { en: "Sync" },
   "Aspetto": { en: "Appearance" },
   "Tema": { en: "Theme" },
   "Lingua": { en: "Language" },
