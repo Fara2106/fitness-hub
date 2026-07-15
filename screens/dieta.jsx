@@ -8,11 +8,11 @@ const _DAY_TYPES = [
 ];
 
 const _CARDIO_TYPES = [
-  { id: "corsa",     label: "Corsa",     emoji: "🏃", kcalMin: 8 },
-  { id: "bike",      label: "Bike",      emoji: "🚴", kcalMin: 6 },
-  { id: "hiit",      label: "HIIT",      emoji: "⚡", kcalMin: 10 },
-  { id: "camminata", label: "Camminata", emoji: "🚶", kcalMin: 4 },
-  { id: "ellittica", label: "Ellittica", emoji: "🔄", kcalMin: 7 },
+  { id: "corsa",     label: "Corsa",     emoji: "🏃" },
+  { id: "bike",      label: "Bike",      emoji: "🚴" },
+  { id: "hiit",      label: "HIIT",      emoji: "⚡" },
+  { id: "camminata", label: "Camminata", emoji: "🚶" },
+  { id: "ellittica", label: "Ellittica", emoji: "🔄" },
 ];
 
 // Full supplement definitions (daily + workout-specific), sortTime drives ordering
@@ -89,19 +89,19 @@ const _FALLBACK = {
   riposo: {
     integratori: _SUPPS_RIPOSO,
     meals: [
-      { time:"08:00", sortTime:"08:00", emoji:"🌅", title:"Colazione", kcal:520,
+      { time:"08:00", sortTime:"08:00", emoji:"🌅", title:"Colazione",
         primary:[{food:"Gallette grano saraceno (4) + marmellata ridotto zucchero + burro chiarificato",qty:"40g + 50g + 10g"},{food:"Pane di segale + prosciutto crudo o bresaola",qty:"80g + 100g"}],
         others:[{food:"Yogurt greco Fage 0% + miele + muesli viviverde",qty:"150g+20g+50g"},{food:"Uova (2) + pane di segale",qty:"160g+100g"}] },
-      { time:"10:30", sortTime:"10:30", emoji:"🍎", title:"Spuntino", kcal:190,
+      { time:"10:30", sortTime:"10:30", emoji:"🍎", title:"Spuntino",
         primary:[{food:"Frutta fresca (no macedonie)",qty:"200g"},{food:"Noci o mandorle",qty:"30g"}],
         others:[] },
-      { time:"13:00", sortTime:"13:00", emoji:"🍝", title:"Pranzo", kcal:680,
+      { time:"13:00", sortTime:"13:00", emoji:"🍝", title:"Pranzo",
         primary:[{food:"Carboidrato: pasta farro integrale | riso rosso | riso basmati | pane integrale",qty:"80–100g"},{food:"Verdure o ortaggi",qty:"300g"},{food:"Olio EVO",qty:"20g"},{food:"Proteina: tonno | orata | pollo | salmone | manzo | tacchino | merluzzo",qty:"a scelta"}],
         others:[{food:"Primo sale 110g | Ricotta 160g | Parmigiano 60g | Feta 100g",qty:""}] },
-      { time:"16:30", sortTime:"16:30", emoji:"🥛", title:"Merenda", kcal:200,
+      { time:"16:30", sortTime:"16:30", emoji:"🥛", title:"Merenda",
         primary:[{food:"Yogurt greco Fage 0% (o yoeggs)",qty:"200g"},{food:"Frutta fresca",qty:"100g"}],
         others:[] },
-      { time:"20:00", sortTime:"20:00", emoji:"🌙", title:"Cena", kcal:520,
+      { time:"20:00", sortTime:"20:00", emoji:"🌙", title:"Cena",
         primary:[{food:"Verdure o ortaggi",qty:"200g"},{food:"Olio EVO",qty:"10g"},{food:"Proteina: merluzzo | pollo | salmone | uova | bistecca | vitello",qty:"a scelta"}],
         others:[{food:"Con legumi: 90g verdure + 20g legumi secchi misto",qty:""}] },
     ],
@@ -109,16 +109,16 @@ const _FALLBACK = {
   mattina: {
     integratori: _SUPPS_MATTINA,
     meals: [
-      { time:"06:30", sortTime:"06:30", emoji:"💪", title:"Pre-allenamento", kcal:290,
+      { time:"06:30", sortTime:"06:30", emoji:"💪", title:"Pre-allenamento",
         primary:[{food:"Gallette grano saraceno (4) + marmellata o miele",qty:"40g+50g"},{food:"Pane tipo 1 + marmellata o miele",qty:"50g+50g"}],
         others:[{food:"Caffè ok, acqua abbondante",qty:""}] },
-      { time:"10:30", sortTime:"10:30", emoji:"🥤", title:"Pranzo post-WO", kcal:720,
+      { time:"10:30", sortTime:"10:30", emoji:"🥤", title:"Pranzo post-WO",
         primary:[{food:"Carboidrato: pasta farro integrale | riso rosso | riso basmati | pane di segale",qty:"80–100g"},{food:"Verdure o ortaggi",qty:"300g"},{food:"Olio EVO",qty:"20g"},{food:"Proteina aumentata: pollo | tacchino | manzo | salmone | orata | merluzzo",qty:"a scelta"}],
         others:[{food:"Tonno 180g | Platessa 340g | Uova 220g | Hamburger chianina 140g",qty:""}] },
-      { time:"16:30", sortTime:"16:30", emoji:"🥛", title:"Merenda", kcal:210,
+      { time:"16:30", sortTime:"16:30", emoji:"🥛", title:"Merenda",
         primary:[{food:"Yogurt greco Fage 0% (o yoeggs)",qty:"200g"},{food:"Frutta fresca",qty:"100g"},{food:"Noci",qty:"30g"}],
         others:[] },
-      { time:"20:00", sortTime:"20:00", emoji:"🌙", title:"Cena", kcal:480,
+      { time:"20:00", sortTime:"20:00", emoji:"🌙", title:"Cena",
         primary:[{food:"Verdure o ortaggi",qty:"100g"},{food:"Olio EVO",qty:"10g"},{food:"Proteina: pollo | salmone | uova | merluzzo | bistecca | vitello",qty:"a scelta"},{food:"Pane di segale",qty:"50g"}],
         others:[] },
     ],
@@ -126,19 +126,19 @@ const _FALLBACK = {
   ore17: {
     integratori: _SUPPS_ORE17,
     meals: [
-      { time:"08:00", sortTime:"08:00", emoji:"🌅", title:"Colazione", kcal:500,
+      { time:"08:00", sortTime:"08:00", emoji:"🌅", title:"Colazione",
         primary:[{food:"Gallette grano saraceno (4) + marmellata + burro chiarificato",qty:"40g+50g+10g"},{food:"Pane di segale + pane integrale + prosciutto/bresaola",qty:"80g+70g+100g"}],
         others:[{food:"Yogurt greco 0% + miele + muesli",qty:"150g+20g+50g"},{food:"Uova (2) + pane",qty:"160g+100g"}] },
-      { time:"10:30", sortTime:"10:30", emoji:"🍎", title:"Spuntino mattina", kcal:230,
+      { time:"10:30", sortTime:"10:30", emoji:"🍎", title:"Spuntino mattina",
         primary:[{food:"Frutta fresca (no macedonie)",qty:"200g"},{food:"Noci o mandorle",qty:"30g"},{food:"Yogurt greco Fage 0% (o yoeggs)",qty:"150g"}],
         others:[] },
-      { time:"13:00", sortTime:"13:00", emoji:"🍝", title:"Pranzo", kcal:640,
+      { time:"13:00", sortTime:"13:00", emoji:"🍝", title:"Pranzo",
         primary:[{food:"Carboidrato: pasta farro | riso rosso | riso basmati | pane integrale",qty:"70–80g"},{food:"Verdure",qty:"300g"},{food:"Olio EVO",qty:"20g"},{food:"Proteina: pollo | salmone | orata | manzo | merluzzo | tacchino",qty:"a scelta"}],
         others:[{food:"Tonno 150g | Ricotta 160g | Feta 100g | Uova 190g",qty:""}] },
-      { time:"16:00", sortTime:"16:00", emoji:"⚡", title:"Pre-WO · spuntino", kcal:180,
+      { time:"16:00", sortTime:"16:00", emoji:"⚡", title:"Pre-WO · spuntino",
         primary:[{food:"Barretta Endurance 4Plus",qty:"45g"},{food:"(+ MGK+ Liquid + Fuel+ — vedi integratori)",qty:""}],
         others:[] },
-      { time:"18:30", sortTime:"18:30", emoji:"🥤", title:"Post-WO (cena)", kcal:460,
+      { time:"18:30", sortTime:"18:30", emoji:"🥤", title:"Post-WO (cena)",
         primary:[{food:"Carboidrato: riso basmati | riso parboiled | riso arborio",qty:"80g"},{food:"Proteina: pollo | manzo | salmone | uova | merluzzo",qty:"a scelta"},{food:"Verdure",qty:"200g"}],
         others:[] },
     ],
@@ -150,11 +150,11 @@ _FALLBACK.ore21 = {
     _FALLBACK.ore17.meals[0], // colazione
     _FALLBACK.ore17.meals[1], // spuntino mattina
     _FALLBACK.ore17.meals[2], // pranzo
-    { time:"16:30", sortTime:"16:30", emoji:"🥛", title:"Merenda", kcal:200,
+    { time:"16:30", sortTime:"16:30", emoji:"🥛", title:"Merenda",
       primary:[{food:"Yogurt greco Fage 0% (o yoeggs)",qty:"200g"},{food:"Frutta fresca",qty:"100g"}], others:[] },
-    { time:"20:00", sortTime:"20:00", emoji:"⚡", title:"Pre-WO · spuntino", kcal:180,
+    { time:"20:00", sortTime:"20:00", emoji:"⚡", title:"Pre-WO · spuntino",
       primary:[{food:"Barretta Endurance 4Plus",qty:"45g"},{food:"(+ MGK+ Liquid + Fuel+ — vedi integratori)",qty:""}], others:[] },
-    { time:"22:00", sortTime:"22:00", emoji:"🌙", title:"Post-WO (cena leggera)", kcal:420,
+    { time:"22:00", sortTime:"22:00", emoji:"🌙", title:"Post-WO (cena leggera)",
       primary:[{food:"Carboidrato: riso basmati | parboiled | arborio",qty:"80g"},{food:"Proteina: pollo | salmone | uova | merluzzo",qty:"a scelta"},{food:"Verdure",qty:"100g"}],
       others:[] },
   ],
@@ -165,10 +165,10 @@ _FALLBACK.ore22 = {
     _FALLBACK.ore17.meals[0], // colazione
     _FALLBACK.ore17.meals[1], // spuntino mattina
     _FALLBACK.ore17.meals[2], // pranzo
-    { time:"18:00", sortTime:"18:00", emoji:"🍽️", title:"Merenda ore 18", kcal:480,
+    { time:"18:00", sortTime:"18:00", emoji:"🍽️", title:"Merenda ore 18",
       primary:[{food:"Verdure",qty:"100g"},{food:"Olio EVO",qty:"10g"},{food:"Proteina: pollo | salmone | manzo | merluzzo",qty:"a scelta"},{food:"Carboidrato: riso basmati | pane grano duro",qty:"50–60g"}],
       others:[] },
-    { time:"21:00", sortTime:"21:00", emoji:"⚡", title:"Pre-WO · spuntino", kcal:180,
+    { time:"21:00", sortTime:"21:00", emoji:"⚡", title:"Pre-WO · spuntino",
       primary:[{food:"Barretta Endurance 4Plus",qty:"45g"},{food:"(+ MGK+ Liquid + Fuel+ — vedi integratori)",qty:""}], others:[] },
   ],
 };
