@@ -83,6 +83,14 @@ const Onboarding = ({ device, onDone }) => {
 
   const [saving, setSaving] = React.useState(false);
 
+  // Rianima il contenuto dello step a ogni cambio (avanti/indietro)
+  React.useEffect(() => {
+    const el = document.querySelector(".onb-step");
+    if (el && window.Motion && window.Motion.enabled() && window.gsap) {
+      window.gsap.fromTo(el, { x: 14, opacity: 0 }, { x: 0, opacity: 1, duration: 0.3, ease: "power2.out", clearProps: "transform,opacity" });
+    }
+  }, [step]);
+
   // Niente da mostrare se tutto configurato
   if (activeSteps.length === 0) return null;
 
@@ -168,43 +176,45 @@ const Onboarding = ({ device, onDone }) => {
         gap: isDesktop ? 24 : 18,
       }}>
 
-        <div className="fade-up" key={step} style={{ textAlign: "center" }}>
-          <div style={{
-            width: 72, height: 72, borderRadius: 22,
-            background: `${current.iconColor}22`,
-            border: `1px solid ${current.iconColor}44`,
-            display: "inline-flex", alignItems: "center", justifyContent: "center",
-            margin: "0 auto 22px",
-          }}>
-            <Icon name={current.icon} size={32} color={current.iconColor} strokeWidth={1.6} />
+        <div className="onb-step">
+          <div className="fade-up" key={step} style={{ textAlign: "center" }}>
+            <div style={{
+              width: 72, height: 72, borderRadius: 22,
+              background: `${current.iconColor}22`,
+              border: `1px solid ${current.iconColor}44`,
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              margin: "0 auto 22px",
+            }}>
+              <Icon name={current.icon} size={32} color={current.iconColor} strokeWidth={1.6} />
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 1, textTransform: "uppercase", color: current.iconColor, marginBottom: 8 }}>
+              {t("Step")} {step + 1} {t("di")} {activeSteps.length} · {t(current.label)}
+            </div>
+            <h1 style={{ fontSize: isDesktop ? 34 : 26, fontWeight: 600, letterSpacing: -0.025, marginBottom: 10 }}>{t(current.title)}</h1>
+            <p className="muted" style={{ fontSize: isDesktop ? 16 : 14, lineHeight: 1.5 }}>{t(current.sub)}</p>
           </div>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 1, textTransform: "uppercase", color: current.iconColor, marginBottom: 8 }}>
-            {t("Step")} {step + 1} {t("di")} {activeSteps.length} · {t(current.label)}
-          </div>
-          <h1 style={{ fontSize: isDesktop ? 34 : 26, fontWeight: 600, letterSpacing: -0.025, marginBottom: 10 }}>{t(current.title)}</h1>
-          <p className="muted" style={{ fontSize: isDesktop ? 16 : 14, lineHeight: 1.5 }}>{t(current.sub)}</p>
-        </div>
 
-        <div className="fade-up" key={`f${step}`} style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 8 }}>
-          <input
-            autoFocus
-            className={"input " + (current.mono ? "input-mono" : "")}
-            type={current.field === "api" ? "password" : "text"}
-            placeholder={current.placeholder}
-            value={values[current.field]}
-            onChange={(e) => setValues(v => ({ ...v, [current.field]: e.target.value }))}
-            style={{
-              maxWidth: current.inputWidth || 420,
-              fontSize: isDesktop ? 17 : 15.5,
-              padding: "14px 18px",
-              textAlign: current.suffix ? "center" : "left",
-              fontWeight: current.mono ? 600 : 500,
-            }}
-            onKeyDown={(e) => { if (e.key === "Enter" && canNext) handleNext(); }}
-          />
-          {current.suffix && (
-            <span className="muted" style={{ fontSize: 18, fontWeight: 500 }}>{current.suffix}</span>
-          )}
+          <div className="fade-up" key={`f${step}`} style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 8 }}>
+            <input
+              autoFocus
+              className={"input " + (current.mono ? "input-mono" : "")}
+              type={current.field === "api" ? "password" : "text"}
+              placeholder={current.placeholder}
+              value={values[current.field]}
+              onChange={(e) => setValues(v => ({ ...v, [current.field]: e.target.value }))}
+              style={{
+                maxWidth: current.inputWidth || 420,
+                fontSize: isDesktop ? 17 : 15.5,
+                padding: "14px 18px",
+                textAlign: current.suffix ? "center" : "left",
+                fontWeight: current.mono ? 600 : 500,
+              }}
+              onKeyDown={(e) => { if (e.key === "Enter" && canNext) handleNext(); }}
+            />
+            {current.suffix && (
+              <span className="muted" style={{ fontSize: 18, fontWeight: 500 }}>{current.suffix}</span>
+            )}
+          </div>
         </div>
 
         <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 8 }}>

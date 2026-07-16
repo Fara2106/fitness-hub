@@ -312,14 +312,15 @@ const Coach = ({ device, onNav, activities = [], checkIn, bodyWeight }) => {
             <div style={{ textAlign: "center", fontSize: 11, fontWeight: 600, color: "var(--text-3)", margin: "2px 0 8px" }}>{t("Oggi")}</div>
             {messages.map((m, i) => <Bubble key={i} m={m} />)}
             {busy && (
-              <div className="fade-up" style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+              <div className="fade-up" style={{ display: "flex", gap: 8, alignItems: "flex-end", marginBottom: 4 }}>
                 <CoachAvatar small />
                 <div style={{
-                  padding: "10px 14px",
+                  maxWidth: "78%", padding: "10px 14px",
                   background: "var(--card)", borderRadius: 18, borderBottomLeftRadius: 4,
                   border: "1px solid var(--border)",
                 }}>
-                  <TypingDots />
+                  <UISkeleton h={11} w={180} style={{ marginBottom: 7 }} />
+                  <UISkeleton h={11} w={120} />
                 </div>
               </div>
             )}

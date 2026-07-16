@@ -12,7 +12,7 @@ const ISection = ({ title, subtitle, children }) => (
 );
 
 const IRow = ({ icon, iconBg, title, sub, trailing, children, onClick }) => (
-  <div className="row" onClick={onClick} style={{ cursor: onClick ? "pointer" : "default" }}>
+  <div className={onClick ? "row pressable" : "row"} onClick={onClick} style={{ cursor: onClick ? "pointer" : "default" }}>
     <div className="icon-wrap" style={{ background: iconBg || "var(--card-3)", color: "#fff" }}>
       <Icon name={icon} size={15} strokeWidth={2} />
     </div>
@@ -70,7 +70,7 @@ const ApiKeyRow = ({ icon, iconBg, title, sub, storageKey, testFn, placeholder }
 
   return (
     <div>
-      <div className="row" onClick={() => setExpanded(e => !e)} style={{ cursor: "pointer" }}>
+      <div className="row pressable" onClick={() => setExpanded(e => !e)} style={{ cursor: "pointer" }}>
         <div className="icon-wrap" style={{ background: iconBg, color: "#fff" }}>
           <Icon name={icon} size={15} strokeWidth={2} />
         </div>
