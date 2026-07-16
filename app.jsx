@@ -350,6 +350,69 @@ const UpdateBanner = ({ onApply }) => {
   );
 };
 
+// ── Pull-to-refresh (solo Home) ─────────────────────────────────────────────
+// Sfrutta il rubber-band nativo iOS: durante l'overscroll in alto scrollTop è
+// negativo. Nessun preventDefault → il gesto resta 100% nativo. L'indicatore
+// sta a top:-48 dentro il contenuto: si vede solo durante il bounce.
+const PullToRefresh = ({ scrollEl, onRefresh }) => {
+  const t = useT();
+  const [phase, setPhase] = React.useState("idle"); // idle | sync
+  const armedRef = React.useRef(false);
+  const iconRef = React.useRef(null);
+  const THRESHOLD = 70;
+
+  React.useEffect(() => {
+    const el = scrollEl && scrollEl.current;
+    if (!el || !(window.Motion && window.Motion.enabled())) return;
+
+    const onScroll = () => {
+      const y = -el.scrollTop; // > 0 durante il rubber-band in alto
+      if (iconRef.current) {
+        const p = Math.max(0, Math.min(1, y / THRESHOLD));
+        iconRef.current.style.opacity = String(p);
+        iconRef.current.style.transform = `rotate(${p * 270}deg) scale(${0.6 + p * 0.4})`;
+      }
+      if (y >= THRESHOLD) armedRef.current = true;
+    };
+    const onTouchEnd = () => {
+      if (!armedRef.current) return;
+      armedRef.current = false;
+      setPhase("sync");
+      Promise.resolve(onRefresh && onRefresh()).finally(() => setPhase("idle"));
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    el.addEventListener("touchend", onTouchEnd, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [scrollEl, onRefresh]);
+
+  return (
+    <React.Fragment>
+      <div style={{
+        position: "absolute", top: -48, left: 0, right: 0, height: 40,
+        display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none",
+      }}>
+        <span ref={iconRef} style={{ opacity: 0, color: "var(--text-2)", display: "flex" }}>
+          <Icon name="refresh" size={20} strokeWidth={2} />
+        </span>
+      </div>
+      {phase === "sync" && (
+        <div className="pill" style={{
+          position: "fixed", top: "calc(env(safe-area-inset-top) + 10px)",
+          left: "50%", transform: "translateX(-50%)", zIndex: 40,
+          background: "var(--glass)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
+          boxShadow: "var(--shadow-2)",
+        }}>
+          <span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} />
+          {t("Aggiornamento…")}
+        </div>
+      )}
+    </React.Fragment>
+  );
+};
+
 const AppFrame = ({ device, initialScreen, chromeless }) => {
   const [storageReady, setStorageReady] = React.useState(window.storage ? window.storage.isReady() : false);
 
@@ -385,6 +448,7 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
     window.addEventListener("lfh-sw-update", onUpd);
     return () => window.removeEventListener("lfh-sw-update", onUpd);
   }, []);
+  const syncNowRef = React.useRef(null);
 
   React.useEffect(() => {
     if (!storageReady || initialized) return;
@@ -462,8 +526,8 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
 
     // Pull dal cloud + riallinea lo stato React condiviso
     const pullAndApply = () => {
-      if (document.visibilityState !== "visible") return;
-      _cloudSync({ pesiMs: 6000, settingsMs: 8000 }).finally(() => {
+      if (document.visibilityState !== "visible") return Promise.resolve();
+      return _cloudSync({ pesiMs: 6000, settingsMs: 8000 }).finally(() => {
         const s = initState();
         setStateRaw(prev => ({
           ...prev,
@@ -474,6 +538,7 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
         }));
       });
     };
+    syncNowRef.current = pullAndApply;
 
     const handleVisibility = () => { if (document.visibilityState === "visible") pullAndApply(); };
     document.addEventListener("visibilitychange", handleVisibility);
@@ -485,8 +550,11 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
       clearInterval(interval);
+      syncNowRef.current = null;
     };
   }, [initialized]);
+
+  const scrollRef = React.useRef(null);
 
   const globalCtx = { lang, setLang: (l) => { setLang(l); window.storage && window.storage.set("lang", l); } };
 
@@ -541,7 +609,13 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
           <Screen which={state.screen} device={device} state={state} set={setState} globalCtx={globalCtx} />
         </div>
       ) : (
-        <div className="lfh-scroll" style={{ flex: 1 }}>
+        <div className="lfh-scroll" ref={scrollRef} style={{ flex: 1, position: "relative" }}>
+          {state.screen === "dashboard" && (
+            <PullToRefresh
+              scrollEl={scrollRef}
+              onRefresh={() => (syncNowRef.current ? syncNowRef.current() : Promise.resolve())}
+            />
+          )}
           <Screen which={state.screen} device={device} state={state} set={setState} globalCtx={globalCtx} />
         </div>
       )}

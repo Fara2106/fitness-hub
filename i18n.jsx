@@ -152,6 +152,7 @@ const I18N_DICT = {
   // Update
   "Nuova versione disponibile": { en: "New version available" },
   "Aggiorna": { en: "Update" },
+  "Aggiornamento…": { en: "Refreshing…" },
 
   // Exercise names (scheda di default / fallback)
   "Panca piana con bilanciere": { en: "Barbell bench press" },
