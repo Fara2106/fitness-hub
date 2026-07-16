@@ -447,6 +447,14 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
     };
   }, [state.theme]);
 
+  // Motion d'ingresso schermata: stagger delle card dentro il container di
+  // scroll a ogni cambio route. Centralizzato qui: le schermate non sanno nulla.
+  React.useEffect(() => {
+    if (!initialized) return;
+    const el = document.querySelector(".lfh-scroll");
+    if (el && window.Motion) window.Motion.screenEnter(el);
+  }, [state.screen, initialized]);
+
   // Re-sync: foreground (Page Visibility) + polling periodico mentre l'app è
   // aperta, così le modifiche fatte su un altro device compaiono da sole.
   React.useEffect(() => {

@@ -42,7 +42,7 @@ const UIHeader = ({ eyebrow, title, right, onProfile }) => (
 
 const UICard = ({ hero, style, onClick, children }) => (
   <div
-    className={"ui-card" + (hero ? " ui-card--hero" : "")}
+    className={"ui-card" + (hero ? " ui-card--hero" : "") + (onClick ? " pressable" : "")}
     onClick={onClick}
     style={onClick ? Object.assign({ cursor: "pointer" }, style) : style}
   >
@@ -53,6 +53,7 @@ const UICard = ({ hero, style, onClick, children }) => (
 const UIRow = ({ icon, title, sub, value, chevron, onClick, children }) => (
   <div
     onClick={onClick}
+    className={onClick ? "pressable" : undefined}
     style={{
       display: "flex", alignItems: "center", gap: 10,
       minHeight: 44, padding: "4px 0",
@@ -140,6 +141,7 @@ const UIButton = ({ variant = "primary", disabled, onClick, style, children }) =
   <button
     onClick={disabled ? undefined : onClick}
     disabled={disabled}
+    className="pressable"
     style={Object.assign({
       minHeight: 44, borderRadius: 12, border: 0,
       display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
@@ -186,6 +188,44 @@ const UISheet = ({ open, onClose, title, children }) => {
   );
 };
 
+// — Empty state disegnato (icona + titolo + sottotesto + azione opzionale) —
+const UIEmpty = ({ icon = "spark", title, sub, action, style }) => (
+  <div style={Object.assign({
+    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+    gap: 10, padding: "36px 28px", textAlign: "center",
+  }, style)}>
+    <span style={{
+      width: 58, height: 58, borderRadius: 18,
+      background: "var(--card)", border: "1px solid var(--border)",
+      boxShadow: "var(--shadow-1), inset 0 1px 0 var(--hair-top)",
+      display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-2)",
+    }}>
+      <Icon name={icon} size={26} strokeWidth={1.7} />
+    </span>
+    <span style={{ fontSize: 16, fontWeight: 650, letterSpacing: "-0.01em" }}>{title}</span>
+    {sub ? <span className="muted" style={{ fontSize: 13, maxWidth: 260, lineHeight: 1.5 }}>{sub}</span> : null}
+    {action || null}
+  </div>
+);
+
+// — Skeleton shimmer (placeholder di caricamento) —
+const UISkeleton = ({ h = 14, w = "100%", r = 8, style }) => (
+  <span className="skeleton" style={Object.assign({ display: "block", height: h, width: w, borderRadius: r }, style)} />
+);
+
+// — Numero animato: al cambio di `value` conta dal valore precedente (Motion.countTo) —
+const UIAnimatedNumber = ({ value, decimals = 1 }) => {
+  const ref = React.useRef(null);
+  const prev = React.useRef(value);
+  React.useEffect(() => {
+    if (prev.current !== value && ref.current && window.Motion) {
+      window.Motion.countTo(ref.current, prev.current, value, { decimals });
+    }
+    prev.current = value;
+  }, [value, decimals]);
+  return <span ref={ref} className="tnum">{Number(value).toFixed(decimals)}</span>;
+};
+
 window.UIAvatarLF = UIAvatarLF;
 window.UIHeader   = UIHeader;
 window.UICard     = UICard;
@@ -196,3 +236,6 @@ window.UIProgress = UIProgress;
 window.UIButton   = UIButton;
 window.UIStatTile = UIStatTile;
 window.UISheet    = UISheet;
+window.UIEmpty    = UIEmpty;
+window.UISkeleton = UISkeleton;
+window.UIAnimatedNumber = UIAnimatedNumber;

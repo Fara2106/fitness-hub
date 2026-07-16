@@ -40,6 +40,7 @@ const TabBar = ({ screen, onNav }) => {
           <button
             key={it.id}
             onClick={() => onNav(it.id)}
+            className="pressable"
             style={{
               flex: 1,
               border: 0,
