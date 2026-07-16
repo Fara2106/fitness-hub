@@ -102,7 +102,10 @@ const SpesaItem = ({ item, checked, onToggle, freq }) => {
   const qty = freq === 2 ? item.qty2 : item.qty1;
   return (
     <div
-      onClick={onToggle}
+      onClick={(ev) => {
+        if (!checked && window.Motion) window.Motion.pop(ev.currentTarget);
+        onToggle();
+      }}
       style={{
         display: "flex", alignItems: "center", gap: 12,
         padding: "12px 16px",
@@ -295,6 +298,10 @@ const Spesa = ({ device, spesaChecked, setSpesaChecked, spesaFreq, setSpesaFreq 
           <i style={{ width: `${(totalDone / totalItems) * 100}%`, background: "linear-gradient(90deg, #30D158 0%, #5AC8FA 100%)" }} />
         </div>
       </div>
+
+      {totalDone > 0 && totalDone === totalItems && (
+        <UIEmpty icon="check" title={t("Spesa completata")} sub={t("Hai preso tutto — ottimo!")} style={{ padding: "18px 16px 6px" }} />
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: isDesktop ? "1fr 1fr" : "1fr", gap: isDesktop ? 16 : 12 }}>
         {CATEGORIES.map(cat => (

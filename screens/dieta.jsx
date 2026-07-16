@@ -405,7 +405,10 @@ const SupplementRow = ({ supp, checked, onToggle }) => {
   const done = !!checked[supp.type];
   return (
     <button
-      onClick={() => onToggle(supp.type)}
+      onClick={(ev) => {
+        if (!done && window.Motion) window.Motion.pop(ev.currentTarget);
+        onToggle(supp.type);
+      }}
       style={{
         display: "flex", alignItems: "center", gap: 10,
         padding: "10px 14px", borderRadius: 12, border: 0,
@@ -752,10 +755,7 @@ const Dieta = ({ device, onNav }) => {
       </div>
 
       {timeline.length === 0 && (
-        <div style={{ textAlign: "center", padding: 40 }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>🍽️</div>
-          <div className="muted">{t("Nessun pasto in questa configurazione")}</div>
-        </div>
+        <UIEmpty icon="fork" title={t("Nessun pasto")} sub={t("Nessun pasto in questa configurazione")} style={{ padding: "24px 16px" }} />
       )}
 
       {/* Genera lista spesa → Spesa (unico accesso mobile oltre a Impostazioni) */}
