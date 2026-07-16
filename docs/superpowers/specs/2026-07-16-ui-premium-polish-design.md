@@ -20,7 +20,7 @@ Portare la UI (redesign 2026-07-15 già live) a livello "premium e curato": moti
 
 - `https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js` (core only, ~25KB gzip, versione pinnata esatta) in `index.html` dopo Recharts, `crossorigin="anonymous"`.
 - **Niente ScrollTrigger** (schermate corte e app-like: peso morto).
-- Aggiunto al precache CORE di `sw.js`.
+- **NON va nel precache di `sw.js`**: il fetch handler del SW bypassa le richieste cross-origin (`if (url.hostname !== self.location.hostname) return;`), quindi una copia precachata non verrebbe mai servita. Offline vale la HTTP cache del browser (stesso trattamento di React/Recharts). Il nuovo `motion.jsx` (same-origin) invece SÌ va in `STATIC_ASSETS`.
 - Guard ovunque: se `window.gsap` è assente (CDN bloccata/offline primo avvio) l'app funziona identica senza animazioni — mai un crash, mai uno stato visivo bloccato (le animazioni partono da stato finale visibile o vi arrivano istantaneamente).
 
 ## 2. `motion.jsx` — sistema motion centralizzato (nuovo file)
