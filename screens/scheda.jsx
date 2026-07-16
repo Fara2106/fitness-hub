@@ -109,7 +109,7 @@ const TimerOverlay = ({ seconds, onClose }) => {
           <div className="num" style={{ fontSize: 56, fontWeight: 600, letterSpacing: -0.04 }}>
             {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}
           </div>
-          <div className="muted" style={{ fontSize: 12, fontWeight: 500 }}>
+          <div className="muted tnum" style={{ fontSize: 12, fontWeight: 500 }}>
             {t("di")} {Math.floor(total / 60)}:{String(total % 60).padStart(2, "0")}
           </div>
         </div>
@@ -165,7 +165,10 @@ const SetRow = ({ s, idx, completed, onToggle, peso, onPesoChange, isPR }) => {
       </div>
       <div className="num" style={{ fontSize: 14, fontWeight: 600, textAlign: "center" }}>{s.rip}</div>
       <button
-        onClick={onToggle}
+        onClick={(ev) => {
+          if (!completed && window.Motion) window.Motion.pop(ev.currentTarget);
+          onToggle();
+        }}
         className={`check ${completed ? "on" : ""}`}
         style={{ width: 26, height: 26, justifySelf: "center" }}
       >
@@ -249,7 +252,7 @@ const SubstitutePopover = ({ alternatives, current, original, onPick, onClose })
 
 // ── Confetti burst ─────────────────────────────────────────────────────────
 const Confetti = () => {
-  const colors = ["#0A84FF", "#30D158", "#FF9F0A", "#BF5AF2", "#5AC8FA", "#FF453A"];
+  const colors = ["#0A84FF", "#5E5CE6", "#5AC8FA", "#30D158"];
   return (
     <div style={{ position: "absolute", inset: 0, pointerEvents: "none", overflow: "hidden", zIndex: 50 }}>
       {Array.from({ length: 32 }).map((_, i) => (
@@ -427,13 +430,13 @@ const ExerciseCard = ({
       {/* Rest + progress footer */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
         <button
-          className="btn"
+          className="btn tnum"
           style={{ padding: "7px 14px", fontSize: 13, background: "rgba(10,132,255,0.14)", borderColor: "transparent", color: "var(--accent)" }}
           onClick={() => onRest(ex.rest)}
         >
           <Icon name="clock" size={13} /> {ex.rest}s
         </button>
-        <span className="muted" style={{ fontSize: 12 }}>
+        <span className="muted tnum" style={{ fontSize: 12 }}>
           <span className="num" style={{ color: "var(--text)", fontWeight: 600 }}>{completed.filter(Boolean).length}</span>
           {" "}/{ex.sets.length}{" "}{t("serie")}
         </span>
@@ -520,7 +523,7 @@ const WorkoutPlayer = ({
         <button className="btn ghost" style={{ padding: "8px 10px" }} title={t("Esci dal player")} onClick={onClose}>
           <Icon name="x" size={16} />
         </button>
-        <div className="muted" style={{ fontSize: 12, fontWeight: 600 }}>{dayName} · {cursor + 1}/{exercises.length}</div>
+        <div className="muted tnum" style={{ fontSize: 12, fontWeight: 600 }}>{dayName} · {cursor + 1}/{exercises.length}</div>
         <button className="btn ghost" style={{ padding: "8px 10px", background: showSubs ? "rgba(10,132,255,0.18)" : "var(--card-2)" }} onClick={() => setShowSubs(s => !s)}>
           <Icon name="refresh" size={16} />
         </button>
@@ -538,7 +541,7 @@ const WorkoutPlayer = ({
 
       {/* Centro: esercizio corrente */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", textAlign: "center", gap: 10 }}>
-        <div className="muted" style={{ fontSize: 12, fontWeight: 600, letterSpacing: 1, textTransform: "uppercase" }}>
+        <div className="muted tnum" style={{ fontSize: 12, fontWeight: 600, letterSpacing: 1, textTransform: "uppercase" }}>
           {t("Serie {n} di {m}").replace("{n}", curSet + 1).replace("{m}", ex.sets.length)}
         </div>
         <h2 style={{ fontSize: 24, fontWeight: 600, letterSpacing: -0.02, maxWidth: 340 }}>{label}</h2>
@@ -553,7 +556,7 @@ const WorkoutPlayer = ({
           <span className="num" style={{ fontSize: 22, fontWeight: 600, color: "var(--text-2)" }}>× {ex.sets[curSet].rip}</span>
         </div>
 
-        <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>
+        <div className="muted tnum" style={{ fontSize: 12.5, marginTop: 4 }}>
           {(ex.history && ex.history.length)
             ? `${t("L'ultima volta")}: ${ex.history[0].peso} kg × ${ex.history[0].rip}`
             : t("Nessuno storico")}
@@ -579,7 +582,10 @@ const WorkoutPlayer = ({
 
       {/* Azioni */}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <button className="btn primary" style={{ width: "100%", padding: 16, fontSize: 16, fontWeight: 600 }} onClick={serieFatta}>
+        <button className="btn primary" style={{ width: "100%", padding: 16, fontSize: 16, fontWeight: 600 }} onClick={(ev) => {
+          if (window.Motion) window.Motion.pop(ev.currentTarget);
+          serieFatta();
+        }}>
           <Icon name="check" size={17} color="#fff" /> {allSetsDone ? t("Dopo") : t("Serie fatta")}
         </button>
         <label style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontSize: 12.5, color: "var(--text-2)" }}>
@@ -857,7 +863,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
           <div style={{ fontSize: 13, fontWeight: 500 }}>
             <span className="num" style={{ fontWeight: 600, fontSize: 16 }}>{completedSets}</span>
-            <span className="muted">/{totalSets} {t("serie completate")}</span>
+            <span className="muted tnum">/{totalSets} {t("serie completate")}</span>
           </div>
           <div className="num" style={{ fontSize: 12, fontWeight: 600, color: allDone ? "var(--success)" : "var(--accent)" }}>
             {Math.round(pct)}%
