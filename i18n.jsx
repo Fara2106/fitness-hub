@@ -384,6 +384,7 @@ const I18N_DICT = {
   // Storico
   "Caricamento grafico…": { en: "Loading chart…" },
   "Nessun dato peso — aggiorna il peso dalla Dashboard": { en: "No weight data — log your weight from the Dashboard" },
+  "Ancora nessun peso": { en: "No weight yet" },
   "misurazioni": { en: "measurements" },
   "da": { en: "since" },
   "Media sonno": { en: "Avg sleep" },
@@ -391,6 +392,7 @@ const I18N_DICT = {
   "Giorni log": { en: "Logged days" },
   "no data": { en: "no data" },
   "Nessun check-in disponibile": { en: "No check-ins available" },
+  "Nessun check-in": { en: "No check-ins" },
   "Minuti": { en: "Minutes" },
   "km totali": { en: "total km" },
   "Check-in": { en: "Check-in" },
@@ -398,6 +400,7 @@ const I18N_DICT = {
   "Ultime misurazioni": { en: "Latest measurements" },
   "Attività recenti": { en: "Recent activities" },
   "Nessuna attività registrata": { en: "No activities logged" },
+  "Nessuna attività": { en: "No activity" },
   "Vai alla Dashboard": { en: "Go to Dashboard" },
   "Ultimi 14 giorni": { en: "Last 14 days" },
 

@@ -24,8 +24,8 @@ const WeightChart = ({ data, isDesktop }) => {
 
   if (!rechartsReady) {
     return (
-      <div style={{ padding: 20, textAlign: "center" }}>
-        <div className="muted" style={{ fontSize: 13 }}>{t("Caricamento grafico…")}</div>
+      <div style={{ padding: "8px 0" }}>
+        <UISkeleton h={180} r={14} />
       </div>
     );
   }
@@ -34,10 +34,7 @@ const WeightChart = ({ data, isDesktop }) => {
 
   if (!data || data.length === 0) {
     return (
-      <div style={{ padding: 28, textAlign: "center" }}>
-        <div style={{ fontSize: 28, marginBottom: 8 }}>📉</div>
-        <div className="muted" style={{ fontSize: 13 }}>{t("Nessun dato peso — aggiorna il peso dalla Dashboard")}</div>
-      </div>
+      <UIEmpty icon="trend-up" title={t("Ancora nessun peso")} sub={t("Nessun dato peso — aggiorna il peso dalla Dashboard")} />
     );
   }
 
@@ -82,7 +79,7 @@ const WeightChart = ({ data, isDesktop }) => {
           background: trend <= 0 ? "rgba(48,209,88,0.15)" : "rgba(255,69,58,0.12)",
           color: trend <= 0 ? "var(--success)" : "var(--danger)",
         }}>
-          {trend > 0 ? "+" : ""}{trend.toFixed(1)} kg
+          <span className="tnum">{trend > 0 ? "+" : ""}{trend.toFixed(1)} kg</span>
         </div>
       </div>
       <ResponsiveContainer width="100%" height={isDesktop ? 200 : 160}>
@@ -159,9 +156,7 @@ const CheckInTrend = ({ isDesktop }) => {
 
   const filled = data.filter(d => d.sleep !== null);
   if (!filled.length) return (
-    <div style={{ padding: "20px 0", textAlign: "center" }}>
-      <div className="muted" style={{ fontSize: 13 }}>{t("Nessun check-in disponibile")}</div>
-    </div>
+    <UIEmpty icon="spark" title={t("Nessun check-in")} sub={t("Nessun check-in disponibile")} style={{ padding: "20px 16px" }} />
   );
 
   const avgSleep  = (filled.reduce((s, d) => s + d.sleep, 0) / filled.length).toFixed(1);
@@ -375,13 +370,17 @@ const Storico = ({ device, onNav }) => {
             {t("Attività recenti")} ({activities.length})
           </div>
           {activities.length === 0 ? (
-            <div style={{ padding: "24px 0", textAlign: "center" }}>
-              <div style={{ fontSize: 28, marginBottom: 8 }}>🏃</div>
-              <div className="muted" style={{ fontSize: 13 }}>{t("Nessuna attività registrata")}</div>
-              <button className="btn primary" style={{ marginTop: 14 }} onClick={() => onNav && onNav("dashboard")}>
-                {t("Vai alla Dashboard")}
-              </button>
-            </div>
+            <UIEmpty
+              icon="wave"
+              title={t("Nessuna attività")}
+              sub={t("Nessuna attività registrata")}
+              style={{ padding: "20px 16px" }}
+              action={
+                <button className="btn primary" style={{ marginTop: 4 }} onClick={() => onNav && onNav("dashboard")}>
+                  {t("Vai alla Dashboard")}
+                </button>
+              }
+            />
           ) : (
             <div>
               {activities.map((act, i) => (

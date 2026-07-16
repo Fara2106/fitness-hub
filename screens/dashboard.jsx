@@ -393,7 +393,7 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
 
       {/* StatTile: Peso */}
       <div style={{ display: "flex", gap: 12 }}>
-        <UIStatTile cap={t("Peso")} value={latestWeight.toFixed(1)} unit="kg" onClick={() => setPesoOpen(true)}>
+        <UIStatTile cap={t("Peso")} value={<UIAnimatedNumber value={latestWeight} decimals={1} />} unit="kg" onClick={() => setPesoOpen(true)}>
           {sparkData.length >= 2
             ? <div style={{ marginTop: 8 }}><Sparkline data={sparkData} width={140} height={40} color="var(--accent)" /></div>
             : <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-3)" }}>{t("Registra il peso per almeno 2 giorni per vedere il trend.")}</div>}
