@@ -127,6 +127,51 @@ if (typeof W.readSchedaProg === "function") {
   ok("schedaProgKey usa la data", W.schedaProgKey("2026-07-15") === "schedaProg_2026-07-15");
 }
 
+// ---- Suite Motion: motion.jsx (guard gsap/reduced-motion) ----
+console.log("\nSuite Motion — motion.jsx (no-op senza gsap, tween con gsap fake)");
+{
+  const sb = { window: {}, console };
+  vm.createContext(sb);
+  try {
+    vm.runInContext(transform(join(ROOT, "motion.jsx")), sb, { filename: "motion.jsx" });
+    ok("motion.jsx si carica sotto vm", true);
+  } catch (e) {
+    ok("motion.jsx si carica sotto vm — " + e.message.split("\n")[0], false);
+  }
+  const M = sb.window.Motion;
+  ok("Motion esposto su window", !!M);
+  if (M) {
+    ok("enabled() === false senza gsap", M.enabled() === false);
+    let threw = false;
+    try { M.screenEnter(null); M.pop(null); M.countTo(null, 0, 10); } catch (_) { threw = true; }
+    ok("API no-op senza gsap/elemento (nessuna eccezione)", !threw);
+    const el = { textContent: "" };
+    M.countTo(el, 0, 82.5, { decimals: 1 });
+    ok("countTo senza gsap scrive subito il valore finale", el.textContent === "82.5");
+    // gsap fake: registra le chiamate e salta subito alla fine dei tween
+    const calls = [];
+    sb.window.gsap = {
+      fromTo: (t, a, b) => calls.push("fromTo"),
+      to: (t, cfg) => { calls.push("to"); if ("v" in cfg) { t.v = cfg.v; cfg.onUpdate && cfg.onUpdate(); } },
+    };
+    ok("enabled() === true con gsap fake", M.enabled() === true);
+    M.pop({});
+    ok("pop() con gsap chiama fromTo", calls.includes("fromTo"));
+    const el2 = { textContent: "" };
+    M.countTo(el2, 80, 82.5, { decimals: 1 });
+    ok("countTo con gsap arriva al valore finale", el2.textContent === "82.5" && calls.includes("to"));
+    const fakeItems = [{}, {}];
+    const container = { querySelectorAll: () => fakeItems, firstElementChild: null };
+    const before = calls.length;
+    M.screenEnter(container);
+    ok("screenEnter con gsap anima i [data-reveal]", calls.length > before);
+    const empty = { querySelectorAll: () => [], firstElementChild: null };
+    let threw2 = false;
+    try { M.screenEnter(empty); } catch (_) { threw2 = true; }
+    ok("screenEnter senza elementi è no-op", !threw2);
+  }
+}
+
 // ---- Esito ----
 console.log("\n" + pass + " pass, " + fail + " fail");
 process.exit(fail === 0 ? 0 : 1);

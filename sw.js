@@ -23,6 +23,7 @@ const STATIC_ASSETS = [
   BASE + "/icons.jsx",
   BASE + "/anatomy.jsx",
   BASE + "/ui.jsx",
+  BASE + "/motion.jsx",
   BASE + "/nav.jsx",
   BASE + "/schedaState.jsx",
   BASE + "/screens/dashboard.jsx",
