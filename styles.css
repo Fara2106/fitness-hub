@@ -12,7 +12,7 @@
   --card-3:  #26262f;
   --border:  #23232b;
   --border-2:#2e2e38;
-  --nav-bg:  rgba(11,11,15,0.92);   /* TabBar / barre flottanti (theme-aware) */
+  --nav-bg:  rgba(11,11,15,0.72);   /* TabBar / barre flottanti (theme-aware) */
   --safe-bg: #0b0b0f;               /* tono TabBar (fallback dietro tutto) */
   /* Striscia status bar iOS (standalone, black-translucent = orologio SEMPRE bianco).
      Dark: si fonde con lo sfondo. Light: tono scuro (vedi .theme-light) perché
@@ -41,6 +41,14 @@
   --r:    16px;
   --r-lg: 22px;
   --r-xl: 28px;
+
+  /* Materiali premium (2026-07-16) */
+  --hair:     rgba(255,255,255,0.08);  /* bordi hairline (usato anche da nav.jsx) */
+  --hair-top: rgba(255,255,255,0.05);  /* highlight superiore card */
+  --glass:    rgba(21,21,27,0.72);     /* superficie vetro (sheet/barre) */
+  --shadow-1: 0 1px 2px rgba(0,0,0,0.25), 0 2px 8px rgba(0,0,0,0.18);
+  --shadow-2: 0 4px 12px rgba(0,0,0,0.32), 0 12px 32px rgba(0,0,0,0.28);
+  --shadow-3: 0 8px 24px rgba(0,0,0,0.45), 0 24px 64px rgba(0,0,0,0.40);
 }
 
 /* ── LIGHT theme ── */
@@ -53,7 +61,7 @@
   --card-3:  #e8e8ed;
   --border:  #e2e4ea;
   --border-2:#d5d7de;
-  --nav-bg:  rgba(247,247,250,0.92);
+  --nav-bg:  rgba(247,247,250,0.72);
   --safe-bg: #f7f7fa; /* tono TabBar chiaro (fallback dietro tutto) */
   /* Light: l'orologio iOS resta bianco (black-translucent) → striscia scura
      (tono ground dark) per renderlo leggibile; si fonde col notch/Dynamic Island */
@@ -71,6 +79,13 @@
   --success: #34c759;
   --warning: #b36b00;  /* ambra scurita: leggibile su fondo chiaro */
   --danger:  #ff3b30;
+
+  --hair:     rgba(0,0,0,0.07);
+  --hair-top: rgba(255,255,255,0.85);
+  --glass:    rgba(255,255,255,0.78);
+  --shadow-1: 0 1px 2px rgba(16,24,40,0.06), 0 2px 8px rgba(16,24,40,0.06);
+  --shadow-2: 0 4px 12px rgba(16,24,40,0.10), 0 12px 32px rgba(16,24,40,0.10);
+  --shadow-3: 0 8px 24px rgba(16,24,40,0.16), 0 24px 64px rgba(16,24,40,0.14);
 }
 
 * { box-sizing: border-box; }
@@ -149,6 +164,7 @@ input, textarea, select { font-family: inherit; color: inherit; }
   border-radius: var(--r);
   border: 1px solid var(--border);
   position: relative;
+  box-shadow: var(--shadow-1), inset 0 1px 0 var(--hair-top);
 }
 .card.flat { border: none; }
 
@@ -456,6 +472,7 @@ input[type=range] { accent-color: var(--accent); }
   border: 1px solid var(--border);
   border-radius: 18px;
   padding: 14px;
+  box-shadow: var(--shadow-1), inset 0 1px 0 var(--hair-top);
 }
 
 /* Card "hero" (Oggi in Home): bagliori radiali del gradiente LF */
@@ -464,14 +481,14 @@ input[type=range] { accent-color: var(--accent); }
   content: "";
   position: absolute;
   inset: -40% 55% 55% -20%;
-  background: radial-gradient(closest-side, rgba(10,132,255,0.28), transparent);
+  background: radial-gradient(closest-side, rgba(10,132,255,0.22), transparent);
   pointer-events: none;
 }
 .ui-card--hero::after {
   content: "";
   position: absolute;
   inset: 55% -20% -40% 60%;
-  background: radial-gradient(closest-side, rgba(94,92,230,0.22), transparent);
+  background: radial-gradient(closest-side, rgba(94,92,230,0.16), transparent);
   pointer-events: none;
 }
 .ui-card--hero > * { position: relative; }
@@ -489,12 +506,18 @@ input[type=range] { accent-color: var(--accent); }
 .ui-sheet {
   width: 100%;
   max-width: 560px;
-  background: var(--card);
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  backdrop-filter: blur(24px) saturate(1.8);
+  box-shadow: var(--shadow-3);
   border: 1px solid var(--border);
   border-radius: 22px 22px 0 0;
   padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
   max-height: 82dvh;
   overflow: auto;
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .ui-sheet { background: var(--card); }
 }
 @media (prefers-reduced-motion: no-preference) {
   .ui-sheet { animation: ui-sheet-up 0.22s cubic-bezier(0.22, 0.8, 0.3, 1); }
@@ -503,3 +526,18 @@ input[type=range] { accent-color: var(--accent); }
     to   { transform: translateY(0);    opacity: 1; }
   }
 }
+
+/* ── Premium polish 2026-07-16 ── */
+@keyframes skeletonShimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--card-2) 25%, var(--card-3) 50%, var(--card-2) 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+
+.pressable { transition: transform 0.12s ease, opacity 0.12s ease; -webkit-tap-highlight-color: transparent; }
+.pressable:active { transform: scale(0.97); opacity: 0.85; }
