@@ -169,6 +169,12 @@ console.log("\nSuite Motion — motion.jsx (no-op senza gsap, tween con gsap fak
     let threw2 = false;
     try { M.screenEnter(empty); } catch (_) { threw2 = true; }
     ok("screenEnter senza elementi è no-op", !threw2);
+    // fallback: nessun [data-reveal] → figli del primo figlio (max 12)
+    const kids = Array.from({ length: 15 }, () => ({}));
+    const fb = { querySelectorAll: () => [], firstElementChild: { children: kids } };
+    const before2 = calls.length;
+    M.screenEnter(fb);
+    ok("screenEnter fallback usa firstElementChild.children", calls.length > before2);
   }
 }
 

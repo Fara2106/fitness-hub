@@ -610,13 +610,13 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
         </div>
       ) : (
         <div className="lfh-scroll" ref={scrollRef} style={{ flex: 1, position: "relative" }}>
+          <Screen which={state.screen} device={device} state={state} set={setState} globalCtx={globalCtx} />
           {state.screen === "dashboard" && (
             <PullToRefresh
               scrollEl={scrollRef}
               onRefresh={() => (syncNowRef.current ? syncNowRef.current() : Promise.resolve())}
             />
           )}
-          <Screen which={state.screen} device={device} state={state} set={setState} globalCtx={globalCtx} />
         </div>
       )}
       <TabBar screen={state.screen} onNav={(s) => setState(st => ({ ...st, screen: s }))} />
