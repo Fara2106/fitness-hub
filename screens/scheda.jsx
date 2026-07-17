@@ -82,7 +82,7 @@ const TimerOverlay = ({ seconds, onClose }) => {
       }}
       onClick={onClose}
     >
-      <div className="muted" style={{ fontSize: 12, fontWeight: 600, letterSpacing: 1, textTransform: "uppercase", marginBottom: 24 }}>{t("Recupero")}</div>
+      <div className="muted" style={{ fontSize: 12, fontWeight: 600, letterSpacing: 1, textTransform: "uppercase", marginBottom: 24, color: "#8e8e9a" }}>{t("Recupero")}</div>
       <div style={{ position: "relative", width: 220, height: 220 }}>
         <div className="timer-pulse" style={{
           position: "absolute", inset: 0, borderRadius: "50%",
@@ -106,10 +106,10 @@ const TimerOverlay = ({ seconds, onClose }) => {
           position: "absolute", inset: 0, display: "flex",
           flexDirection: "column", alignItems: "center", justifyContent: "center",
         }}>
-          <div className="num" style={{ fontSize: 56, fontWeight: 600, letterSpacing: -0.04 }}>
+          <div className="num" style={{ fontSize: 56, fontWeight: 600, letterSpacing: -0.04, color: "#f2f2f7" }}>
             {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}
           </div>
-          <div className="muted tnum" style={{ fontSize: 12, fontWeight: 500 }}>
+          <div className="muted tnum" style={{ fontSize: 12, fontWeight: 500, color: "#8e8e9a" }}>
             {t("di")} {Math.floor(total / 60)}:{String(total % 60).padStart(2, "0")}
           </div>
         </div>
@@ -121,7 +121,7 @@ const TimerOverlay = ({ seconds, onClose }) => {
           {done ? t("Riprendi") : t("Salta")}
         </button>
       </div>
-      <div className="muted" style={{ fontSize: 11.5, marginTop: 16 }}>{t("Tocca ovunque per chiudere")}</div>
+      <div className="muted" style={{ fontSize: 11.5, marginTop: 16, color: "#8e8e9a" }}>{t("Tocca ovunque per chiudere")}</div>
     </div>
   );
 };
