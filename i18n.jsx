@@ -148,6 +148,11 @@ const I18N_DICT = {
   "Auto-recupero": { en: "Auto-rest" },
   "Esci dal player": { en: "Exit player" },
   "Nessuno storico": { en: "No history" },
+  "record": { en: "best" },
+  "prova": { en: "try" },
+  "Progressione: tocca per applicare": { en: "Progression: tap to apply" },
+  "Nuovo record!": { en: "New PR!" },
+  "nuovi record!": { en: "new PRs!" },
 
   // Update
   "Nuova versione disponibile": { en: "New version available" },
@@ -386,6 +391,10 @@ const I18N_DICT = {
   "Configura in Profilo": { en: "Set up in Profile" },
 
   // Storico
+  "Volume": { en: "Volume" },
+  "Serie per gruppo": { en: "Sets per muscle" },
+  "ultimi 7 giorni": { en: "last 7 days" },
+  "Nessun allenamento negli ultimi 7 giorni": { en: "No workouts in the last 7 days" },
   "Caricamento grafico…": { en: "Loading chart…" },
   "Nessun dato peso — aggiorna il peso dalla Dashboard": { en: "No weight data — log your weight from the Dashboard" },
   "Ancora nessun peso": { en: "No weight yet" },

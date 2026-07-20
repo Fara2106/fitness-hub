@@ -258,6 +258,55 @@ const ActivityRow = ({ act, isDesktop }) => {
   );
 };
 
+// ── Volume per gruppo muscolare (ultimi 7 giorni) ──────────────────────────
+const _GROUP_COLORS = {
+  Petto: "var(--accent)", Schiena: "#5AC8FA", Gambe: "#30D158",
+  Spalle: "#FF9F0A", Braccia: "#BF5AF2", Core: "#FF453A", Altro: "var(--text-3)",
+};
+const VolumeView = ({ isDesktop }) => {
+  const t = useT();
+  const data = React.useMemo(() => {
+    if (!window.storage || !window.WorkoutProgress) return { byGroup: {}, total: 0, order: [], days: 0 };
+    const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
+    const dates = window.WorkoutProgress.lastNDates(today, 7);
+    const hist = dates
+      .map(d => ({ date: d, muscleSets: window.storage.get(`muscleSets_${d}`, null) }))
+      .filter(h => h.muscleSets && Object.keys(h.muscleSets).length);
+    const agg = window.WorkoutProgress.aggregateVolume(hist);
+    return Object.assign({}, agg, { days: hist.length });
+  }, []);
+
+  if (!data.total) {
+    return (
+      <div style={{ padding: "24px 0", textAlign: "center" }}>
+        <div style={{ fontSize: 28, marginBottom: 8 }}>💪</div>
+        <div className="muted" style={{ fontSize: 13 }}>{t("Nessun allenamento negli ultimi 7 giorni")}</div>
+      </div>
+    );
+  }
+  const max = Math.max.apply(null, data.order.map(g => data.byGroup[g]));
+  return (
+    <div>
+      {data.order.map(g => {
+        const v = data.byGroup[g];
+        const col = _GROUP_COLORS[g] || "var(--text-3)";
+        return (
+          <div key={g} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0" }}>
+            <div style={{ width: 62, fontSize: 13, color: "var(--text-2)", flexShrink: 0 }}>{t(g)}</div>
+            <div style={{ flex: 1, height: 10, borderRadius: 999, background: "var(--track)", overflow: "hidden" }}>
+              <div style={{ width: `${max ? (v / max) * 100 : 0}%`, height: "100%", borderRadius: 999, background: col, transition: "width 0.4s" }} />
+            </div>
+            <div className="num" style={{ width: 26, textAlign: "right", fontSize: 14, fontWeight: 600 }}>{v}</div>
+          </div>
+        );
+      })}
+      <div className="muted tnum" style={{ fontSize: 11.5, marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)", textAlign: "center" }}>
+        {data.total} {t("serie")} · {data.days} {t("sessioni")}
+      </div>
+    </div>
+  );
+};
+
 // ── Storico screen ─────────────────────────────────────────────────────────
 const Storico = ({ device, onNav }) => {
   const isDesktop = device === "desktop";
@@ -329,6 +378,7 @@ const Storico = ({ device, onNav }) => {
       <div className="segmented">
         {[
           { id: "peso",     label: `⚖️ ${t("Peso")}` },
+          { id: "volume",   label: `💪 ${t("Volume")}` },
           { id: "cardio",   label: `🏃 ${t("Cardio")}` },
           { id: "checkin",  label: `📋 ${t("Check-in")}` },
         ].map(tb => (
@@ -360,6 +410,16 @@ const Storico = ({ device, onNav }) => {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Volume tab */}
+      {tab === "volume" && (
+        <div className="card" style={{ padding: isDesktop ? 22 : 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 12 }}>
+            {t("Serie per gruppo")} · {t("ultimi 7 giorni")}
+          </div>
+          <VolumeView isDesktop={isDesktop} />
         </div>
       )}
 

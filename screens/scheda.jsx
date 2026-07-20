@@ -461,7 +461,7 @@ const ExerciseCard = ({
 // ── Workout Player (vista a schermo intero, un esercizio alla volta) ────────
 const WorkoutPlayer = ({
   dayKey, dayName, exercises, cursor, setCursor,
-  completion, substitutions, pesosRef, sheetsWeights,
+  completion, substitutions, pesosRef, sheetsWeights, prMap,
   autoRest, setAutoRest, onPatch, onClose, onFinish,
 }) => {
   const t = useT();
@@ -512,6 +512,22 @@ const WorkoutPlayer = ({
   const label = substitutions[id] ? t(substitutions[id]) : t(ex.name);
   const next = exercises[cursor + 1];
 
+  // ── Progressione + PR (coach silenzioso) ──────────────────────────────────
+  const exName = substitutions[id] || ex.name;
+  const WP = window.WorkoutProgress;
+  // Ultimo peso reale della serie: pesi Sheets (getUltimiPesi) → history esercizio.
+  const lastRaw = (() => {
+    const k = (exName || "").toLowerCase(), ko = (ex.name || "").toLowerCase();
+    const row = sheetsWeights && (sheetsWeights[k] || sheetsWeights[ko]);
+    if (row && row[curSet] != null) return String(row[curSet]);
+    if (ex.history && ex.history.length) return String(ex.history[0].peso);
+    return null;
+  })();
+  const sug     = WP ? WP.suggestNext(lastRaw) : null;
+  const prBest  = WP ? WP.bestFor(prMap || {}, exName) : null;
+  const curNum  = WP ? WP.parseWeight(pesoVal) : null;
+  const isPR    = prBest != null && curNum != null && curNum > prBest;
+
   return (
     <div style={{
       position: "fixed", inset: 0, zIndex: 9990,
@@ -556,10 +572,29 @@ const WorkoutPlayer = ({
           <span className="num" style={{ fontSize: 22, fontWeight: 600, color: "var(--text-2)" }}>× {ex.sets[curSet].rip}</span>
         </div>
 
-        <div className="muted tnum" style={{ fontSize: 12.5, marginTop: 4 }}>
-          {(ex.history && ex.history.length)
-            ? `${t("L'ultima volta")}: ${ex.history[0].peso} kg × ${ex.history[0].rip}`
-            : t("Nessuno storico")}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 7, marginTop: 4 }}>
+          <div className="muted tnum" style={{ fontSize: 12.5 }}>
+            {lastRaw != null ? `${t("L'ultima volta")}: ${lastRaw} kg` : t("Nessuno storico")}
+            {prBest != null ? ` · ${t("record")} ${prBest} kg` : ""}
+          </div>
+          {isPR ? (
+            <span className="tnum" style={{
+              fontSize: 12.5, fontWeight: 700, color: "var(--success)",
+              background: "rgba(48,209,88,0.15)", borderRadius: 999, padding: "5px 12px",
+            }}>🏆 {t("Nuovo record!")}</span>
+          ) : sug ? (
+            <button
+              onClick={() => setPeso(String(sug.next))}
+              className="pressable tnum"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 5,
+                fontSize: 12.5, fontWeight: 600, color: "var(--accent)",
+                background: "rgba(10,132,255,0.14)", border: "1px solid var(--border)",
+                borderRadius: 999, padding: "6px 12px", cursor: "pointer",
+              }}
+              title={t("Progressione: tocca per applicare")}
+            >↑ {t("prova")} {sug.next} kg</button>
+          ) : null}
         </div>
 
         {/* Puntini serie */}
@@ -618,6 +653,10 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   const [showConfetti, setShowConfetti] = React.useState(false);
   const [notes, setNotes]   = React.useState(() => window.storage ? window.storage.get(`notes_${_todayK()}`, "") : "");
   const [sheetsWeights, setSheetsWeights] = React.useState(null);
+  // Record personali (PR) per esercizio: { nome: { peso, date } } — persistiti,
+  // aggiornati alla chiusura sessione; il Player li usa per il badge "record".
+  const [prMap, setPrMap] = React.useState(() => window.storage ? window.storage.get("prMap", {}) : {});
+  const [newPRs, setNewPRs] = React.useState([]); // PR appena battuti → celebrazione
   const [saving, setSaving] = React.useState(false);
   const [saveMsg, setSaveMsg] = React.useState("");
   const prevDoneRef = React.useRef(null); // null = da inizializzare al primo render
@@ -739,6 +778,31 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
           daily[g] = (daily[g] || 0) + done;
         });
         window.storage.set(`muscleSets_${today}`, daily);
+
+        // Record personali: raccogli le serie completate (peso digitato) e
+        // aggiorna il PR per esercizio. I nuovi record → celebrazione in UI.
+        if (window.WorkoutProgress) {
+          const doneSets = [];
+          exercises.forEach((ex, exIdx) => {
+            const id = window.exId(scheda, exIdx);
+            const exComp = completion[id] || [];
+            const exName = substitutions[id] || ex.name;
+            const exPesos = pesosRef.current[id] || ex.sets.map(s => String(s.peso));
+            ex.sets.forEach((s, setIdx) => {
+              if (!exComp[setIdx]) return;
+              const raw = exPesos[setIdx];
+              doneSets.push({ esercizio: exName, peso: (raw != null && String(raw).trim() !== "") ? raw : s.peso, date: today });
+            });
+          });
+          const res = window.WorkoutProgress.applySession(prMap, doneSets);
+          if (res.newPRs.length) {
+            window.storage.set("prMap", res.prMap);
+            setPrMap(res.prMap);
+            setNewPRs(res.newPRs);
+            if (navigator.vibrate) navigator.vibrate([40, 60, 40, 60, 80]);
+            setTimeout(() => setNewPRs([]), 5000);
+          }
+        }
       }
 
       if (window.sheetsAPI) {
@@ -964,12 +1028,33 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
           substitutions={substitutions}
           pesosRef={pesosRef}
           sheetsWeights={sheetsWeights}
+          prMap={prMap}
           autoRest={autoRest}
           setAutoRest={setAutoRest}
           onPatch={patchProg}
           onClose={() => setMode("list")}
           onFinish={() => setMode("list")}
         />
+      )}
+
+      {/* Celebrazione record personali (PR) */}
+      {newPRs.length > 0 && (
+        <div className="pop-in" style={{
+          position: "fixed", left: 16, right: 16, bottom: "calc(env(safe-area-inset-bottom) + 90px)",
+          zIndex: 9995, background: "var(--card)", border: "1px solid rgba(48,209,88,0.4)",
+          borderRadius: 16, padding: "14px 16px", boxShadow: "0 16px 40px -12px rgba(0,0,0,0.5)",
+          display: "flex", alignItems: "center", gap: 12,
+        }}>
+          <div style={{ fontSize: 26 }}>🏆</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--success)" }}>
+              {newPRs.length === 1 ? t("Nuovo record!") : `${newPRs.length} ${t("nuovi record!")}`}
+            </div>
+            <div className="muted tnum" style={{ fontSize: 12, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {newPRs.slice(0, 3).map(p => `${t(p.esercizio)} ${p.peso}kg`).join(" · ")}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

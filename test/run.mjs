@@ -178,6 +178,85 @@ console.log("\nSuite Motion — motion.jsx (no-op senza gsap, tween con gsap fak
   }
 }
 
+// ---- Suite WorkoutProgress (modulo puro: progressione, PR, volume, nudge, merge) ----
+console.log("\nSuite WorkoutProgress — progressione carichi, PR, volume, nudge, merge weightLog");
+{
+  const sb = { window: {}, console };
+  vm.createContext(sb);
+  try {
+    vm.runInContext(transform(join(ROOT, "progress.jsx")), sb, { filename: "progress.jsx" });
+    ok("progress.jsx si carica sotto vm", true);
+  } catch (e) {
+    ok("progress.jsx si carica sotto vm — " + e.message.split("\n")[0], false);
+  }
+  const P = sb.window.WorkoutProgress;
+  ok("WorkoutProgress esposto su window", !!P);
+  if (P) {
+    // parseWeight
+    ok("parseWeight('80') === 80", P.parseWeight("80") === 80);
+    ok("parseWeight('82,5') === 82.5 (virgola)", P.parseWeight("82,5") === 82.5);
+    ok("parseWeight('elastico rosso') === null", P.parseWeight("elastico rosso") === null);
+    ok("parseWeight('') === null", P.parseWeight("") === null);
+    ok("parseWeight('0') === null (non positivo)", P.parseWeight("0") === null);
+
+    // suggestNext (micro-step per fascia)
+    ok("suggestNext('8') → +1 = 9", (P.suggestNext("8") || {}).next === 9);
+    ok("suggestNext('30') → +2.5 = 32.5", (P.suggestNext("30") || {}).next === 32.5);
+    ok("suggestNext('100') → +5 = 105", (P.suggestNext("100") || {}).next === 105);
+    ok("suggestNext('elastico') === null", P.suggestNext("elastico") === null);
+
+    // applySession / PR
+    const s1 = P.applySession({}, [
+      { esercizio: "Panca", peso: "60", date: "2026-07-01" },
+      { esercizio: "Panca", peso: "62.5", date: "2026-07-01" },   // stesso esercizio, tiene il max
+      { esercizio: "Squat", peso: "elastico", date: "2026-07-01" }, // scartato
+    ]);
+    ok("applySession: primo PR Panca = 62.5", s1.prMap["Panca"].peso === 62.5);
+    ok("applySession: un solo newPR per esercizio", s1.newPRs.filter(p => p.esercizio === "Panca").length === 1);
+    ok("applySession: peso non numerico non crea PR", !s1.prMap["Squat"]);
+    const s2 = P.applySession(s1.prMap, [{ esercizio: "Panca", peso: "60", date: "2026-07-08" }]);
+    ok("applySession: peso inferiore NON è PR", s2.newPRs.length === 0 && s2.prMap["Panca"].peso === 62.5);
+    const s3 = P.applySession(s1.prMap, [{ esercizio: "Panca", peso: "65", date: "2026-07-08" }]);
+    ok("applySession: nuovo massimo è PR con prev", s3.newPRs.length === 1 && s3.newPRs[0].prev === 62.5);
+    ok("bestFor legge il PR", P.bestFor(s1.prMap, "Panca") === 62.5);
+
+    // aggregateVolume
+    const vol = P.aggregateVolume([
+      { date: "2026-07-01", muscleSets: { Petto: 4, Gambe: 6 } },
+      { date: "2026-07-03", muscleSets: { Petto: 3, Braccia: 2 } },
+    ]);
+    ok("aggregateVolume: Petto sommato = 7", vol.byGroup.Petto === 7);
+    ok("aggregateVolume: total = 15", vol.total === 15);
+    ok("aggregateVolume: order per volume desc (Petto=7 primo)", vol.order[0] === "Petto");
+    ok("aggregateVolume: history vuota → total 0", P.aggregateVolume([]).total === 0);
+
+    // lastNDates
+    const dts = P.lastNDates("2026-07-15", 3);
+    ok("lastNDates: 3 date, oggi incluso e desc", dts.length === 3 && dts[0] === "2026-07-15" && dts[2] === "2026-07-13");
+
+    // nextNudge (priorità: workout → checkin → hydration; rispetta dismissed)
+    ok("nextNudge: giorno workout non fatto → nudge workout",
+      (P.nextNudge({ isWorkoutDay: true, gymDone: false, hour: 10 }) || {}).id === "workout");
+    ok("nextNudge: workout fatto, sera senza check-in → nudge checkin",
+      (P.nextNudge({ isWorkoutDay: true, gymDone: true, checkInDone: false, hour: 21 }) || {}).id === "checkin");
+    ok("nextNudge: dismissed 'workout' → salta al successivo o null",
+      P.nextNudge({ isWorkoutDay: true, gymDone: false, hour: 10, dismissed: ["workout"] }) === null);
+    ok("nextNudge: nulla di pertinente → null",
+      P.nextNudge({ isWorkoutDay: false, checkInDone: true, hydration: 8, hour: 15 }) === null);
+
+    // mergeWeightLog
+    const merged = P.mergeWeightLog(
+      [{ date: "2026-07-01", weight: 77 }, { date: "2026-07-02", weight: 77.5 }],
+      [{ date: "2026-07-02", weight: 78 }, { date: "2026-07-03", weight: 78.2 }]
+    );
+    ok("mergeWeightLog: dedup per data, 3 entry", merged.length === 3);
+    ok("mergeWeightLog: conflitto 07-02 → cloud vince (78)", merged.find(e => e.date === "2026-07-02").weight === 78);
+    ok("mergeWeightLog: ordinata ascendente", merged[0].date === "2026-07-01" && merged[2].date === "2026-07-03");
+    ok("mergeWeightLog prefer local: 07-02 → 77.5",
+      P.mergeWeightLog([{ date: "2026-07-02", weight: 77.5 }], [{ date: "2026-07-02", weight: 78 }], "local")[0].weight === 77.5);
+  }
+}
+
 // ---- Esito ----
 console.log("\n" + pass + " pass, " + fail + " fail");
 process.exit(fail === 0 ? 0 : 1);

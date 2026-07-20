@@ -67,6 +67,25 @@ ESCLUDERE SEMPRE dalla dieta: pasta di ceci, lenticchie, piselli, bevanda di man
     prompt += `\n\nNote scheda di oggi: "${sessionNotes}"`;
   }
 
+  // ── Performance reale: record personali + volume (dati loggati localmente) ──
+  // Rende il coach data-driven: sa cosa Lorenzo ha davvero sollevato, non solo
+  // il testo della scheda.
+  const prMap = st ? st.get("prMap", {}) : {};
+  const prKeys = Object.keys(prMap || {});
+  if (prKeys.length) {
+    const prList = prKeys.slice(0, 15).map(k => `${k} ${prMap[k].peso}kg`).join(", ");
+    prompt += `\n\nRecord personali (massimale caricato per esercizio): ${prList}.`;
+  }
+  if (window.WorkoutProgress && st) {
+    const dates = window.WorkoutProgress.lastNDates(today, 7);
+    const hist = dates.map(d => ({ date: d, muscleSets: st.get(`muscleSets_${d}`, null) })).filter(h => h.muscleSets);
+    const vol = window.WorkoutProgress.aggregateVolume(hist);
+    if (vol.total > 0) {
+      const parts = vol.order.map(g => `${g} ${vol.byGroup[g]}`).join(", ");
+      prompt += `\nVolume ultimi 7 giorni (serie per gruppo): ${parts} (totale ${vol.total} serie).`;
+    }
+  }
+
   // ── Scheda allenamento (file caricato) ─────────────────────────────────────
   if (schedaData) {
     const txt = schedaData.length > 3000 ? schedaData.slice(0, 3000) + "\n[…troncato]" : schedaData;
