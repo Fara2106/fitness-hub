@@ -341,7 +341,6 @@ window.parseDieta = function (text) {
         time:    meta.time,
         emoji:   meta.emoji,
         title:   meta.title,
-        kcal:    0,
         primary: [],
         others:  [],
       };

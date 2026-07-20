@@ -180,11 +180,21 @@ async function _cloudSync(opts) {
     ]);
 
     // 1. Peso corporeo (foglio PesoCorporeo)
+    // Robustezza: fondi lo storico cloud nel weightLog locale (dedup per data,
+    // merge canonico e testato) invece di scrivere solo l'ultimo peso. Così i
+    // grafici/volume hanno i dati completi anche senza aprire lo Storico, e non
+    // si perde nulla per data mancante da un lato.
     if (pesiRes.ok) {
       const pesi = pesiRes.value;
       if (Array.isArray(pesi) && pesi.length > 0) {
-        st.set("bodyWeight", pesi[pesi.length - 1].weight);
-        console.log("[sync] bodyWeight →", pesi[pesi.length - 1].weight);
+        if (window.WorkoutProgress) {
+          const merged = window.WorkoutProgress.mergeWeightLog(st.get("weightLog", []), pesi, "cloud");
+          st.set("weightLog", merged);
+          if (merged.length) st.set("bodyWeight", merged[merged.length - 1].weight);
+        } else {
+          st.set("bodyWeight", pesi[pesi.length - 1].weight);
+        }
+        console.log("[sync] weightLog merge ←", pesi.length, "cloud rows");
       }
     } else {
       console.warn("[sync] getPesoCorporeo:", pesiRes.err);

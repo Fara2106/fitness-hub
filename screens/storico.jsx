@@ -324,12 +324,17 @@ const Storico = ({ device, onNav }) => {
     window.sheetsAPI.getPesoCorporeo()
       .then(rows => {
         if (!Array.isArray(rows) || !rows.length) return;
-        // Merge: mappa per data, Sheets ha priorità
+        // Merge canonico (dedup per data, Sheets ha priorità) — stessa logica
+        // testata usata dalla sync in app.jsx.
         const local = window.storage.get("weightLog", []);
-        const map = {};
-        local.forEach(e => { if (e.date) map[e.date] = e; });
-        rows.forEach(e => { if (e.date) map[e.date] = e; });
-        const merged = Object.values(map).sort((a, b) => a.date.localeCompare(b.date));
+        const merged = window.WorkoutProgress
+          ? window.WorkoutProgress.mergeWeightLog(local, rows, "cloud")
+          : (() => {
+              const map = {};
+              local.forEach(e => { if (e.date) map[e.date] = e; });
+              rows.forEach(e => { if (e.date) map[e.date] = e; });
+              return Object.values(map).sort((a, b) => a.date.localeCompare(b.date));
+            })();
         window.storage.set("weightLog", merged);
         setWeightLog(merged.slice(-60));
       })

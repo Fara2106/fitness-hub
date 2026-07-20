@@ -304,6 +304,25 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
 
   const startWorkout = () => { window._schedaIntent = "player"; onNav("scheda"); };
 
+  // ── Nudge in-app (NON push OS): un solo suggerimento contestuale, dismissabile ──
+  const [nudgeDismissed, setNudgeDismissed] = React.useState(
+    () => (window.storage ? window.storage.get(`nudgeDismissed_${today}`, []) : [])
+  );
+  const nudge = window.WorkoutProgress ? window.WorkoutProgress.nextNudge({
+    isWorkoutDay: !!todaySession,
+    gymDone: window.storage ? !!window.storage.get(`gym_${today}`, false) : false,
+    checkInDone: window.storage ? window.storage.get(`checkIn_${today}`, null) != null : false,
+    hydration: window.storage ? Number(window.storage.get(`hydration_${today}`, 0)) : 0,
+    hydrationTarget: 8,
+    hour: new Date().getHours(),
+    dismissed: nudgeDismissed,
+  }) : null;
+  const dismissNudge = (id) => {
+    const nextD = nudgeDismissed.concat([id]);
+    setNudgeDismissed(nextD);
+    if (window.storage) window.storage.set(`nudgeDismissed_${today}`, nextD);
+  };
+
   return (
     <div className="fade-up" style={{ padding: isDesktop ? "28px 40px" : "10px 16px 24px", display: "flex", flexDirection: "column", gap: 12, maxWidth: 640, margin: "0 auto", width: "100%" }}>
 
@@ -318,6 +337,26 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
           </div>
         }
       />
+
+      {/* Nudge contestuale (idratazione / check-in / allenamento) */}
+      {nudge && (
+        <div className="fade-up" style={{
+          display: "flex", alignItems: "center", gap: 10,
+          background: "rgba(10,132,255,0.12)", border: "1px solid rgba(10,132,255,0.25)",
+          borderRadius: 14, padding: "11px 12px 11px 14px",
+        }}>
+          <span style={{ fontSize: 17 }}>{nudge.kind === "workout" ? "🏋️" : nudge.kind === "checkin" ? "🌙" : "💧"}</span>
+          <div style={{ flex: 1, fontSize: 13, lineHeight: 1.35 }}>{t(nudge.text)}</div>
+          {nudge.kind === "workout" && (
+            <button onClick={startWorkout} style={{ flexShrink: 0, background: "var(--accent)", color: "#fff", border: 0, borderRadius: 999, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              {t("Inizia")}
+            </button>
+          )}
+          <button onClick={() => dismissNudge(nudge.id)} aria-label={t("Ignora")} style={{ flexShrink: 0, width: 26, height: 26, borderRadius: 999, background: "transparent", border: 0, color: "var(--text-3)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Icon name="x" size={13} strokeWidth={2.4} />
+          </button>
+        </div>
+      )}
 
       {/* Hero "Oggi" */}
       <UICard hero>
