@@ -221,8 +221,8 @@ async function _cloudSync(opts) {
         try { st.set("spesaChecked", JSON.parse(spesaCloud)); console.log("[sync pull] spesaChecked ✓"); } catch(_) {}
       }
       if (s.spesaFreq)  st.set("spesaFreq", Number(s.spesaFreq) || 1);
-      // groqApiKey: cloud wins sempre
-      if (s.groqApiKey) { st.set("groqApiKey", s.groqApiKey); console.log("[sync pull] groqApiKey ✓"); }
+      // groqApiKey: NON sincronizzata (sicurezza) — la chiave resta solo sul device,
+      // così non finisce nel foglio Settings esposto dal backend pubblico.
       if (s.bodyWeight && parseFloat(s.bodyWeight) > 0) {
         st.set("bodyWeight", parseFloat(s.bodyWeight));
         console.log("[sync pull] bodyWeight (settings) →", s.bodyWeight);
@@ -265,8 +265,9 @@ function _cloudPushMissing(cloudKeys) {
     }
   };
 
-  // Chiavi semplici (string/number)
-  const KEYS = ["groqApiKey", "bodyWeight", "onboardingDone", "spesaFreq"];
+  // Chiavi semplici (string/number). groqApiKey ESCLUSA di proposito: è un
+  // segreto → resta device-local, non va nel foglio Settings esposto.
+  const KEYS = ["bodyWeight", "onboardingDone", "spesaFreq"];
   KEYS.forEach(k => {
     const local = st.get(k, "");
     if (local && !cloudKeys[k]) {
@@ -300,8 +301,7 @@ window._cloudPushAll = function() {
     }
   };
 
-  // Tutte le chiavi sincronizzabili
-  push("groqApiKey",    st.get("groqApiKey", ""));
+  // Tutte le chiavi sincronizzabili (groqApiKey ESCLUSA: segreto device-local)
   push("bodyWeight",    st.get("bodyWeight", ""));
   push("spesaFreq",     st.get("spesaFreq", ""));
   push("onboardingDone", st.get("onboardingDone", false) ? "true" : "");

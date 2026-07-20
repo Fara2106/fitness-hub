@@ -44,12 +44,8 @@ const ApiKeyRow = ({ icon, iconBg, title, sub, storageKey, testFn, placeholder }
     setVal(v);
     const trimmed = v.trim();
     if (window.storage) window.storage.set(storageKey, trimmed);
-    // Sync groqApiKey al cloud (con retry così non si perde su errore di rete)
-    if (storageKey === "groqApiKey" && trimmed) {
-      (window._saveSettingRetry
-        ? window._saveSettingRetry("groqApiKey", trimmed)
-        : (window.sheetsAPI && window.sheetsAPI.saveSettings({ key: "groqApiKey", value: trimmed }).catch(() => {})));
-    }
+    // NB: la chiave Groq NON viene più sincronizzata al cloud (sicurezza): resta
+    // solo sul device. Va reinserita a mano su ogni device (per te 1-2 volte).
   };
 
   const test = async () => {
