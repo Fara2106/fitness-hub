@@ -32,9 +32,22 @@ function doOptions(e) {
   return ContentService.createTextOutput("").setMimeType(ContentService.MimeType.JSON);
 }
 
+// ── Autorizzazione ────────────────────────────────────────────────────────
+// Token condiviso col Cloudflare Worker (che lo inietta da un segreto NON nel
+// repo). Impostalo in: Progetto → Impostazioni progetto → Proprietà script →
+// APP_TOKEN = <stringa lunga casuale>. Finché la proprietà NON è impostata, il
+// comportamento resta quello legacy (aperto) → si può deployare il codice prima
+// e attivare l'enforcement dopo, senza finestra di rottura.
+function _tokenOk(provided) {
+  const expected = PropertiesService.getScriptProperties().getProperty("APP_TOKEN");
+  if (!expected) return true;               // non configurato → legacy
+  return provided === expected;
+}
+
 // ── GET dispatcher ────────────────────────────────────────────────────────
 function doGet(e) {
   const p = e.parameter || {};
+  if (!_tokenOk(p._token)) return _err("Non autorizzato");
   try {
     switch (p.action) {
       case "getPesoCorporeo":  return _getPesoCorporeo();
@@ -58,6 +71,7 @@ function doPost(e) {
   } catch (_) {
     return _err("JSON non valido");
   }
+  if (!_tokenOk(body._token)) return _err("Non autorizzato");
   try {
     switch (body.action) {
       case "savePeso":          return _savePeso(body);

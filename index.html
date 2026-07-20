@@ -2,6 +2,13 @@
 <html lang="it">
 <head>
 <meta charset="UTF-8" />
+<!-- Content-Security-Policy (difesa in profondità). connect-src BLINDATO ai soli
+     host legittimi (proxy Sheets, worker push, Groq) → anche se venisse iniettato
+     codice, non potrebbe esfiltrare dati verso domini terzi. script-src richiede
+     'unsafe-eval' (Babel standalone compila JSX a runtime) e 'unsafe-inline' (script
+     di bootstrap inline). object-src none, base-uri self bloccano vettori classici.
+     NB: frame-ancestors/X-Frame non sono impostabili via <meta> su GitHub Pages. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://fitness-hub-proxy.lorefara97.workers.dev https://fitness-hub-push.lorefara97.workers.dev https://api.groq.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'" />
 <!-- maximum-scale=1 + user-scalable=no: blocca il pinch-zoom E l'auto-zoom iOS sul focus
      degli input (che, con #root a posizione fissa, lasciava una fascia vuota in basso).
      In PWA standalone iOS rispetta questi vincoli. -->
@@ -20,7 +27,7 @@
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png" />
 <link rel="manifest" href="manifest.json" />
-<link rel="stylesheet" href="styles.css?v=20260720121849" />
+<link rel="stylesheet" href="styles.css?v=20260720142314" />
 <style>
   /* Banda nera in basso su iOS standalone — CAUSA RADICE MISURATA on-device (PWA):
      innerH/clientH/height:100%/position:fixed;bottom:0/svh/dvh valgono TUTTI il viewport
@@ -108,43 +115,43 @@
 <!-- prop-types PRIMA di Recharts: l'UMD di Recharts lo richiede come globale
      window.PropTypes — senza, Recharts crasha ("oneOfType of undefined") e
      il grafico peso in Storico resta per sempre su "Caricamento grafico…" -->
-<script src="https://cdn.jsdelivr.net/npm/prop-types@15.8.1/prop-types.min.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/prop-types@15.8.1/prop-types.min.js" integrity="sha384-/AfDwVDXNopzPvhxMPQ11y1OCpR6mVkWx47qzSwIiquvxkcMkZddEzDNtIOtfCpk" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js" integrity="sha384-d1XH4LhwLW8j0l6VXMP8yJabdGY9ZqtZk7k7PaPk5NoUCcZ/hDkL5aaKioKQbcZg" crossorigin="anonymous"></script>
 <script>if (typeof Recharts !== 'undefined') window.Recharts = Recharts;</script>
 
 <!-- GSAP core (motion premium). Se la CDN è bloccata l'app funziona identica: motion.jsx fa da guard. -->
-<script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/gsap.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/gsap.min.js" integrity="sha384-HOvlOYPIs/zjoIkWUGXkVmXsjr8GuZLV+Q+rcPwmJOVZVpvTSXQChiN4t9Euv9Vc" crossorigin="anonymous"></script>
 
-<!-- Core utilities (?v=20260720121849: versionato, bumpato a ogni deploy → niente cache stale) -->
-<script type="text/babel" src="storage.jsx?v=20260720121849"></script>
-<script type="text/babel" src="api.jsx?v=20260720121849"></script>
-<script type="text/babel" src="push.jsx?v=20260720121849"></script>
-<script type="text/babel" src="defaults.jsx?v=20260720121849"></script>
-<script type="text/babel" src="parser.jsx?v=20260720121849"></script>
+<!-- Core utilities (?v=20260720142314: versionato, bumpato a ogni deploy → niente cache stale) -->
+<script type="text/babel" src="storage.jsx?v=20260720142314"></script>
+<script type="text/babel" src="api.jsx?v=20260720142314"></script>
+<script type="text/babel" src="push.jsx?v=20260720142314"></script>
+<script type="text/babel" src="defaults.jsx?v=20260720142314"></script>
+<script type="text/babel" src="parser.jsx?v=20260720142314"></script>
 
 <!-- Components -->
-<script type="text/babel" src="i18n.jsx?v=20260720121849"></script>
-<script type="text/babel" src="icons.jsx?v=20260720121849"></script>
-<script type="text/babel" src="ui.jsx?v=20260720121849"></script>
-<script type="text/babel" src="motion.jsx?v=20260720121849"></script>
-<script type="text/babel" src="anatomy.jsx?v=20260720121849"></script>
-<script type="text/babel" src="nav.jsx?v=20260720121849"></script>
-<script type="text/babel" src="schedaState.jsx?v=20260720121849"></script>
-<script type="text/babel" src="progress.jsx?v=20260720121849"></script>
+<script type="text/babel" src="i18n.jsx?v=20260720142314"></script>
+<script type="text/babel" src="icons.jsx?v=20260720142314"></script>
+<script type="text/babel" src="ui.jsx?v=20260720142314"></script>
+<script type="text/babel" src="motion.jsx?v=20260720142314"></script>
+<script type="text/babel" src="anatomy.jsx?v=20260720142314"></script>
+<script type="text/babel" src="nav.jsx?v=20260720142314"></script>
+<script type="text/babel" src="schedaState.jsx?v=20260720142314"></script>
+<script type="text/babel" src="progress.jsx?v=20260720142314"></script>
 
 <!-- Screens -->
-<script type="text/babel" src="screens/onboarding.jsx?v=20260720121849"></script>
-<script type="text/babel" src="screens/dashboard.jsx?v=20260720121849"></script>
-<script type="text/babel" src="screens/scheda.jsx?v=20260720121849"></script>
-<script type="text/babel" src="screens/dieta.jsx?v=20260720121849"></script>
-<script type="text/babel" src="screens/spesa.jsx?v=20260720121849"></script>
-<script type="text/babel" src="screens/coach.jsx?v=20260720121849"></script>
-<script type="text/babel" src="screens/storico.jsx?v=20260720121849"></script>
-<script type="text/babel" src="screens/impostazioni.jsx?v=20260720121849"></script>
-<script type="text/babel" src="screens/promemoria.jsx?v=20260720121849"></script>
+<script type="text/babel" src="screens/onboarding.jsx?v=20260720142314"></script>
+<script type="text/babel" src="screens/dashboard.jsx?v=20260720142314"></script>
+<script type="text/babel" src="screens/scheda.jsx?v=20260720142314"></script>
+<script type="text/babel" src="screens/dieta.jsx?v=20260720142314"></script>
+<script type="text/babel" src="screens/spesa.jsx?v=20260720142314"></script>
+<script type="text/babel" src="screens/coach.jsx?v=20260720142314"></script>
+<script type="text/babel" src="screens/storico.jsx?v=20260720142314"></script>
+<script type="text/babel" src="screens/impostazioni.jsx?v=20260720142314"></script>
+<script type="text/babel" src="screens/promemoria.jsx?v=20260720142314"></script>
 
 <!-- App frame -->
-<script type="text/babel" src="app.jsx?v=20260720121849"></script>
+<script type="text/babel" src="app.jsx?v=20260720142314"></script>
 
 <!-- Mount: auto-detect device -->
 <script type="text/babel" data-presets="env,react">
