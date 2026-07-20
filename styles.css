@@ -45,10 +45,23 @@
   /* Materiali premium (2026-07-16) */
   --hair:     rgba(255,255,255,0.08);  /* bordi hairline (usato anche da nav.jsx) */
   --hair-top: rgba(255,255,255,0.05);  /* highlight superiore card */
-  --glass:    rgba(21,21,27,0.72);     /* superficie vetro (sheet/barre) */
+  --glass:    rgba(21,21,27,0.60);     /* superficie vetro (sheet/barre) */
   --shadow-1: 0 1px 2px rgba(0,0,0,0.25), 0 2px 8px rgba(0,0,0,0.18);
   --shadow-2: 0 4px 12px rgba(0,0,0,0.32), 0 12px 32px rgba(0,0,0,0.28);
   --shadow-3: 0 8px 24px rgba(0,0,0,0.45), 0 24px 64px rgba(0,0,0,0.40);
+
+  /* ── Liquid Glass (Apple-style, 2026-07-20) ─────────────────────────────
+     Materiale translucido: sfoca + satura ciò che sta dietro, con highlight
+     speculare in alto e ombra sul bordo inferiore → effetto "lente". */
+  --glass-blur:   30px;
+  --glass-sat:    180%;
+  --glass-edge:   rgba(255,255,255,0.22);  /* highlight speculare superiore */
+  --glass-edge-b: rgba(0,0,0,0.28);        /* ombra bordo inferiore */
+  --glass-border: rgba(255,255,255,0.12);  /* hairline luminoso */
+  --glass-sheen:  linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0) 42%);
+  /* Aloni ambient dietro il contenuto (danno "qualcosa da rifrangere" al vetro) */
+  --ambient-1: rgba(10,132,255,0.11);
+  --ambient-2: rgba(94,92,230,0.11);
 }
 
 /* ── LIGHT theme ── */
@@ -82,10 +95,20 @@
 
   --hair:     rgba(0,0,0,0.07);
   --hair-top: rgba(255,255,255,0.85);
-  --glass:    rgba(255,255,255,0.78);
+  --glass:    rgba(255,255,255,0.62);
   --shadow-1: 0 1px 2px rgba(16,24,40,0.06), 0 2px 8px rgba(16,24,40,0.06);
   --shadow-2: 0 4px 12px rgba(16,24,40,0.10), 0 12px 32px rgba(16,24,40,0.10);
   --shadow-3: 0 8px 24px rgba(16,24,40,0.16), 0 24px 64px rgba(16,24,40,0.14);
+
+  /* Liquid Glass — variante chiara */
+  --glass-blur:   24px;
+  --glass-sat:    180%;
+  --glass-edge:   rgba(255,255,255,0.90);
+  --glass-edge-b: rgba(16,24,40,0.05);
+  --glass-border: rgba(255,255,255,0.65);
+  --glass-sheen:  linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0) 42%);
+  --ambient-1: rgba(10,132,255,0.08);
+  --ambient-2: rgba(94,92,230,0.07);
 }
 
 * { box-sizing: border-box; }
@@ -108,7 +131,12 @@ input, textarea, select { font-family: inherit; color: inherit; }
   --frame-pad: 16px;
   height: 100%;
   width: 100%;
-  background: var(--bg);
+  /* Sfondo con aloni ambient brand: dà profondità e "materia" da rifrangere
+     al vetro di TabBar/Sidebar/sheet. Restano sotto le card opache. */
+  background:
+    radial-gradient(100% 60% at 6% -12%, var(--ambient-1), transparent 55%),
+    radial-gradient(90% 55% at 106% 110%, var(--ambient-2), transparent 55%),
+    var(--bg);
   color: var(--text);
   font-family: var(--body);
   display: flex;
@@ -497,7 +525,9 @@ input[type=range] { accent-color: var(--accent); }
 .ui-sheet-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.45);
+  background: rgba(0,0,0,0.4);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
   z-index: 60;
   display: flex;
   align-items: flex-end;
@@ -506,11 +536,12 @@ input[type=range] { accent-color: var(--accent); }
 .ui-sheet {
   width: 100%;
   max-width: 560px;
-  background: var(--glass);
-  -webkit-backdrop-filter: blur(24px) saturate(1.8);
-  backdrop-filter: blur(24px) saturate(1.8);
-  box-shadow: var(--shadow-3);
-  border: 1px solid var(--border);
+  background-color: var(--glass);
+  background-image: var(--glass-sheen);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  box-shadow: var(--shadow-3), inset 0 1px 0 var(--glass-edge);
+  border: 1px solid var(--glass-border);
   border-radius: 22px 22px 0 0;
   padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
   max-height: 82dvh;
@@ -541,3 +572,19 @@ input[type=range] { accent-color: var(--accent); }
 
 .pressable { transition: transform 0.12s ease, opacity 0.12s ease; -webkit-tap-highlight-color: transparent; }
 .pressable:active { transform: scale(0.97); opacity: 0.85; }
+
+/* ── Liquid Glass utility ─────────────────────────────────────────────────
+   Materiale vetro riutilizzabile: sfoca+satura il dietro, hairline luminoso,
+   highlight speculare in alto + ombra bordo inferiore, velo (sheen) in alto.
+   Fallback opaco dove backdrop-filter non è supportato. */
+.glass {
+  background-color: var(--glass);
+  background-image: var(--glass-sheen);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-2), inset 0 1px 0 var(--glass-edge), inset 0 -1px 0 var(--glass-edge-b);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass { background-color: var(--card); background-image: none; }
+}

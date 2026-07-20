@@ -349,9 +349,12 @@ const Coach = ({ device, onNav, activities = [], checkIn, bodyWeight }) => {
           <div style={{
             padding: isDesktop ? "10px 40px 24px" : "8px 16px 20px",
             display: "flex", flexDirection: "column", gap: 9,
-            borderTop: "1px solid var(--border)",
-            background: "var(--nav-bg)", // theme-aware
-            backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
+            borderTop: "1px solid var(--glass-border)",
+            backgroundColor: "var(--glass)",
+            backgroundImage: "var(--glass-sheen)",
+            backdropFilter: "blur(var(--glass-blur)) saturate(var(--glass-sat))",
+            WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(var(--glass-sat))",
+            boxShadow: "inset 0 1px 0 var(--glass-edge)",
             flexShrink: 0,
           }}>
             <div className="hscroll" style={{ display: "flex", gap: 7 }}>

@@ -21,15 +21,18 @@ const TabBar = ({ screen, onNav }) => {
       style={{
         flexShrink: 0,
         display: "flex",
-        gap: 0,
-        padding: "8px 4px 10px",
-        // Icone più in basso: solo la safe-area home-indicator sotto (niente extra),
-        // così restano sopra la barra iOS ma scendono di ~10px.
-        paddingBottom: "calc(2px + env(safe-area-inset-bottom))",
-        background: "var(--nav-bg)", // theme-aware: si adatta a dark/light
-        backdropFilter: "blur(26px)",
-        WebkitBackdropFilter: "blur(26px)",
-        borderTop: "1px solid var(--hair)",
+        gap: 2,
+        // Barra vetro FLOTTANTE (liquid glass): staccata dai bordi + angoli morbidi.
+        margin: "0 10px",
+        marginBottom: "calc(6px + env(safe-area-inset-bottom))",
+        padding: "7px 6px",
+        borderRadius: 26,
+        backgroundColor: "var(--glass)",
+        backgroundImage: "var(--glass-sheen)",
+        backdropFilter: "blur(var(--glass-blur)) saturate(var(--glass-sat))",
+        WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(var(--glass-sat))",
+        border: "1px solid var(--glass-border)",
+        boxShadow: "var(--shadow-2), inset 0 1px 0 var(--glass-edge), inset 0 -1px 0 var(--glass-edge-b)",
         position: "relative",
         zIndex: 5,
       }}
@@ -44,18 +47,20 @@ const TabBar = ({ screen, onNav }) => {
             style={{
               flex: 1,
               border: 0,
-              background: "transparent",
+              // Pillola vetro sull'elemento attivo.
+              background: on ? "rgba(10,132,255,0.16)" : "transparent",
               color: on ? "var(--accent)" : "var(--text-2)",
-              padding: "6px 0 4px",
+              padding: "7px 0 6px",
+              borderRadius: 17,
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
               gap: 3,
               cursor: "pointer",
-              transition: "color 0.16s",
+              transition: "color 0.16s, background 0.16s",
             }}
           >
-            <Icon name={it.icon} size={24} strokeWidth={on ? 2.1 : 1.9} />
+            <Icon name={it.icon} size={23} strokeWidth={on ? 2.1 : 1.9} />
             <span style={{ fontSize: 9.5, fontWeight: on ? 600 : 500, letterSpacing: -0.005 }}>{t(it.label)}</span>
           </button>
         );
@@ -85,8 +90,13 @@ const Sidebar = ({ screen, onNav }) => {
         width: 240,
         flexShrink: 0,
         height: "100%",
-        background: "var(--bg-2)",
-        borderRight: "1px solid var(--border)",
+        // Sidebar in liquid glass (desktop/iPad): traslucida sul gradiente ambient.
+        backgroundColor: "var(--glass)",
+        backgroundImage: "var(--glass-sheen)",
+        backdropFilter: "blur(var(--glass-blur)) saturate(var(--glass-sat))",
+        WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(var(--glass-sat))",
+        borderRight: "1px solid var(--glass-border)",
+        boxShadow: "inset -1px 0 0 var(--glass-edge-b)",
         display: "flex",
         flexDirection: "column",
         padding: "22px 14px",

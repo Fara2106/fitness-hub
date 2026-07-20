@@ -423,7 +423,26 @@ const PullToRefresh = ({ scrollEl, onRefresh }) => {
   );
 };
 
-const AppFrame = ({ device, initialScreen, chromeless }) => {
+const AppFrame = ({ device: _deviceProp, initialScreen, chromeless }) => {
+  // Device EFFETTIVO ricalcolato dal viewport (non solo al mount): così iPad —
+  // che in standalone Safari si presenta come "Macintosh" — e le rotazioni /
+  // il resize del browser passano correttamente tra layout mobile e Sidebar.
+  // Tablet/desktop quando il lato corto ≥ 600 e il lato lungo ≥ 820 (esclude
+  // i telefoni anche in orizzontale, dove il lato corto resta < 600).
+  const _computeDevice = () => {
+    const w = window.innerWidth, h = window.innerHeight;
+    const short = Math.min(w, h), long = Math.max(w, h);
+    return (short >= 600 && long >= 820) ? "desktop" : "mobile";
+  };
+  const [device, setDevice] = React.useState(_computeDevice);
+  React.useEffect(() => {
+    let raf = 0;
+    const onResize = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => setDevice(_computeDevice())); };
+    window.addEventListener("resize", onResize);
+    window.addEventListener("orientationchange", onResize);
+    return () => { window.removeEventListener("resize", onResize); window.removeEventListener("orientationchange", onResize); cancelAnimationFrame(raf); };
+  }, []);
+
   const [storageReady, setStorageReady] = React.useState(window.storage ? window.storage.isReady() : false);
 
   React.useEffect(() => {
@@ -603,7 +622,11 @@ const AppFrame = ({ device, initialScreen, chromeless }) => {
         <Sidebar screen={state.screen} onNav={(s) => setState(st => ({ ...st, screen: s }))} />
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <div className="lfh-scroll" style={{ flex: 1 }}>
-            <Screen which={state.screen} device={device} state={state} set={setState} globalCtx={globalCtx} />
+            {/* Contenuto centrato con max-width: sfrutta lo spazio iPad/desktop
+                senza stirare le schermate a tutta larghezza. */}
+            <div style={{ maxWidth: 960, width: "100%", margin: "0 auto", minHeight: "100%", display: "flex", flexDirection: "column" }}>
+              <Screen which={state.screen} device={device} state={state} set={setState} globalCtx={globalCtx} />
+            </div>
           </div>
         </div>
       </div>
