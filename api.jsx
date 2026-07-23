@@ -57,6 +57,11 @@ window.sheetsAPI = {
   async getUltimiPesi()    { return this.get({ action: "getUltimiPesi" }); },
   async getCheckIn(date)   { return this.get(date ? { action: "getCheckIn", date } : { action: "getCheckIn" }); },
 
+  // ── Misure corporee (cm) — richiede il .gs con getMisure/saveMisure;
+  //    col backend vecchio le chiamate falliscono in silenzio (local-only). ──
+  async getMisure()        { return this.get({ action: "getMisure" }); },
+  async saveMisure(d)      { return this.post({ action: "saveMisure", ...d }); },
+
   // ── POST endpoints ──
   async savePeso(d)        { return this.post({ action: "savePeso",        ...d }); },
   async savePesoCorporeo(d){ return this.post({ action: "savePesoCorporeo",...d }); },

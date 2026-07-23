@@ -171,6 +171,17 @@ window.sheetsAPI = {
       action: "getCheckIn"
     });
   },
+  async getMisure() {
+    return this.get({
+      action: "getMisure"
+    });
+  },
+  async saveMisure(d) {
+    return this.post({
+      action: "saveMisure",
+      ...d
+    });
+  },
   async savePeso(d) {
     return this.post({
       action: "savePeso",
@@ -2484,6 +2495,117 @@ const I18N_DICT = {
   "Errore di lettura del file": {
     en: "Could not read the file"
   },
+  "Ultime sessioni": {
+    en: "Recent sessions"
+  },
+  "Aggiungi nota setup": {
+    en: "Add setup note"
+  },
+  "Nota setup (macchina, sedile, presa…)": {
+    en: "Setup note (machine, seat, grip…)"
+  },
+  "es. sedile 4, presa media…": {
+    en: "e.g. seat 4, medium grip…"
+  },
+  "Scarico": {
+    en: "Deload"
+  },
+  "Seduta scarica consigliata": {
+    en: "Deload session recommended"
+  },
+  "Recupero incompleto — oggi meglio scaricare": {
+    en: "Incomplete recovery — better to go lighter today"
+  },
+  "Sessione completata": {
+    en: "Session complete"
+  },
+  "Tonnellaggio": {
+    en: "Tonnage"
+  },
+  "vs precedente": {
+    en: "vs previous"
+  },
+  "prima": {
+    en: "before"
+  },
+  "Fatto": {
+    en: "Done"
+  },
+  "La tua settimana": {
+    en: "Your week"
+  },
+  "kg vs prec.": {
+    en: "kg vs prev."
+  },
+  "record battuto": {
+    en: "record beaten"
+  },
+  "record battuti": {
+    en: "records beaten"
+  },
+  "Pasto fatto": {
+    en: "Meal done"
+  },
+  "Equivalenti": {
+    en: "Equivalents"
+  },
+  "Forza": {
+    en: "Strength"
+  },
+  "Misure": {
+    en: "Measures"
+  },
+  "Massimale stimato per esercizio": {
+    en: "Estimated 1RM per exercise"
+  },
+  "e1RM = massimale stimato (formula di Epley). Tocca un esercizio per il trend.": {
+    en: "e1RM = estimated one-rep max (Epley formula). Tap an exercise for its trend."
+  },
+  "Ancora nessun dato forza": {
+    en: "No strength data yet"
+  },
+  "Chiudi qualche sessione con i pesi segnati per vedere l'e1RM stimato": {
+    en: "Close a few sessions with logged weights to see your estimated e1RM"
+  },
+  "Serve più di una sessione per il trend": {
+    en: "More than one session is needed for a trend"
+  },
+  "Grafico non disponibile": {
+    en: "Chart unavailable"
+  },
+  "Misure corporee": {
+    en: "Body measurements"
+  },
+  "Vita": {
+    en: "Waist"
+  },
+  "Fianchi": {
+    en: "Hips"
+  },
+  "Torace": {
+    en: "Chest"
+  },
+  "Braccio": {
+    en: "Arm"
+  },
+  "Coscia": {
+    en: "Thigh"
+  },
+  "Misure salvate": {
+    en: "Measurements saved"
+  },
+  "Aggiorna misure": {
+    en: "Update measurements"
+  },
+  "Registra le prime misure": {
+    en: "Log your first measurements"
+  },
+  "Salva misure": {
+    en: "Save measurements"
+  },
+  "Ultime rilevazioni": {
+    en: "Latest entries"
+  },
   "Backup": {
     en: "Backup"
   },
@@ -4259,6 +4381,338 @@ window.writeSchedaProg = writeSchedaProg;
 })();
 })();
 
+// ══ insights.jsx ══
+;(function () {
+(function () {
+  function _num(raw) {
+    if (raw == null) return null;
+    const s = String(raw).trim().replace(",", ".");
+    if (!s || !/^[0-9]+(\.[0-9]+)?$/.test(s)) return null;
+    const n = parseFloat(s);
+    return n > 0 ? n : null;
+  }
+  function e1rm(peso, rip) {
+    const p = _num(peso),
+      r = Number(rip);
+    if (p == null || !r || r < 1) return null;
+    if (r === 1) return p;
+    return Math.round(p * (1 + r / 30) * 10) / 10;
+  }
+  function exerciseSessions(pesiMap, name, limit) {
+    limit = limit || 3;
+    const rows = pesiMap && pesiMap[String(name || "").toLowerCase().trim()] || [];
+    const byDate = {};
+    rows.forEach(r => {
+      if (!r || !r.date) return;
+      (byDate[r.date] = byDate[r.date] || []).push({
+        peso: r.peso,
+        rip: r.rip
+      });
+    });
+    return Object.keys(byDate).sort().reverse().slice(0, limit).map(date => {
+      const sets = byDate[date];
+      let top = 0,
+        tonnage = 0;
+      sets.forEach(s => {
+        const p = _num(s.peso);
+        if (p != null) {
+          if (p > top) top = p;
+          tonnage += p * (Number(s.rip) || 0);
+        }
+      });
+      return {
+        date,
+        sets,
+        top: top || null,
+        tonnage: Math.round(tonnage)
+      };
+    });
+  }
+  function sessionSummary(args) {
+    const {
+      exercises,
+      dayKey,
+      completion,
+      substitutions,
+      pesos,
+      exIdFn,
+      startTs,
+      endTs,
+      pesiMap
+    } = args;
+    let setsDone = 0,
+      tonnage = 0,
+      prevTonnage = 0,
+      hasPrev = false;
+    const perExercise = [];
+    (exercises || []).forEach((ex, i) => {
+      const id = exIdFn(dayKey, i);
+      const comp = completion && completion[id] || [];
+      const done = comp.filter(Boolean).length;
+      if (!done) return;
+      const name = substitutions && substitutions[id] || ex.name;
+      const exPesos = pesos && pesos[id] || ex.sets.map(s => String(s.peso == null ? "" : s.peso));
+      let top = null;
+      ex.sets.forEach((s, j) => {
+        if (!comp[j]) return;
+        setsDone++;
+        const p = _num(exPesos[j] != null && String(exPesos[j]).trim() !== "" ? exPesos[j] : s.peso);
+        if (p != null) {
+          tonnage += p * (Number(s.rip) || 0);
+          if (top == null || p > top) top = p;
+        }
+      });
+      const prevSessions = exerciseSessions(pesiMap, name, 1);
+      const prev = prevSessions[0] || null;
+      if (prev) {
+        hasPrev = true;
+        prevTonnage += prev.tonnage;
+      }
+      perExercise.push({
+        name,
+        top,
+        prevTop: prev ? prev.top : null,
+        delta: top != null && prev && prev.top != null ? Math.round((top - prev.top) * 10) / 10 : null
+      });
+    });
+    const durationMin = startTs && endTs && endTs > startTs ? Math.max(1, Math.round((endTs - startTs) / 60000)) : null;
+    return {
+      setsDone,
+      exCount: perExercise.length,
+      durationMin,
+      tonnage: Math.round(tonnage),
+      prevTonnage: hasPrev ? Math.round(prevTonnage) : null,
+      perExercise
+    };
+  }
+  function weeklyReport(args) {
+    const {
+      today,
+      weightLog,
+      gymFlags,
+      muscleHist,
+      prMap,
+      checkinDates,
+      plannedSessions
+    } = args;
+    const days = [];
+    const prevDays = [];
+    const base = new Date(today + "T12:00:00");
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(base);
+      d.setDate(d.getDate() - i);
+      const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      (i < 7 ? days : prevDays).push(k);
+    }
+    const inWeek = date => days.indexOf(date) !== -1;
+    const sessions = days.filter(d => gymFlags && gymFlags[d]).length;
+    const byGroup = {};
+    let totalSets = 0;
+    (muscleHist || []).forEach(h => {
+      if (!h || !inWeek(h.date) || !h.muscleSets) return;
+      Object.keys(h.muscleSets).forEach(g => {
+        const n = Number(h.muscleSets[g]) || 0;
+        byGroup[g] = (byGroup[g] || 0) + n;
+        totalSets += n;
+      });
+    });
+    const order = Object.keys(byGroup).sort((a, b) => byGroup[b] - byGroup[a]);
+    const avg = dates => {
+      const w = (weightLog || []).filter(e => e && dates.indexOf(e.date) !== -1).map(e => e.weight);
+      if (!w.length) return null;
+      return Math.round(w.reduce((s, x) => s + x, 0) / w.length * 10) / 10;
+    };
+    const avgWeight = avg(days);
+    const prevAvgWeight = avg(prevDays);
+    const weightDelta = avgWeight != null && prevAvgWeight != null ? Math.round((avgWeight - prevAvgWeight) * 10) / 10 : null;
+    const prs = [];
+    Object.keys(prMap || {}).forEach(nome => {
+      const pr = prMap[nome];
+      if (pr && inWeek(pr.date)) prs.push({
+        esercizio: nome,
+        peso: pr.peso,
+        date: pr.date
+      });
+    });
+    prs.sort((a, b) => (b.peso || 0) - (a.peso || 0));
+    const checkins = (checkinDates || []).filter(inWeek).length;
+    return {
+      sessions,
+      planned: plannedSessions || 3,
+      totalSets,
+      byGroup,
+      order,
+      avgWeight,
+      prevAvgWeight,
+      weightDelta,
+      prs,
+      checkins
+    };
+  }
+  function deloadAdvice(checkIns) {
+    const list = (checkIns || []).filter(Boolean);
+    const today = list[0];
+    if (!today) return {
+      deload: false,
+      reason: null
+    };
+    if (String(today.ailments || "").trim()) return {
+      deload: true,
+      reason: "fastidi"
+    };
+    const score = c => ((Number(c.sleep) || 0) + (Number(c.energy) || 0)) / 2;
+    if (score(today) > 0 && score(today) <= 2.5) return {
+      deload: true,
+      reason: "energia"
+    };
+    const y = list[1];
+    if (y && score(today) > 0 && score(today) <= 3 && score(y) > 0 && score(y) <= 3) {
+      return {
+        deload: true,
+        reason: "recupero"
+      };
+    }
+    return {
+      deload: false,
+      reason: null
+    };
+  }
+  function deloadWeight(raw) {
+    const p = _num(raw);
+    if (p == null) return null;
+    const step = p < 20 ? 1 : 2.5;
+    const target = p * 0.9;
+    const v = Math.round(target / step) * step;
+    return v > 0 && v < p ? v : null;
+  }
+  function mealAdherence(checkedMap, totalMeals) {
+    const done = Object.keys(checkedMap || {}).filter(k => checkedMap[k]).length;
+    const total = Number(totalMeals) || 0;
+    return {
+      done: Math.min(done, total),
+      total,
+      pct: total ? Math.round(Math.min(done, total) / total * 100) : 0
+    };
+  }
+  const FOOD_GROUPS = [{
+    id: "carbo",
+    items: [{
+      match: /\briso\b/,
+      name: "Riso (secco)",
+      kcal: 360
+    }, {
+      match: /\bpasta\b/,
+      name: "Pasta (secca)",
+      kcal: 360
+    }, {
+      match: /\bpane\b/,
+      name: "Pane",
+      kcal: 250
+    }, {
+      match: /\bpatat/,
+      name: "Patate",
+      kcal: 77
+    }, {
+      match: /\bgallette\b/,
+      name: "Gallette",
+      kcal: 380
+    }]
+  }, {
+    id: "proteine",
+    items: [{
+      match: /\bpollo\b/,
+      name: "Pollo (petto)",
+      kcal: 110
+    }, {
+      match: /\btacchino\b/,
+      name: "Tacchino",
+      kcal: 105
+    }, {
+      match: /\bmanzo\b|\bbisteccc?a\b|\bvitello\b/,
+      name: "Manzo magro",
+      kcal: 130
+    }, {
+      match: /\bmerluzzo\b/,
+      name: "Merluzzo",
+      kcal: 82
+    }, {
+      match: /\borata\b/,
+      name: "Orata",
+      kcal: 100
+    }, {
+      match: /\bsalmone\b/,
+      name: "Salmone",
+      kcal: 185
+    }, {
+      match: /\btonno\b/,
+      name: "Tonno al naturale",
+      kcal: 105
+    }, {
+      match: /\buova\b|\buovo\b/,
+      name: "Uova",
+      kcal: 143
+    }]
+  }, {
+    id: "grassi",
+    items: [{
+      match: /\bolio\b/,
+      name: "Olio EVO",
+      kcal: 900
+    }, {
+      match: /\bnoci\b/,
+      name: "Noci",
+      kcal: 650
+    }, {
+      match: /\bmandorl/,
+      name: "Mandorle",
+      kcal: 600
+    }]
+  }];
+  function _swapsFrom(group, base, grams) {
+    const kcal = base.kcal * grams / 100;
+    return group.items.filter(it => it !== base).map(it => ({
+      name: it.name,
+      grams: Math.round(kcal / it.kcal * 100 / 5) * 5
+    })).filter(s => s.grams >= 5);
+  }
+  function _findBase(text) {
+    for (const group of FOOD_GROUPS) {
+      const base = group.items.find(it => it.match.test(text));
+      if (base) return {
+        group,
+        base
+      };
+    }
+    return null;
+  }
+  function foodSwaps(foodText, qtyText) {
+    const text = String(foodText || "").toLowerCase();
+    const mQty = String(qtyText || "").match(/(\d+)\s*[–\-e]?\s*\d*\s*g/);
+    if (mQty) {
+      const hit = _findBase(text);
+      if (hit) return _swapsFrom(hit.group, hit.base, parseInt(mQty[1], 10));
+    }
+    for (const seg of text.split(/[|+]/)) {
+      const m = seg.match(/(\d+)\s*g\s+(.+)/);
+      if (!m) continue;
+      const hit = _findBase(m[2]);
+      if (hit) return _swapsFrom(hit.group, hit.base, parseInt(m[1], 10));
+    }
+    return [];
+  }
+  window.Insights = {
+    e1rm,
+    exerciseSessions,
+    sessionSummary,
+    weeklyReport,
+    deloadAdvice,
+    deloadWeight,
+    mealAdherence,
+    foodSwaps
+  };
+})();
+})();
+
 // ══ screens/onboarding.jsx ══
 ;(function () {
 const STEPS = [{
@@ -5181,6 +5635,134 @@ const ActivityLogger = ({
     })
   }, t("Salva sessione")))));
 };
+const WeeklyReportCard = ({
+  onNav
+}) => {
+  const t = useT();
+  const today = window.todayKey ? window.todayKey() : _dayKey(new Date());
+  const dow = new Date().getDay();
+  const show = dow === 0 || dow === 1;
+  const weekKey = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - d.getDay());
+    return _dayKey(d);
+  })();
+  const [dismissed, setDismissed] = React.useState(() => window.storage ? window.storage.get("weeklyReportDismissed", "") : "");
+  const rep = React.useMemo(() => {
+    if (!show || !window.Insights || !window.storage) return null;
+    const st = window.storage;
+    const gymFlags = {},
+      muscleHist = [],
+      checkinDates = [];
+    for (let i = 0; i < 14; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const k = _dayKey(d);
+      if (st.get(`gym_${k}`, false)) gymFlags[k] = true;
+      const ms = st.get(`muscleSets_${k}`, null);
+      if (ms && Object.keys(ms).length) muscleHist.push({
+        date: k,
+        muscleSets: ms
+      });
+      if (st.get(`checkIn_${k}`, null)) checkinDates.push(k);
+    }
+    return window.Insights.weeklyReport({
+      today,
+      weightLog: st.get("weightLog", []),
+      gymFlags,
+      muscleHist,
+      prMap: st.get("prMap", {}),
+      checkinDates,
+      plannedSessions: (window.getSchedule ? (window.getSchedule().days || []).length : 3) || 3
+    });
+  }, [show, today]);
+  if (!show || !rep || dismissed === weekKey) return null;
+  if (!rep.sessions && !rep.totalSets && rep.avgWeight == null) return null;
+  const dismiss = () => {
+    setDismissed(weekKey);
+    if (window.storage) window.storage.set("weeklyReportDismissed", weekKey);
+  };
+  return React.createElement(UICard, null, React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      marginBottom: 10
+    }
+  }, React.createElement("span", {
+    className: "ui-cap"
+  }, "📅 ", t("La tua settimana")), React.createElement("button", {
+    onClick: dismiss,
+    "aria-label": t("Ignora"),
+    style: {
+      marginLeft: "auto",
+      width: 26,
+      height: 26,
+      borderRadius: 999,
+      background: "transparent",
+      border: 0,
+      color: "var(--text-3)",
+      cursor: "pointer",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center"
+    }
+  }, React.createElement(Icon, {
+    name: "x",
+    size: 13,
+    strokeWidth: 2.4
+  }))), React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "repeat(3, 1fr)",
+      gap: 8,
+      marginBottom: rep.prs.length || rep.order.length ? 12 : 0
+    }
+  }, React.createElement("div", null, React.createElement("div", {
+    className: "tnum",
+    style: {
+      fontSize: 20,
+      fontWeight: 700
+    }
+  }, rep.sessions, React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: "var(--text-2)",
+      fontWeight: 500
+    }
+  }, "/", rep.planned)), React.createElement("div", {
+    className: "ui-cap"
+  }, t("sessioni"))), React.createElement("div", null, React.createElement("div", {
+    className: "tnum",
+    style: {
+      fontSize: 20,
+      fontWeight: 700
+    }
+  }, rep.totalSets), React.createElement("div", {
+    className: "ui-cap"
+  }, t("serie"))), React.createElement("div", null, React.createElement("div", {
+    className: "tnum",
+    style: {
+      fontSize: 20,
+      fontWeight: 700,
+      color: rep.weightDelta == null ? "var(--text)" : rep.weightDelta <= 0 ? "var(--success)" : "#FF9F0A"
+    }
+  }, rep.weightDelta == null ? "—" : `${rep.weightDelta > 0 ? "+" : ""}${rep.weightDelta}`), React.createElement("div", {
+    className: "ui-cap"
+  }, t("kg vs prec.")))), rep.prs.length > 0 && React.createElement("div", {
+    className: "tnum",
+    style: {
+      fontSize: 12.5,
+      color: "var(--success)",
+      fontWeight: 600,
+      marginBottom: rep.order.length ? 8 : 0
+    }
+  }, "🏆 ", rep.prs.length, " ", rep.prs.length === 1 ? t("record battuto") : t("record battuti"), ": ", rep.prs.slice(0, 2).map(p => `${p.esercizio} ${p.peso}kg`).join(" · ")), rep.order.length > 0 && React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: "var(--text-2)"
+    }
+  }, t("Volume"), ": ", rep.order.slice(0, 3).map(g => `${t(g)} ${rep.byGroup[g]}`).join(" · ")));
+};
 const Dashboard = ({
   device,
   onNav,
@@ -5417,7 +5999,9 @@ const Dashboard = ({
       color: "var(--text-2)",
       lineHeight: 1.45
     }
-  }, t("Recupero attivo, mobilità e idratazione."))), nextMeal ? React.createElement(UICard, {
+  }, t("Recupero attivo, mobilità e idratazione."))), React.createElement(WeeklyReportCard, {
+    onNav: onNav
+  }), nextMeal ? React.createElement(UICard, {
     onClick: () => onNav("dieta")
   }, React.createElement("div", {
     style: {
@@ -6270,7 +6854,8 @@ const ExerciseCard = ({
   onSubstitute,
   sheetsWeights,
   savedPesos,
-  onPesosChange
+  onPesosChange,
+  exNote
 }) => {
   const t = useT();
   const [pesos, setPesos] = React.useState(() => {
@@ -6385,7 +6970,22 @@ const ExerciseCard = ({
       padding: "3px 8px",
       color: "var(--text-3)"
     }
-  }, ex.ripRange, " rip"))), React.createElement("div", {
+  }, ex.ripRange, " rip")), exNote && React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 11.5,
+      marginTop: 5,
+      display: "flex",
+      alignItems: "center",
+      gap: 5
+    }
+  }, React.createElement("span", null, "📝"), React.createElement("span", {
+    style: {
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, exNote))), React.createElement("div", {
     style: {
       display: "flex",
       gap: 4,
@@ -6515,6 +7115,221 @@ const ExerciseCard = ({
     }
   }, React.createElement("span", null, "🔴"), React.createElement("span", null, t("Macchina occupata — attendi o sostituisci con ↻"))));
 };
+const ExNoteRow = ({
+  name,
+  note,
+  onSave
+}) => {
+  const t = useT();
+  const [editing, setEditing] = React.useState(false);
+  const [val, setVal] = React.useState(note || "");
+  React.useEffect(() => {
+    setVal(note || "");
+    setEditing(false);
+  }, [name]);
+  const commit = () => {
+    onSave(name, val.trim());
+    setEditing(false);
+  };
+  if (editing) {
+    return React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 6,
+        width: "100%",
+        maxWidth: 340
+      }
+    }, React.createElement("input", {
+      autoFocus: true,
+      value: val,
+      onChange: e => setVal(e.target.value),
+      onKeyDown: e => {
+        if (e.key === "Enter") commit();
+      },
+      onBlur: commit,
+      placeholder: t("es. sedile 4, presa media…"),
+      className: "input",
+      style: {
+        flex: 1,
+        fontSize: 13,
+        padding: "8px 10px"
+      }
+    }));
+  }
+  return React.createElement("button", {
+    onClick: () => setEditing(true),
+    style: {
+      background: "transparent",
+      border: 0,
+      cursor: "pointer",
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 6,
+      fontSize: 12.5,
+      color: note ? "var(--text-2)" : "var(--text-3)",
+      padding: "4px 8px",
+      maxWidth: 340
+    },
+    title: t("Nota setup (macchina, sedile, presa…)")
+  }, React.createElement("span", {
+    style: {
+      flexShrink: 0
+    }
+  }, "📝"), React.createElement("span", {
+    style: {
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, note || t("Aggiungi nota setup")));
+};
+const SessionSummaryOverlay = ({
+  data,
+  onClose
+}) => {
+  const t = useT();
+  if (!data) return null;
+  const deltaTon = data.prevTonnage != null && data.prevTonnage > 0 ? Math.round((data.tonnage - data.prevTonnage) / data.prevTonnage * 100) : null;
+  const stat = (label, value, sub) => React.createElement("div", {
+    className: "card",
+    style: {
+      padding: "14px 12px",
+      textAlign: "center"
+    }
+  }, React.createElement("div", {
+    className: "num",
+    style: {
+      fontSize: 22,
+      fontWeight: 700
+    }
+  }, value), React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 10.5,
+      marginTop: 3,
+      textTransform: "uppercase",
+      letterSpacing: 0.4
+    }
+  }, label), sub && React.createElement("div", {
+    className: "tnum",
+    style: {
+      fontSize: 11,
+      marginTop: 2,
+      color: "var(--text-2)"
+    }
+  }, sub));
+  return React.createElement("div", {
+    style: {
+      position: "fixed",
+      inset: 0,
+      zIndex: 9992,
+      background: "var(--bg)",
+      display: "flex",
+      flexDirection: "column",
+      padding: "max(env(safe-area-inset-top), 20px) 20px calc(env(safe-area-inset-bottom) + 20px)",
+      overflowY: "auto"
+    }
+  }, React.createElement("div", {
+    style: {
+      textAlign: "center",
+      margin: "18px 0 6px",
+      fontSize: 40
+    }
+  }, "💪"), React.createElement("h2", {
+    style: {
+      textAlign: "center",
+      fontSize: 24,
+      fontWeight: 700,
+      letterSpacing: -0.02
+    }
+  }, t("Sessione completata")), React.createElement("div", {
+    className: "muted",
+    style: {
+      textAlign: "center",
+      fontSize: 13,
+      marginTop: 4,
+      marginBottom: 18
+    }
+  }, data.exCount, " ", t("esercizi"), " · ", data.setsDone, " ", t("serie")), React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: 10,
+      marginBottom: 14
+    }
+  }, stat(t("Durata"), data.durationMin != null ? `${data.durationMin}′` : "—"), stat(t("Tonnellaggio"), data.tonnage ? `${data.tonnage}` : "—", data.tonnage ? "kg" : null), stat(t("Serie"), data.setsDone), stat(t("vs precedente"), deltaTon != null ? `${deltaTon > 0 ? "+" : ""}${deltaTon}%` : "—", data.prevTonnage != null ? `${t("prima")}: ${data.prevTonnage} kg` : null)), data.prs && data.prs.length > 0 && React.createElement("div", {
+    className: "card",
+    style: {
+      padding: 14,
+      marginBottom: 14,
+      border: "1px solid rgba(48,209,88,0.4)"
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 13,
+      fontWeight: 700,
+      color: "var(--success)",
+      marginBottom: 6
+    }
+  }, "🏆 ", data.prs.length === 1 ? t("Nuovo record!") : `${data.prs.length} ${t("nuovi record!")}`), React.createElement("div", {
+    className: "tnum",
+    style: {
+      fontSize: 12.5,
+      color: "var(--text-2)"
+    }
+  }, data.prs.map(p => `${t(p.esercizio)} ${p.peso} kg`).join(" · "))), data.perExercise && data.perExercise.length > 0 && React.createElement("div", {
+    className: "card",
+    style: {
+      padding: "6px 14px",
+      marginBottom: 16
+    }
+  }, data.perExercise.map((e, i) => React.createElement("div", {
+    key: i,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      padding: "9px 0",
+      borderTop: i > 0 ? "1px solid var(--border)" : 0
+    }
+  }, React.createElement("div", {
+    style: {
+      flex: 1,
+      fontSize: 13.5,
+      fontWeight: 500,
+      minWidth: 0,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, t(e.name)), e.top != null && React.createElement("div", {
+    className: "num",
+    style: {
+      fontSize: 13,
+      fontWeight: 600
+    }
+  }, e.top, " kg"), e.delta != null && React.createElement("span", {
+    className: "tnum",
+    style: {
+      fontSize: 11.5,
+      fontWeight: 700,
+      borderRadius: 999,
+      padding: "2px 8px",
+      background: e.delta > 0 ? "rgba(48,209,88,0.15)" : e.delta < 0 ? "rgba(255,159,10,0.15)" : "var(--card-2)",
+      color: e.delta > 0 ? "var(--success)" : e.delta < 0 ? "#FF9F0A" : "var(--text-3)"
+    }
+  }, e.delta > 0 ? `↑ +${e.delta}` : e.delta < 0 ? `↓ ${e.delta}` : "=")))), React.createElement("button", {
+    className: "btn primary",
+    style: {
+      width: "100%",
+      padding: 15,
+      fontSize: 16,
+      fontWeight: 600,
+      marginTop: "auto"
+    },
+    onClick: onClose
+  }, t("Fatto")));
+};
 const WorkoutPlayer = ({
   dayKey,
   dayName,
@@ -6526,6 +7341,10 @@ const WorkoutPlayer = ({
   pesosRef,
   sheetsWeights,
   prMap,
+  pesiHistory,
+  deload,
+  exNotes,
+  onSaveNote,
   autoRest,
   setAutoRest,
   onPatch,
@@ -6589,6 +7408,13 @@ const WorkoutPlayer = ({
   const prBest = WP ? WP.bestFor(prMap || {}, exName) : null;
   const curNum = WP ? WP.parseWeight(pesoVal) : null;
   const isPR = prBest != null && curNum != null && curNum > prBest;
+  const isDeload = !!(deload && deload.deload);
+  const deloadW = isDeload && window.Insights ? window.Insights.deloadWeight(lastRaw) : null;
+  const exHistory = React.useMemo(() => {
+    if (!window.Insights || !pesiHistory) return [];
+    return window.Insights.exerciseSessions(pesiHistory, exName, 3);
+  }, [pesiHistory, exName]);
+  const exNote = (exNotes || {})[(exName || "").toLowerCase()];
   return React.createElement("div", {
     style: {
       position: "fixed",
@@ -6728,7 +7554,34 @@ const WorkoutPlayer = ({
       borderRadius: 999,
       padding: "5px 12px"
     }
-  }, "🏆 ", t("Nuovo record!")) : sug ? React.createElement("button", {
+  }, "🏆 ", t("Nuovo record!")) : isDeload ? deloadW != null ? React.createElement("button", {
+    onClick: () => setPeso(String(deloadW)),
+    className: "pressable tnum",
+    style: {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 5,
+      fontSize: 12.5,
+      fontWeight: 600,
+      color: "#FF9F0A",
+      background: "rgba(255,159,10,0.14)",
+      border: "1px solid rgba(255,159,10,0.3)",
+      borderRadius: 999,
+      padding: "6px 12px",
+      cursor: "pointer"
+    },
+    title: t("Recupero incompleto — oggi meglio scaricare")
+  }, "🪫 ", t("Scarico"), ": ", t("prova"), " ", deloadW, " kg") : React.createElement("span", {
+    className: "tnum",
+    style: {
+      fontSize: 12.5,
+      fontWeight: 600,
+      color: "#FF9F0A",
+      background: "rgba(255,159,10,0.14)",
+      borderRadius: 999,
+      padding: "5px 12px"
+    }
+  }, "🪫 ", t("Seduta scarica consigliata")) : sug ? React.createElement("button", {
     onClick: () => setPeso(String(sug.next)),
     className: "pressable tnum",
     style: {
@@ -6759,7 +7612,62 @@ const WorkoutPlayer = ({
       borderRadius: "50%",
       background: d ? "var(--success)" : i === curSet ? "var(--accent)" : "var(--track)"
     }
-  })))), next && React.createElement("div", {
+  }))), exHistory.length > 0 && React.createElement("div", {
+    className: "card",
+    style: {
+      width: "100%",
+      maxWidth: 340,
+      padding: "10px 14px",
+      marginTop: 10,
+      textAlign: "left"
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 10,
+      fontWeight: 600,
+      color: "var(--text-3)",
+      letterSpacing: 0.5,
+      textTransform: "uppercase",
+      marginBottom: 6
+    }
+  }, t("Ultime sessioni")), exHistory.map((h, i) => React.createElement("div", {
+    key: h.date,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      padding: "5px 0",
+      borderTop: i > 0 ? "1px solid var(--border)" : 0
+    }
+  }, React.createElement("span", {
+    className: "num muted",
+    style: {
+      fontSize: 11.5,
+      width: 40,
+      flexShrink: 0
+    }
+  }, h.date.slice(5).replace("-", "/")), React.createElement("span", {
+    className: "tnum",
+    style: {
+      flex: 1,
+      fontSize: 12,
+      color: "var(--text-2)",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, h.sets.map(s => `${s.peso}×${s.rip}`).join(" · ")), h.top != null && React.createElement("span", {
+    className: "num",
+    style: {
+      fontSize: 12,
+      fontWeight: 700,
+      flexShrink: 0
+    }
+  }, h.top)))), React.createElement(ExNoteRow, {
+    name: exName,
+    note: exNote,
+    onSave: onSaveNote
+  })), next && React.createElement("div", {
     className: "muted",
     style: {
       fontSize: 12.5,
@@ -6830,6 +7738,10 @@ const Scheda = ({
   const [showConfetti, setShowConfetti] = React.useState(false);
   const [notes, setNotes] = React.useState(() => window.storage ? window.storage.get(`notes_${_todayK()}`, "") : "");
   const [sheetsWeights, setSheetsWeights] = React.useState(null);
+  const [pesiHistory, setPesiHistory] = React.useState(null);
+  const [exNotes, setExNotes] = React.useState(() => window.storage ? window.storage.get("exNotes", {}) : {});
+  const exNotesPushTid = React.useRef(null);
+  const [summary, setSummary] = React.useState(null);
   const [prMap, setPrMap] = React.useState(() => window.storage ? window.storage.get("prMap", {}) : {});
   const [newPRs, setNewPRs] = React.useState([]);
   const [saving, setSaving] = React.useState(false);
@@ -6848,6 +7760,12 @@ const Scheda = ({
     }
   }, []);
   const patchProg = patch => {
+    if (patch.completion && window.storage) {
+      const k = `gymStart_${_todayK()}`;
+      if (!window.storage.get(k, null) && Object.values(patch.completion).some(arr => (arr || []).some(Boolean))) {
+        window.storage.set(k, Date.now());
+      }
+    }
     window.writeSchedaProg(window.storage, _todayK(), patch);
     setProg(p => ({
       completion: Object.assign({}, p.completion, patch.completion),
@@ -6855,6 +7773,36 @@ const Scheda = ({
       pesos: Object.assign({}, p.pesos, patch.pesos)
     }));
   };
+  const saveExNote = (name, text) => {
+    const key = (name || "").toLowerCase();
+    if (!key) return;
+    setExNotes(prev => {
+      const next = Object.assign({}, prev);
+      if (text) next[key] = text;else delete next[key];
+      if (window.storage) window.storage.set("exNotes", next);
+      clearTimeout(exNotesPushTid.current);
+      exNotesPushTid.current = setTimeout(() => {
+        if (window._saveSettingRetry) window._saveSettingRetry("exNotes", JSON.stringify(next));
+      }, 1500);
+      return next;
+    });
+  };
+  const deload = React.useMemo(() => {
+    if (!window.Insights) return {
+      deload: false,
+      reason: null
+    };
+    const list = [checkIn];
+    if (window.storage) {
+      for (let i = 1; i <= 2; i++) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        list.push(window.storage.get(`checkIn_${k}`, null));
+      }
+    }
+    return window.Insights.deloadAdvice(list);
+  }, [checkIn]);
   const switchTo = k => {
     setScheda(k);
     if (window.storage) window.storage.set("schedaSelectedDay", k);
@@ -6869,6 +7817,10 @@ const Scheda = ({
     window.sheetsAPI.getUltimiPesi().then(data => {
       if (!data || typeof data !== "object") return;
       setSheetsWeights(data);
+    }).catch(() => {});
+    window.sheetsAPI.getPesi().then(data => {
+      if (!data || typeof data !== "object") return;
+      setPesiHistory(data);
     }).catch(() => {});
   }, []);
   React.useEffect(() => {
@@ -6911,6 +7863,7 @@ const Scheda = ({
   const handleSaveSession = async () => {
     if (saving) return;
     setSaving(true);
+    let sessionPRs = [];
     try {
       const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
       if (window.storage) window.storage.set(`notes_${today}`, notes);
@@ -6958,11 +7911,29 @@ const Scheda = ({
           if (res.newPRs.length) {
             window.storage.set("prMap", res.prMap);
             setPrMap(res.prMap);
+            sessionPRs = res.newPRs;
             setNewPRs(res.newPRs);
             if (navigator.vibrate) navigator.vibrate([40, 60, 40, 60, 80]);
             setTimeout(() => setNewPRs([]), 5000);
           }
         }
+      }
+      if (window.Insights) {
+        const startTs = window.storage ? window.storage.get(`gymStart_${today}`, null) : null;
+        const s = window.Insights.sessionSummary({
+          exercises,
+          dayKey: scheda,
+          completion,
+          substitutions,
+          pesos: pesosRef.current,
+          exIdFn: window.exId,
+          startTs,
+          endTs: Date.now(),
+          pesiMap: pesiHistory || {}
+        });
+        setSummary(Object.assign({}, s, {
+          prs: sessionPRs
+        }));
       }
       if (window.sheetsAPI) {
         await window.sheetsAPI.saveSessione({
@@ -7189,6 +8160,7 @@ const Scheda = ({
         }
       }),
       sheetsWeights: sheetsWeights,
+      exNote: exNotes[(substitutions[id] || ex.name || "").toLowerCase()],
       savedPesos: pesosRef.current[id],
       onPesosChange: pesos => {
         pesosRef.current[id] = pesos;
@@ -7290,11 +8262,21 @@ const Scheda = ({
     pesosRef: pesosRef,
     sheetsWeights: sheetsWeights,
     prMap: prMap,
+    pesiHistory: pesiHistory,
+    deload: deload,
+    exNotes: exNotes,
+    onSaveNote: saveExNote,
     autoRest: autoRest,
     setAutoRest: setAutoRest,
     onPatch: patchProg,
     onClose: () => setMode("list"),
-    onFinish: () => setMode("list")
+    onFinish: () => {
+      setMode("list");
+      if (completedSets > 0) handleSaveSession();
+    }
+  }), summary && React.createElement(SessionSummaryOverlay, {
+    data: summary,
+    onClose: () => setSummary(null)
   }), newPRs.length > 0 && React.createElement("div", {
     className: "pop-in",
     style: {
@@ -8366,14 +9348,18 @@ const SupplementRow = ({
 };
 const MealCard = ({
   meal,
-  isDesktop
+  isDesktop,
+  checked,
+  onToggle
 }) => {
   const t = useT();
   const [open, setOpen] = React.useState(false);
+  const [swapOpen, setSwapOpen] = React.useState(null);
   return React.createElement("div", {
     className: "card lift",
     style: {
-      padding: isDesktop ? 20 : 16
+      padding: isDesktop ? 20 : 16,
+      opacity: checked ? 0.82 : 1
     }
   }, React.createElement("div", {
     style: {
@@ -8396,54 +9382,105 @@ const MealCard = ({
     style: {
       fontSize: 15.5,
       fontWeight: 600,
-      letterSpacing: -0.015
+      letterSpacing: -0.015,
+      textDecoration: checked ? "line-through" : "none"
     }
   }, t(meal.title)), React.createElement("div", {
     className: "num muted",
     style: {
       fontSize: 12
     }
-  }, meal.time)))), React.createElement("div", {
+  }, meal.time))), onToggle && React.createElement("button", {
+    onClick: ev => {
+      if (!checked && window.Motion) window.Motion.pop(ev.currentTarget);
+      onToggle();
+    },
+    className: `check ${checked ? "on" : ""}`,
+    "aria-label": t("Pasto fatto"),
+    style: {
+      width: 28,
+      height: 28,
+      flexShrink: 0
+    }
+  }, React.createElement(Icon, {
+    name: "check",
+    size: 14,
+    color: "#062810"
+  }))), React.createElement("div", {
     style: {
       display: "flex",
       flexDirection: "column"
     }
-  }, meal.primary.map((f, i) => React.createElement("div", {
-    key: i,
-    style: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "flex-start",
-      padding: "7px 0",
-      borderTop: i > 0 ? "1px solid var(--border)" : "0",
-      gap: 8
-    }
-  }, React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "flex-start",
-      gap: 7,
-      fontSize: 13.5,
-      fontWeight: 500,
-      lineHeight: 1.35,
-      minWidth: 0
-    }
-  }, React.createElement("span", {
-    style: {
-      fontSize: 15,
-      flexShrink: 0,
-      lineHeight: 1.2
-    }
-  }, window.foodEmoji(f.food)), React.createElement("span", null, f.food)), f.qty && React.createElement("div", {
-    className: "num",
-    style: {
-      fontSize: 12.5,
-      color: "var(--text-2)",
-      fontWeight: 600,
-      whiteSpace: "nowrap",
-      flexShrink: 0
-    }
-  }, f.qty)))), meal.others && meal.others.length > 0 && React.createElement(React.Fragment, null, React.createElement("button", {
+  }, meal.primary.map((f, i) => {
+    const swaps = window.Insights ? window.Insights.foodSwaps(f.food, f.qty) : [];
+    const hasSwaps = swaps.length > 0;
+    return React.createElement("div", {
+      key: i,
+      style: {
+        borderTop: i > 0 ? "1px solid var(--border)" : "0"
+      }
+    }, React.createElement("div", {
+      onClick: hasSwaps ? () => setSwapOpen(s => s === i ? null : i) : undefined,
+      style: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "flex-start",
+        padding: "7px 0",
+        gap: 8,
+        cursor: hasSwaps ? "pointer" : "default"
+      }
+    }, React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 7,
+        fontSize: 13.5,
+        fontWeight: 500,
+        lineHeight: 1.35,
+        minWidth: 0
+      }
+    }, React.createElement("span", {
+      style: {
+        fontSize: 15,
+        flexShrink: 0,
+        lineHeight: 1.2
+      }
+    }, window.foodEmoji(f.food)), React.createElement("span", null, f.food, hasSwaps && React.createElement("span", {
+      style: {
+        color: "var(--accent)",
+        fontSize: 11,
+        marginLeft: 5
+      }
+    }, "⇄"))), f.qty && React.createElement("div", {
+      className: "num",
+      style: {
+        fontSize: 12.5,
+        color: "var(--text-2)",
+        fontWeight: 600,
+        whiteSpace: "nowrap",
+        flexShrink: 0
+      }
+    }, f.qty)), swapOpen === i && hasSwaps && React.createElement("div", {
+      className: "fade-up",
+      style: {
+        margin: "0 0 8px",
+        padding: "8px 10px",
+        background: "var(--card-2)",
+        borderRadius: 9,
+        fontSize: 12,
+        color: "var(--text-2)",
+        lineHeight: 1.5
+      }
+    }, React.createElement("span", {
+      style: {
+        fontWeight: 600,
+        color: "var(--text-3)",
+        fontSize: 10.5,
+        textTransform: "uppercase",
+        letterSpacing: 0.4
+      }
+    }, t("Equivalenti"), " · "), swaps.map(s => `${s.name} ${s.grams}g`).join(" · ")));
+  })), meal.others && meal.others.length > 0 && React.createElement(React.Fragment, null, React.createElement("button", {
     onClick: () => setOpen(o => !o),
     style: {
       display: "flex",
@@ -8527,6 +9564,19 @@ const Dieta = ({
       return next;
     });
   };
+  const [mealChecked, setMealChecked] = React.useState(() => window.storage ? window.storage.get(`dietaCheck_${today}`, {}) : {});
+  const toggleMeal = key => {
+    setMealChecked(c => {
+      const next = {
+        ...c,
+        [key]: !c[key]
+      };
+      if (window.storage) window.storage.set(`dietaCheck_${today}`, next);
+      if (navigator.vibrate) navigator.vibrate([40]);
+      return next;
+    });
+  };
+  const _mealKey = ml => `${ml.time}|${ml.title}`;
   const dayType = training ? trainTime : "riposo";
   const section = dieta[dayType] || dieta.riposo;
   const meals = section.meals || [];
@@ -8535,6 +9585,10 @@ const Dieta = ({
   const timeline = _buildTimeline(meals, supps);
   const doneCount = supps.filter(s => checked[s.type]).length;
   const allSuppsDone = doneCount === supps.length;
+  const mealAdh = window.Insights ? window.Insights.mealAdherence(meals.reduce((m, ml) => {
+    m[_mealKey(ml)] = !!mealChecked[_mealKey(ml)];
+    return m;
+  }, {}), meals.length) : null;
   return React.createElement("div", {
     className: "fade-up",
     style: {
@@ -8542,6 +9596,13 @@ const Dieta = ({
       display: "flex",
       flexDirection: "column",
       gap: isDesktop ? 18 : 14
+    }
+  }, React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "flex-end",
+      justifyContent: "space-between",
+      gap: 10
     }
   }, React.createElement("div", null, React.createElement("div", {
     style: {
@@ -8556,7 +9617,17 @@ const Dieta = ({
       fontSize: isDesktop ? 28 : 24,
       fontWeight: 600
     }
-  }, t("Dieta"))), React.createElement("div", {
+  }, t("Dieta"))), mealAdh && mealAdh.total > 0 && React.createElement("span", {
+    className: "pill tnum",
+    style: {
+      fontSize: 11.5,
+      fontWeight: 600,
+      padding: "5px 11px",
+      marginBottom: 4,
+      background: mealAdh.pct === 100 ? "rgba(48,209,88,0.15)" : "var(--card-2)",
+      color: mealAdh.pct === 100 ? "var(--success)" : "var(--text-2)"
+    }
+  }, "🍽 ", mealAdh.done, "/", mealAdh.total, " ", mealAdh.pct === 100 ? "✓" : `· ${mealAdh.pct}%`)), React.createElement("div", {
     className: "card",
     style: {
       padding: isDesktop ? 18 : 14
@@ -8910,7 +9981,9 @@ const Dieta = ({
       }
     }, item.kind === "meal" ? item.time : item.sortTime), item.kind === "meal" ? React.createElement(MealCard, {
       meal: item,
-      isDesktop: isDesktop
+      isDesktop: isDesktop,
+      checked: !!mealChecked[_mealKey(item)],
+      onToggle: () => toggleMeal(_mealKey(item))
     }) : React.createElement(SupplementRow, {
       supp: item,
       checked: checked,
@@ -9642,6 +10715,19 @@ ESCLUDERE SEMPRE dalla dieta: pasta di ceci, lenticchie, piselli, bevanda di man
     if (vol.total > 0) {
       const parts = vol.order.map(g => `${g} ${vol.byGroup[g]}`).join(", ");
       prompt += `\nVolume ultimi 7 giorni (serie per gruppo): ${parts} (totale ${vol.total} serie).`;
+    }
+  }
+  if (st) {
+    const mealChecked = st.get(`dietaCheck_${today}`, {});
+    const done = Object.keys(mealChecked).filter(k => mealChecked[k]).length;
+    if (done > 0) prompt += `\nPasti già consumati oggi (spuntati): ${done}.`;
+  }
+  if (st) {
+    const measures = st.get("bodyMeasures", []);
+    const lastM = measures.length ? measures[measures.length - 1] : null;
+    if (lastM) {
+      const parts = ["vita", "fianchi", "torace", "braccio", "coscia"].filter(k => lastM[k] > 0).map(k => `${k} ${lastM[k]}cm`).join(", ");
+      if (parts) prompt += `\nMisure corporee (${lastM.date}): ${parts}.`;
     }
   }
   if (schedaData) {
@@ -10673,6 +11759,406 @@ const VolumeView = ({
     }
   }, data.total, " ", t("serie"), " · ", data.days, " ", t("sessioni")));
 };
+const ForzaView = ({
+  isDesktop
+}) => {
+  const t = useT();
+  const [pesiMap, setPesiMap] = React.useState(null);
+  const [selected, setSelected] = React.useState(null);
+  React.useEffect(() => {
+    if (!window.sheetsAPI) {
+      setPesiMap({});
+      return;
+    }
+    window.sheetsAPI.getPesi().then(d => setPesiMap(d && typeof d === "object" ? d : {})).catch(() => setPesiMap({}));
+  }, []);
+  const list = React.useMemo(() => {
+    if (!pesiMap || !window.Insights) return [];
+    return Object.keys(pesiMap).map(name => {
+      const sessions = window.Insights.exerciseSessions(pesiMap, name, 12).slice().reverse();
+      const points = sessions.map(s => {
+        let best = null;
+        s.sets.forEach(x => {
+          const v = window.Insights.e1rm(x.peso, x.rip);
+          if (v != null && (best == null || v > best)) best = v;
+        });
+        return {
+          date: s.date,
+          label: s.date.slice(5),
+          e1rm: best
+        };
+      }).filter(p => p.e1rm != null);
+      if (!points.length) return null;
+      const latest = points[points.length - 1].e1rm;
+      const delta = Math.round((latest - points[0].e1rm) * 10) / 10;
+      return {
+        name,
+        points,
+        latest,
+        delta
+      };
+    }).filter(Boolean).sort((a, b) => b.latest - a.latest).slice(0, 10);
+  }, [pesiMap]);
+  if (pesiMap === null) return React.createElement(UISkeleton, {
+    h: 160,
+    r: 14
+  });
+  if (!list.length) {
+    return React.createElement(UIEmpty, {
+      icon: "dumbbell",
+      title: t("Ancora nessun dato forza"),
+      sub: t("Chiudi qualche sessione con i pesi segnati per vedere l'e1RM stimato"),
+      style: {
+        padding: "20px 16px"
+      }
+    });
+  }
+  const sel = list.find(e => e.name === selected) || null;
+  const R = window.Recharts;
+  return React.createElement("div", null, React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 11.5,
+      marginBottom: 8
+    }
+  }, t("e1RM = massimale stimato (formula di Epley). Tocca un esercizio per il trend.")), list.map(e => {
+    const on = selected === e.name;
+    return React.createElement("div", {
+      key: e.name
+    }, React.createElement("div", {
+      className: "pressable",
+      onClick: () => setSelected(on ? null : e.name),
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "9px 2px",
+        borderTop: "1px solid var(--border)",
+        cursor: "pointer"
+      }
+    }, React.createElement("div", {
+      style: {
+        flex: 1,
+        fontSize: 13.5,
+        fontWeight: on ? 700 : 500,
+        minWidth: 0,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        color: on ? "var(--accent)" : "var(--text)"
+      }
+    }, e.name), React.createElement("div", {
+      className: "num",
+      style: {
+        fontSize: 14,
+        fontWeight: 700
+      }
+    }, e.latest, " ", React.createElement("span", {
+      style: {
+        fontSize: 10,
+        color: "var(--text-3)",
+        fontWeight: 500
+      }
+    }, "kg")), e.points.length > 1 && React.createElement("span", {
+      className: "tnum",
+      style: {
+        fontSize: 11,
+        fontWeight: 700,
+        borderRadius: 999,
+        padding: "2px 8px",
+        flexShrink: 0,
+        background: e.delta > 0 ? "rgba(48,209,88,0.15)" : e.delta < 0 ? "rgba(255,159,10,0.15)" : "var(--card-2)",
+        color: e.delta > 0 ? "var(--success)" : e.delta < 0 ? "#FF9F0A" : "var(--text-3)"
+      }
+    }, e.delta > 0 ? `+${e.delta}` : e.delta)), on && sel && sel.points.length > 1 && R && React.createElement("div", {
+      className: "fade-up",
+      style: {
+        padding: "6px 0 12px"
+      }
+    }, React.createElement(R.ResponsiveContainer, {
+      width: "100%",
+      height: 140
+    }, React.createElement(R.LineChart, {
+      data: sel.points,
+      margin: {
+        top: 4,
+        right: 4,
+        bottom: 0,
+        left: -24
+      }
+    }, React.createElement(R.CartesianGrid, {
+      strokeDasharray: "3 3",
+      stroke: "var(--border)"
+    }), React.createElement(R.XAxis, {
+      dataKey: "label",
+      tick: {
+        fill: "var(--text-3)",
+        fontSize: 9.5
+      },
+      tickLine: false,
+      axisLine: false
+    }), React.createElement(R.YAxis, {
+      domain: ["dataMin - 2", "dataMax + 2"],
+      tick: {
+        fill: "var(--text-3)",
+        fontSize: 9.5
+      },
+      tickLine: false,
+      axisLine: false
+    }), React.createElement(R.Line, {
+      type: "monotone",
+      dataKey: "e1rm",
+      stroke: "var(--accent)",
+      strokeWidth: 2,
+      dot: {
+        fill: "var(--accent)",
+        strokeWidth: 0,
+        r: 3
+      }
+    })))), on && sel && (sel.points.length <= 1 || !R) && React.createElement("div", {
+      className: "muted fade-up",
+      style: {
+        fontSize: 12,
+        padding: "2px 2px 10px"
+      }
+    }, sel.points.length <= 1 ? t("Serve più di una sessione per il trend") : t("Grafico non disponibile")));
+  }));
+};
+const _MEASURE_FIELDS = [{
+  id: "vita",
+  label: "Vita"
+}, {
+  id: "fianchi",
+  label: "Fianchi"
+}, {
+  id: "torace",
+  label: "Torace"
+}, {
+  id: "braccio",
+  label: "Braccio"
+}, {
+  id: "coscia",
+  label: "Coscia"
+}];
+const MisureView = ({
+  isDesktop
+}) => {
+  const t = useT();
+  const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
+  const [log, setLog] = React.useState(() => window.storage ? window.storage.get("bodyMeasures", []) : []);
+  const [editing, setEditing] = React.useState(false);
+  const [vals, setVals] = React.useState({});
+  const [savedMsg, setSavedMsg] = React.useState("");
+  React.useEffect(() => {
+    if (!window.sheetsAPI || !window.sheetsAPI.getMisure || !window.storage) return;
+    window.sheetsAPI.getMisure().then(rows => {
+      if (!Array.isArray(rows) || !rows.length) return;
+      const map = {};
+      window.storage.get("bodyMeasures", []).forEach(e => {
+        if (e && e.date) map[e.date] = e;
+      });
+      rows.forEach(e => {
+        if (e && e.date) map[e.date] = Object.assign({}, map[e.date], e);
+      });
+      const merged = Object.values(map).sort((a, b) => a.date.localeCompare(b.date)).slice(-120);
+      window.storage.set("bodyMeasures", merged);
+      setLog(merged);
+    }).catch(() => {});
+  }, []);
+  const latest = log.length ? log[log.length - 1] : {};
+  const firstVal = id => {
+    for (const e of log) {
+      if (e[id] > 0) return e[id];
+    }
+    return null;
+  };
+  const openEdit = () => {
+    const v = {};
+    _MEASURE_FIELDS.forEach(f => {
+      v[f.id] = latest[f.id] ? String(latest[f.id]) : "";
+    });
+    setVals(v);
+    setEditing(true);
+  };
+  const save = () => {
+    const entry = {
+      date: today
+    };
+    let any = false;
+    _MEASURE_FIELDS.forEach(f => {
+      const n = parseFloat(String(vals[f.id] || "").replace(",", "."));
+      if (n > 0) {
+        entry[f.id] = Math.round(n * 10) / 10;
+        any = true;
+      }
+    });
+    if (!any) {
+      setEditing(false);
+      return;
+    }
+    const next = log.filter(e => e.date !== today).concat([Object.assign({}, log.find(e => e.date === today), entry)]);
+    next.sort((a, b) => a.date.localeCompare(b.date));
+    if (window.storage) window.storage.set("bodyMeasures", next.slice(-120));
+    setLog(next.slice(-120));
+    setEditing(false);
+    setSavedMsg("✓ " + t("Misure salvate"));
+    setTimeout(() => setSavedMsg(""), 2500);
+    if (window.sheetsAPI && window.sheetsAPI.saveMisure) window.sheetsAPI.saveMisure(entry).catch(() => {});
+  };
+  return React.createElement("div", null, React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: isDesktop ? "repeat(5, 1fr)" : "repeat(3, 1fr)",
+      gap: 8,
+      marginBottom: 12
+    }
+  }, _MEASURE_FIELDS.map(f => {
+    const cur = latest[f.id];
+    const first = firstVal(f.id);
+    const delta = cur > 0 && first > 0 && cur !== first ? Math.round((cur - first) * 10) / 10 : null;
+    return React.createElement("div", {
+      key: f.id,
+      className: "card",
+      style: {
+        padding: "10px 8px",
+        textAlign: "center"
+      }
+    }, React.createElement("div", {
+      className: "num",
+      style: {
+        fontSize: 17,
+        fontWeight: 700
+      }
+    }, cur > 0 ? cur : "—"), React.createElement("div", {
+      className: "muted",
+      style: {
+        fontSize: 9.5,
+        textTransform: "uppercase",
+        letterSpacing: 0.4,
+        marginTop: 2
+      }
+    }, t(f.label)), delta != null && React.createElement("div", {
+      className: "tnum",
+      style: {
+        fontSize: 10,
+        fontWeight: 600,
+        marginTop: 2,
+        color: delta < 0 ? "var(--success)" : "#FF9F0A"
+      }
+    }, delta > 0 ? "+" : "", delta));
+  })), editing ? React.createElement("div", {
+    className: "fade-up",
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 10
+    }
+  }, React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: isDesktop ? "repeat(5, 1fr)" : "repeat(3, 1fr)",
+      gap: 8
+    }
+  }, _MEASURE_FIELDS.map(f => React.createElement("div", {
+    key: f.id
+  }, React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 10,
+      textTransform: "uppercase",
+      letterSpacing: 0.4,
+      marginBottom: 4
+    }
+  }, t(f.label)), React.createElement("input", {
+    inputMode: "decimal",
+    value: vals[f.id] || "",
+    onChange: e => setVals(v => Object.assign({}, v, {
+      [f.id]: e.target.value.replace(/[^0-9.,]/g, "")
+    })),
+    placeholder: "cm",
+    className: "input input-mono",
+    style: {
+      width: "100%",
+      padding: "9px 8px",
+      fontSize: 14,
+      textAlign: "center"
+    }
+  })))), React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8
+    }
+  }, React.createElement("button", {
+    className: "btn",
+    style: {
+      flex: 1
+    },
+    onClick: () => setEditing(false)
+  }, t("Annulla")), React.createElement("button", {
+    className: "btn primary",
+    style: {
+      flex: 2
+    },
+    onClick: save
+  }, t("Salva misure")))) : React.createElement("button", {
+    className: "btn",
+    style: {
+      width: "100%",
+      padding: 12,
+      fontSize: 14
+    },
+    onClick: openEdit
+  }, React.createElement(Icon, {
+    name: "plus",
+    size: 14
+  }), " ", log.length ? t("Aggiorna misure") : t("Registra le prime misure")), savedMsg && React.createElement("div", {
+    className: "fade-up",
+    style: {
+      textAlign: "center",
+      fontSize: 12.5,
+      color: "var(--success)",
+      marginTop: 8
+    }
+  }, savedMsg), log.length > 1 && React.createElement("div", {
+    style: {
+      marginTop: 14,
+      paddingTop: 10,
+      borderTop: "1px solid var(--border)"
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 10.5,
+      fontWeight: 600,
+      color: "var(--text-3)",
+      letterSpacing: 0.5,
+      textTransform: "uppercase",
+      marginBottom: 6
+    }
+  }, t("Ultime rilevazioni")), log.slice(-5).reverse().map((e, i) => React.createElement("div", {
+    key: e.date,
+    style: {
+      display: "flex",
+      gap: 10,
+      padding: "6px 0",
+      borderTop: i > 0 ? "1px solid var(--border)" : 0,
+      fontSize: 12
+    }
+  }, React.createElement("span", {
+    className: "num muted",
+    style: {
+      width: 76,
+      flexShrink: 0
+    }
+  }, e.date), React.createElement("span", {
+    className: "tnum",
+    style: {
+      color: "var(--text-2)",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, _MEASURE_FIELDS.filter(f => e[f.id] > 0).map(f => `${t(f.label)} ${e[f.id]}`).join(" · "))))));
+};
 const Storico = ({
   device,
   onNav
@@ -10787,13 +12273,23 @@ const Storico = ({
       letterSpacing: 0.4
     }
   }, s.label)))), React.createElement("div", {
-    className: "segmented"
+    className: "segmented",
+    style: {
+      overflowX: "auto",
+      WebkitOverflowScrolling: "touch"
+    }
   }, [{
     id: "peso",
     label: `⚖️ ${t("Peso")}`
   }, {
+    id: "forza",
+    label: `🏆 ${t("Forza")}`
+  }, {
     id: "volume",
     label: `💪 ${t("Volume")}`
+  }, {
+    id: "misure",
+    label: `📏 ${t("Misure")}`
   }, {
     id: "cardio",
     label: `🏃 ${t("Cardio")}`
@@ -10803,7 +12299,12 @@ const Storico = ({
   }].map(tb => React.createElement("button", {
     key: tb.id,
     className: tab === tb.id ? "on" : "",
-    onClick: () => setTab(tb.id)
+    onClick: () => setTab(tb.id),
+    style: {
+      whiteSpace: "nowrap",
+      flex: "1 0 auto",
+      minWidth: 76
+    }
   }, tb.label))), tab === "peso" && React.createElement("div", {
     className: "card",
     style: {
@@ -10856,7 +12357,39 @@ const Storico = ({
       fontSize: 14,
       fontWeight: 600
     }
-  }, entry.weight, " kg"))))), tab === "volume" && React.createElement("div", {
+  }, entry.weight, " kg"))))), tab === "forza" && React.createElement("div", {
+    className: "card",
+    style: {
+      padding: isDesktop ? 22 : 16
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 11,
+      fontWeight: 600,
+      color: "var(--text-3)",
+      letterSpacing: 0.5,
+      textTransform: "uppercase",
+      marginBottom: 12
+    }
+  }, t("Massimale stimato per esercizio")), React.createElement(ForzaView, {
+    isDesktop: isDesktop
+  })), tab === "misure" && React.createElement("div", {
+    className: "card",
+    style: {
+      padding: isDesktop ? 22 : 16
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 11,
+      fontWeight: 600,
+      color: "var(--text-3)",
+      letterSpacing: 0.5,
+      textTransform: "uppercase",
+      marginBottom: 12
+    }
+  }, t("Misure corporee"), " (cm)"), React.createElement(MisureView, {
+    isDesktop: isDesktop
+  })), tab === "volume" && React.createElement("div", {
     className: "card",
     style: {
       padding: isDesktop ? 22 : 16
@@ -13071,7 +14604,7 @@ function _cleanupOldDailyKeys() {
     const cut = new Date();
     cut.setDate(cut.getDate() - 90);
     const cutKey = `${cut.getFullYear()}-${String(cut.getMonth() + 1).padStart(2, "0")}-${String(cut.getDate()).padStart(2, "0")}`;
-    const re = /^(checkIn_|hydration_|notes_|gym_|integ_|coachChat_|schedaProg_|muscleSets_)(\d{4}-\d{2}-\d{2})$/;
+    const re = /^(checkIn_|hydration_|notes_|gym_|integ_|coachChat_|schedaProg_|muscleSets_|dietaCheck_|gymStart_|restDay_|nudgeDismissed_)(\d{4}-\d{2}-\d{2})$/;
     window.storage.keys().forEach(k => {
       const m = k.match(re);
       if (m && m[2] < cutKey) window.storage.remove(k);

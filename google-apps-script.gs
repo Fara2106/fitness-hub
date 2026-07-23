@@ -55,6 +55,7 @@ function doGet(e) {
       case "getUltimiPesi":    return _getUltimiPesi();
       case "getCheckIn":       return _getCheckIn(p.date);
       case "getSettings":      return _getSettings();
+      case "getMisure":        return _getMisure();
       case "getAll":           return _getAll();
       default:
         return _json({ success: true, message: "Lorenzo Fitness Hub API v2", endpoints: ["getPesoCorporeo","getPesi","getUltimiPesi","getCheckIn","getSettings","getAll","savePeso","savePesoCorporeo","saveSessione","saveMovimento","saveCheckIn","saveSettings"] });
@@ -80,6 +81,7 @@ function doPost(e) {
       case "saveSessione":      return _saveSessione(body);
       case "saveMovimento":     return _saveMovimento(body);
       case "saveCheckIn":       return _saveCheckIn(body);
+      case "saveMisure":        return _saveMisure(body);
       case "saveSettings":      return _saveSettings(body);
       default:
         return _err("Azione sconosciuta: " + body.action);
@@ -102,6 +104,7 @@ function _getSheet(name) {
       Sessioni:          ["Data", "Tipo", "Settimana", "SerieCompletate", "SerieTotal", "Note", "OraInizio"],
       Movimenti:         ["Data", "Tipo", "Minuti", "Km", "Note"],
       CheckIn:           ["Data", "Sonno", "Energia", "Fastidi"],
+      Misure:            ["Data", "Vita", "Fianchi", "Torace", "Braccio", "Coscia"],
       Settings:          ["Key", "Value"],
     };
     if (headers[name]) {
@@ -322,6 +325,44 @@ function _saveCheckIn(body) {
   }
   sh.appendRow([date, Number(body.sleep) || 0, Number(body.energy) || 0, body.ailments || ""]);
   return _json({ success: true, action: "inserted", date });
+}
+
+// ── Misure corporee (cm): Data | Vita | Fianchi | Torace | Braccio | Coscia ─
+var _MISURE_COLS = ["vita", "fianchi", "torace", "braccio", "coscia"];
+
+function _getMisure() {
+  const sh = _getSheet("Misure");
+  const data = sh.getDataRange().getValues();
+  if (data.length <= 1) return _json([]);
+  const rows = data.slice(1).filter(r => r[0]).map(r => {
+    const out = { date: r[0] instanceof Date
+      ? Utilities.formatDate(r[0], Session.getScriptTimeZone(), "yyyy-MM-dd")
+      : String(r[0]) };
+    _MISURE_COLS.forEach((c, i) => { const v = Number(r[i + 1]); if (v > 0) out[c] = v; });
+    return out;
+  }).slice(-120);
+  return _json(rows);
+}
+
+// Upsert per data; aggiorna SOLO i campi presenti nel body (gli altri restano).
+function _saveMisure(body) {
+  const sh = _getSheet("Misure");
+  const date = body.date || _today();
+  const data = sh.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    const rowDate = data[i][0] instanceof Date
+      ? Utilities.formatDate(data[i][0], Session.getScriptTimeZone(), "yyyy-MM-dd")
+      : String(data[i][0]);
+    if (rowDate === date) {
+      _MISURE_COLS.forEach(function (c, j) {
+        const v = Number(body[c]);
+        if (v > 0) sh.getRange(i + 1, j + 2).setValue(v);
+      });
+      return _json({ success: true, action: "updated", date: date });
+    }
+  }
+  sh.appendRow([date].concat(_MISURE_COLS.map(function (c) { return Number(body[c]) > 0 ? Number(body[c]) : ""; })));
+  return _json({ success: true, action: "inserted", date: date });
 }
 
 // ── GET: settings (cross-device sync) ─────────────────────────────────────

@@ -235,6 +235,87 @@ const ActivityLogger = ({ onClose, onSave, isDesktop }) => {
   );
 };
 
+// ── Report settimanale (visibile domenica e lunedì, dismissabile a settimana) ─
+const WeeklyReportCard = ({ onNav }) => {
+  const t = useT();
+  const today = window.todayKey ? window.todayKey() : _dayKey(new Date());
+  const dow = new Date().getDay();               // 0 = domenica, 1 = lunedì
+  const show = dow === 0 || dow === 1;
+  // La settimana è identificata dalla sua domenica → il dismiss vale per
+  // domenica E lunedì della stessa finestra, poi la card torna la settimana dopo.
+  const weekKey = (() => { const d = new Date(); d.setDate(d.getDate() - d.getDay()); return _dayKey(d); })();
+  const [dismissed, setDismissed] = React.useState(
+    () => (window.storage ? window.storage.get("weeklyReportDismissed", "") : "")
+  );
+
+  const rep = React.useMemo(() => {
+    if (!show || !window.Insights || !window.storage) return null;
+    const st = window.storage;
+    const gymFlags = {}, muscleHist = [], checkinDates = [];
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      const k = _dayKey(d);
+      if (st.get(`gym_${k}`, false)) gymFlags[k] = true;
+      const ms = st.get(`muscleSets_${k}`, null);
+      if (ms && Object.keys(ms).length) muscleHist.push({ date: k, muscleSets: ms });
+      if (st.get(`checkIn_${k}`, null)) checkinDates.push(k);
+    }
+    return window.Insights.weeklyReport({
+      today,
+      weightLog: st.get("weightLog", []),
+      gymFlags, muscleHist,
+      prMap: st.get("prMap", {}),
+      checkinDates,
+      plannedSessions: (window.getSchedule ? (window.getSchedule().days || []).length : 3) || 3,
+    });
+  }, [show, today]);
+
+  if (!show || !rep || dismissed === weekKey) return null;
+  if (!rep.sessions && !rep.totalSets && rep.avgWeight == null) return null; // niente da raccontare
+
+  const dismiss = () => {
+    setDismissed(weekKey);
+    if (window.storage) window.storage.set("weeklyReportDismissed", weekKey);
+  };
+
+  return (
+    <UICard>
+      <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
+        <span className="ui-cap">📅 {t("La tua settimana")}</span>
+        <button onClick={dismiss} aria-label={t("Ignora")} style={{ marginLeft: "auto", width: 26, height: 26, borderRadius: 999, background: "transparent", border: 0, color: "var(--text-3)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Icon name="x" size={13} strokeWidth={2.4} />
+        </button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: rep.prs.length || rep.order.length ? 12 : 0 }}>
+        <div>
+          <div className="tnum" style={{ fontSize: 20, fontWeight: 700 }}>{rep.sessions}<span style={{ fontSize: 12, color: "var(--text-2)", fontWeight: 500 }}>/{rep.planned}</span></div>
+          <div className="ui-cap">{t("sessioni")}</div>
+        </div>
+        <div>
+          <div className="tnum" style={{ fontSize: 20, fontWeight: 700 }}>{rep.totalSets}</div>
+          <div className="ui-cap">{t("serie")}</div>
+        </div>
+        <div>
+          <div className="tnum" style={{ fontSize: 20, fontWeight: 700, color: rep.weightDelta == null ? "var(--text)" : rep.weightDelta <= 0 ? "var(--success)" : "#FF9F0A" }}>
+            {rep.weightDelta == null ? "—" : `${rep.weightDelta > 0 ? "+" : ""}${rep.weightDelta}`}
+          </div>
+          <div className="ui-cap">{t("kg vs prec.")}</div>
+        </div>
+      </div>
+      {rep.prs.length > 0 && (
+        <div className="tnum" style={{ fontSize: 12.5, color: "var(--success)", fontWeight: 600, marginBottom: rep.order.length ? 8 : 0 }}>
+          🏆 {rep.prs.length} {rep.prs.length === 1 ? t("record battuto") : t("record battuti")}: {rep.prs.slice(0, 2).map(p => `${p.esercizio} ${p.peso}kg`).join(" · ")}
+        </div>
+      )}
+      {rep.order.length > 0 && (
+        <div style={{ fontSize: 12, color: "var(--text-2)" }}>
+          {t("Volume")}: {rep.order.slice(0, 3).map(g => `${t(g)} ${rep.byGroup[g]}`).join(" · ")}
+        </div>
+      )}
+    </UICard>
+  );
+};
+
 // ── Main Dashboard ─────────────────────────────────────────────────────────
 const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn, bodyWeight, setBodyWeight }) => {
   const isDesktop = device === "desktop";
@@ -387,6 +468,9 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
           </div>
         )}
       </UICard>
+
+      {/* Report settimanale (solo domenica/lunedì, dati reali della settimana) */}
+      <WeeklyReportCard onNav={onNav} />
 
       {/* Prossimo pasto */}
       {nextMeal ? (

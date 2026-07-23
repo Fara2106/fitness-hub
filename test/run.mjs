@@ -257,6 +257,119 @@ console.log("\nSuite WorkoutProgress — progressione carichi, PR, volume, nudge
   }
 }
 
+// ---- Suite Insights (modulo puro: e1RM, sessioni, report, deload, swap) ----
+console.log("\nSuite Insights — e1RM, storico esercizio, riepilogo, report, deload, pasti");
+{
+  const sb = { window: {}, console };
+  vm.createContext(sb);
+  try {
+    vm.runInContext(transform(join(ROOT, "insights.jsx")), sb, { filename: "insights.jsx" });
+    ok("insights.jsx si carica sotto vm", true);
+  } catch (e) {
+    ok("insights.jsx si carica sotto vm — " + e.message.split("\n")[0], false);
+  }
+  const I = sb.window.Insights;
+  ok("Insights esposto su window", !!I);
+  if (I) {
+    // e1RM (Epley)
+    ok("e1rm(100,5) = 116.7", I.e1rm(100, 5) === 116.7);
+    ok("e1rm(100,1) = 100", I.e1rm(100, 1) === 100);
+    ok("e1rm('82,5',8) usa la virgola", I.e1rm("82,5", 8) === 104.5);
+    ok("e1rm('elastico',5) = null", I.e1rm("elastico", 5) === null);
+
+    // exerciseSessions
+    const pesiMap = { "panca piana": [
+      { date: "2026-07-10", setN: 1, peso: 80, rip: 8 },
+      { date: "2026-07-10", setN: 2, peso: 82.5, rip: 6 },
+      { date: "2026-07-17", setN: 1, peso: 82.5, rip: 8 },
+      { date: "2026-07-17", setN: 2, peso: 85, rip: 5 },
+      { date: "2026-07-03", setN: 1, peso: 77.5, rip: 8 },
+    ]};
+    const sess = I.exerciseSessions(pesiMap, "Panca Piana", 2);
+    ok("exerciseSessions: 2 sessioni, più recente prima", sess.length === 2 && sess[0].date === "2026-07-17");
+    ok("exerciseSessions: top della più recente = 85", sess[0].top === 85);
+    ok("exerciseSessions: tonnage 17/07 = 82.5*8+85*5 = 1085", sess[0].tonnage === 1085);
+    ok("exerciseSessions: nome sconosciuto → []", I.exerciseSessions(pesiMap, "Squat").length === 0);
+
+    // sessionSummary
+    const exIdFn = (d, i) => d + "#" + i;
+    const sum = I.sessionSummary({
+      exercises: [
+        { name: "Panca piana", sets: [{ rip: 8, peso: 80 }, { rip: 8, peso: 80 }] },
+        { name: "Croci", sets: [{ rip: 12, peso: 14 }] },
+      ],
+      dayKey: "Upper A",
+      completion: { "Upper A#0": [true, true], "Upper A#1": [false] },
+      substitutions: {},
+      pesos: { "Upper A#0": ["85", "85"] },
+      exIdFn,
+      startTs: 1000, endTs: 1000 + 50 * 60000,
+      pesiMap,
+    });
+    ok("sessionSummary: 2 serie fatte, 1 esercizio", sum.setsDone === 2 && sum.exCount === 1);
+    ok("sessionSummary: tonnage = 85*8*2 = 1360", sum.tonnage === 1360);
+    ok("sessionSummary: durata 50 min", sum.durationMin === 50);
+    ok("sessionSummary: delta vs top precedente (85→85) = 0", sum.perExercise[0].delta === 0);
+    ok("sessionSummary: prevTonnage dalla sessione più recente", sum.prevTonnage === 1085);
+    ok("sessionSummary: senza start → durationMin null",
+      I.sessionSummary({ exercises: [], dayKey: "X", completion: {}, substitutions: {}, pesos: {}, exIdFn, pesiMap: {} }).durationMin === null);
+
+    // weeklyReport
+    const rep = I.weeklyReport({
+      today: "2026-07-23",
+      weightLog: [
+        { date: "2026-07-12", weight: 101 }, { date: "2026-07-14", weight: 100.6 },
+        { date: "2026-07-20", weight: 100.2 }, { date: "2026-07-22", weight: 100 },
+      ],
+      gymFlags: { "2026-07-20": true, "2026-07-22": true, "2026-07-10": true },
+      muscleHist: [
+        { date: "2026-07-20", muscleSets: { Petto: 6, Braccia: 4 } },
+        { date: "2026-07-22", muscleSets: { Gambe: 8 } },
+        { date: "2026-07-10", muscleSets: { Petto: 99 } },   // fuori settimana
+      ],
+      prMap: { "Panca piana": { peso: 85, date: "2026-07-22" }, "Squat": { peso: 120, date: "2026-07-01" } },
+      checkinDates: ["2026-07-21", "2026-07-22", "2026-07-01"],
+      plannedSessions: 3,
+    });
+    ok("weeklyReport: 2 sessioni in settimana", rep.sessions === 2);
+    ok("weeklyReport: 18 serie, Gambe primo gruppo", rep.totalSets === 18 && rep.order[0] === "Gambe");
+    ok("weeklyReport: media peso 100.1 vs 100.8 → delta -0.7",
+      rep.avgWeight === 100.1 && rep.prevAvgWeight === 100.8 && rep.weightDelta === -0.7);
+    ok("weeklyReport: 1 PR in settimana (Panca)", rep.prs.length === 1 && rep.prs[0].esercizio === "Panca piana");
+    ok("weeklyReport: 2 check-in in settimana", rep.checkins === 2);
+
+    // deload
+    ok("deload: fastidi oggi → true/fastidi",
+      I.deloadAdvice([{ sleep: 4, energy: 4, ailments: "spalla dx" }]).reason === "fastidi");
+    ok("deload: oggi 2/5 e 3/5 (media 2.5) → true",
+      I.deloadAdvice([{ sleep: 2, energy: 3, ailments: "" }]).deload === true);
+    ok("deload: due giorni mediocri (3/3) → true/recupero",
+      I.deloadAdvice([{ sleep: 3, energy: 3 }, { sleep: 3, energy: 3 }]).reason === "recupero");
+    ok("deload: tutto ok → false",
+      I.deloadAdvice([{ sleep: 4, energy: 4, ailments: "" }, { sleep: 5, energy: 4 }]).deload === false);
+    ok("deload: nessun check-in → false", I.deloadAdvice([]).deload === false);
+    ok("deloadWeight(100) = 90", I.deloadWeight("100") === 90);
+    ok("deloadWeight(10) = 9 (step 1 sotto i 20)", I.deloadWeight(10) === 9);
+    ok("deloadWeight('elastico') = null", I.deloadWeight("elastico") === null);
+
+    // mealAdherence
+    const adh = I.mealAdherence({ a: true, b: true, c: false }, 5);
+    ok("mealAdherence: 2/5 = 40%", adh.done === 2 && adh.pct === 40);
+
+    // foodSwaps
+    const swaps = I.foodSwaps("Carboidrato: riso basmati | pane integrale", "80–100g");
+    ok("foodSwaps riso 80g: contiene pasta 80g", swaps.some(s => s.name.indexOf("Pasta") === 0 && s.grams === 80));
+    ok("foodSwaps riso 80g: patate ~375g", swaps.some(s => s.name === "Patate" && s.grams === 375));
+    ok("foodSwaps: alimento sconosciuto → []", I.foodSwaps("Verdure o ortaggi", "300g").length === 0);
+    ok("foodSwaps: senza grammi → []", I.foodSwaps("Riso basmati", "a scelta").length === 0);
+    // Formato dieta.txt parsato: grammi NEL testo, segmenti con |
+    const swaps2 = I.foodSwaps("Carboidrato (scegli 1): 80g pasta farro integrale | 80g riso rosso integrale", "");
+    ok("foodSwaps testo '80g pasta | …': base pasta → patate 375g", swaps2.some(s => s.name === "Patate" && s.grams === 375));
+    const swaps3 = I.foodSwaps("Proteina (scegli 1): 150g tonno | 110g primo sale", "");
+    ok("foodSwaps testo '150g tonno': equivalenti proteici presenti", swaps3.some(s => s.name.indexOf("Pollo") === 0));
+  }
+}
+
 // ---- Suite bundle: app.compiled.js allineato ai sorgenti (no drift) ----
 // Il browser carica SOLO app.compiled.js: se un .jsx viene modificato senza
 // rigenerare il bundle (`npm run build`), l'app servirebbe codice vecchio.

@@ -39,6 +39,7 @@ export const BUNDLE_FILES = [
   "nav.jsx",
   "schedaState.jsx",
   "progress.jsx",
+  "insights.jsx",
   // Screens
   "screens/onboarding.jsx",
   "screens/dashboard.jsx",

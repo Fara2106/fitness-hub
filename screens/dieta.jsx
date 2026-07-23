@@ -444,37 +444,69 @@ const SupplementRow = ({ supp, checked, onToggle }) => {
 };
 
 // ── Meal card ──────────────────────────────────────────────────────────────
-const MealCard = ({ meal, isDesktop }) => {
+// checked/onToggle: spunta "pasto fatto" (aderenza giornaliera, dietaCheck_<date>).
+// Gli alimenti riconosciuti da Insights.foodSwaps mostrano, al tocco, le
+// grammature equivalenti degli scambi dello stesso gruppo (parità kcal).
+const MealCard = ({ meal, isDesktop, checked, onToggle }) => {
   const t = useT();
   const [open, setOpen] = React.useState(false);
+  const [swapOpen, setSwapOpen] = React.useState(null); // indice riga aperta
 
   return (
-    <div className="card lift" style={{ padding: isDesktop ? 20 : 16 }}>
+    <div className="card lift" style={{ padding: isDesktop ? 20 : 16, opacity: checked ? 0.82 : 1 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 22 }}>{meal.emoji}</span>
           <div>
-            <div style={{ fontSize: 15.5, fontWeight: 600, letterSpacing: -0.015 }}>{t(meal.title)}</div>
+            <div style={{ fontSize: 15.5, fontWeight: 600, letterSpacing: -0.015, textDecoration: checked ? "line-through" : "none" }}>{t(meal.title)}</div>
             <div className="num muted" style={{ fontSize: 12 }}>{meal.time}</div>
           </div>
         </div>
+        {onToggle && (
+          <button
+            onClick={(ev) => { if (!checked && window.Motion) window.Motion.pop(ev.currentTarget); onToggle(); }}
+            className={`check ${checked ? "on" : ""}`}
+            aria-label={t("Pasto fatto")}
+            style={{ width: 28, height: 28, flexShrink: 0 }}
+          >
+            <Icon name="check" size={14} color="#062810" />
+          </button>
+        )}
       </div>
 
       <div style={{ display: "flex", flexDirection: "column" }}>
-        {meal.primary.map((f, i) => (
-          <div key={i} style={{
-            display: "flex", justifyContent: "space-between", alignItems: "flex-start",
-            padding: "7px 0", borderTop: i > 0 ? "1px solid var(--border)" : "0", gap: 8,
-          }}>
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 7, fontSize: 13.5, fontWeight: 500, lineHeight: 1.35, minWidth: 0 }}>
-              <span style={{ fontSize: 15, flexShrink: 0, lineHeight: 1.2 }}>{window.foodEmoji(f.food)}</span>
-              <span>{f.food}</span>
+        {meal.primary.map((f, i) => {
+          const swaps = window.Insights ? window.Insights.foodSwaps(f.food, f.qty) : [];
+          const hasSwaps = swaps.length > 0;
+          return (
+            <div key={i} style={{ borderTop: i > 0 ? "1px solid var(--border)" : "0" }}>
+              <div
+                onClick={hasSwaps ? () => setSwapOpen(s => (s === i ? null : i)) : undefined}
+                style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "flex-start",
+                  padding: "7px 0", gap: 8, cursor: hasSwaps ? "pointer" : "default",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 7, fontSize: 13.5, fontWeight: 500, lineHeight: 1.35, minWidth: 0 }}>
+                  <span style={{ fontSize: 15, flexShrink: 0, lineHeight: 1.2 }}>{window.foodEmoji(f.food)}</span>
+                  <span>{f.food}{hasSwaps && <span style={{ color: "var(--accent)", fontSize: 11, marginLeft: 5 }}>⇄</span>}</span>
+                </div>
+                {f.qty && (
+                  <div className="num" style={{ fontSize: 12.5, color: "var(--text-2)", fontWeight: 600, whiteSpace: "nowrap", flexShrink: 0 }}>{f.qty}</div>
+                )}
+              </div>
+              {swapOpen === i && hasSwaps && (
+                <div className="fade-up" style={{
+                  margin: "0 0 8px", padding: "8px 10px", background: "var(--card-2)",
+                  borderRadius: 9, fontSize: 12, color: "var(--text-2)", lineHeight: 1.5,
+                }}>
+                  <span style={{ fontWeight: 600, color: "var(--text-3)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: 0.4 }}>{t("Equivalenti")} · </span>
+                  {swaps.map(s => `${s.name} ${s.grams}g`).join(" · ")}
+                </div>
+              )}
             </div>
-            {f.qty && (
-              <div className="num" style={{ fontSize: 12.5, color: "var(--text-2)", fontWeight: 600, whiteSpace: "nowrap", flexShrink: 0 }}>{f.qty}</div>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {meal.others && meal.others.length > 0 && (
@@ -542,6 +574,20 @@ const Dieta = ({ device, onNav }) => {
     });
   };
 
+  // Aderenza pasti: spunte per pasto (dietaCheck_<date>) → percentuale del giorno.
+  const [mealChecked, setMealChecked] = React.useState(() =>
+    window.storage ? window.storage.get(`dietaCheck_${today}`, {}) : {}
+  );
+  const toggleMeal = (key) => {
+    setMealChecked(c => {
+      const next = { ...c, [key]: !c[key] };
+      if (window.storage) window.storage.set(`dietaCheck_${today}`, next);
+      if (navigator.vibrate) navigator.vibrate([40]);
+      return next;
+    });
+  };
+  const _mealKey = (ml) => `${ml.time}|${ml.title}`;
+
   const dayType    = training ? trainTime : "riposo";
   const section    = dieta[dayType] || dieta.riposo;
   const meals      = section.meals || [];
@@ -556,12 +602,30 @@ const Dieta = ({ device, onNav }) => {
   const doneCount = supps.filter(s => checked[s.type]).length;
   const allSuppsDone = doneCount === supps.length;
 
+  // Aderenza del giorno: solo i pasti della variante corrente.
+  const mealAdh = window.Insights
+    ? window.Insights.mealAdherence(
+        meals.reduce((m, ml) => { m[_mealKey(ml)] = !!mealChecked[_mealKey(ml)]; return m; }, {}),
+        meals.length)
+    : null;
+
   return (
     <div className="fade-up" style={{ padding: isDesktop ? "32px 40px" : "10px 16px 24px", display: "flex", flexDirection: "column", gap: isDesktop ? 18 : 14 }}>
 
-      <div>
-        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)", letterSpacing: 0.5, textTransform: "uppercase" }}>{t("Piano alimentare")}</div>
-        <h1 style={{ fontSize: isDesktop ? 28 : 24, fontWeight: 600 }}>{t("Dieta")}</h1>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)", letterSpacing: 0.5, textTransform: "uppercase" }}>{t("Piano alimentare")}</div>
+          <h1 style={{ fontSize: isDesktop ? 28 : 24, fontWeight: 600 }}>{t("Dieta")}</h1>
+        </div>
+        {mealAdh && mealAdh.total > 0 && (
+          <span className="pill tnum" style={{
+            fontSize: 11.5, fontWeight: 600, padding: "5px 11px", marginBottom: 4,
+            background: mealAdh.pct === 100 ? "rgba(48,209,88,0.15)" : "var(--card-2)",
+            color: mealAdh.pct === 100 ? "var(--success)" : "var(--text-2)",
+          }}>
+            🍽 {mealAdh.done}/{mealAdh.total} {mealAdh.pct === 100 ? "✓" : `· ${mealAdh.pct}%`}
+          </span>
+        )}
       </div>
 
       {/* Activity card */}
@@ -744,7 +808,12 @@ const Dieta = ({ device, onNav }) => {
                 </div>
 
                 {item.kind === "meal" ? (
-                  <MealCard meal={item} isDesktop={isDesktop} />
+                  <MealCard
+                    meal={item}
+                    isDesktop={isDesktop}
+                    checked={!!mealChecked[_mealKey(item)]}
+                    onToggle={() => toggleMeal(_mealKey(item))}
+                  />
                 ) : (
                   <SupplementRow supp={item} checked={checked} onToggle={toggleSupp} />
                 )}

@@ -307,6 +307,224 @@ const VolumeView = ({ isDesktop }) => {
   );
 };
 
+// ── Forza: e1RM stimato (Epley) per esercizio, dai dati SerieAllenamento ────
+const ForzaView = ({ isDesktop }) => {
+  const t = useT();
+  const [pesiMap, setPesiMap] = React.useState(null); // null = caricamento
+  const [selected, setSelected] = React.useState(null);
+
+  React.useEffect(() => {
+    if (!window.sheetsAPI) { setPesiMap({}); return; }
+    window.sheetsAPI.getPesi()
+      .then(d => setPesiMap(d && typeof d === "object" ? d : {}))
+      .catch(() => setPesiMap({}));
+  }, []);
+
+  // Per esercizio: e1RM migliore per sessione (asc) → ultimo valore + delta.
+  const list = React.useMemo(() => {
+    if (!pesiMap || !window.Insights) return [];
+    return Object.keys(pesiMap).map(name => {
+      const sessions = window.Insights.exerciseSessions(pesiMap, name, 12).slice().reverse();
+      const points = sessions.map(s => {
+        let best = null;
+        s.sets.forEach(x => {
+          const v = window.Insights.e1rm(x.peso, x.rip);
+          if (v != null && (best == null || v > best)) best = v;
+        });
+        return { date: s.date, label: s.date.slice(5), e1rm: best };
+      }).filter(p => p.e1rm != null);
+      if (!points.length) return null;
+      const latest = points[points.length - 1].e1rm;
+      const delta = Math.round((latest - points[0].e1rm) * 10) / 10;
+      return { name, points, latest, delta };
+    }).filter(Boolean).sort((a, b) => b.latest - a.latest).slice(0, 10);
+  }, [pesiMap]);
+
+  if (pesiMap === null) return <UISkeleton h={160} r={14} />;
+  if (!list.length) {
+    return <UIEmpty icon="dumbbell" title={t("Ancora nessun dato forza")} sub={t("Chiudi qualche sessione con i pesi segnati per vedere l'e1RM stimato")} style={{ padding: "20px 16px" }} />;
+  }
+
+  const sel = list.find(e => e.name === selected) || null;
+  const R = window.Recharts;
+
+  return (
+    <div>
+      <div className="muted" style={{ fontSize: 11.5, marginBottom: 8 }}>
+        {t("e1RM = massimale stimato (formula di Epley). Tocca un esercizio per il trend.")}
+      </div>
+      {list.map(e => {
+        const on = selected === e.name;
+        return (
+          <div key={e.name}>
+            <div
+              className="pressable"
+              onClick={() => setSelected(on ? null : e.name)}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 2px", borderTop: "1px solid var(--border)", cursor: "pointer" }}
+            >
+              <div style={{ flex: 1, fontSize: 13.5, fontWeight: on ? 700 : 500, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: on ? "var(--accent)" : "var(--text)" }}>
+                {e.name}
+              </div>
+              <div className="num" style={{ fontSize: 14, fontWeight: 700 }}>{e.latest} <span style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 500 }}>kg</span></div>
+              {e.points.length > 1 && (
+                <span className="tnum" style={{
+                  fontSize: 11, fontWeight: 700, borderRadius: 999, padding: "2px 8px", flexShrink: 0,
+                  background: e.delta > 0 ? "rgba(48,209,88,0.15)" : e.delta < 0 ? "rgba(255,159,10,0.15)" : "var(--card-2)",
+                  color: e.delta > 0 ? "var(--success)" : e.delta < 0 ? "#FF9F0A" : "var(--text-3)",
+                }}>{e.delta > 0 ? `+${e.delta}` : e.delta}</span>
+              )}
+            </div>
+            {on && sel && sel.points.length > 1 && R && (
+              <div className="fade-up" style={{ padding: "6px 0 12px" }}>
+                <R.ResponsiveContainer width="100%" height={140}>
+                  <R.LineChart data={sel.points} margin={{ top: 4, right: 4, bottom: 0, left: -24 }}>
+                    <R.CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                    <R.XAxis dataKey="label" tick={{ fill: "var(--text-3)", fontSize: 9.5 }} tickLine={false} axisLine={false} />
+                    <R.YAxis domain={["dataMin - 2", "dataMax + 2"]} tick={{ fill: "var(--text-3)", fontSize: 9.5 }} tickLine={false} axisLine={false} />
+                    <R.Line type="monotone" dataKey="e1rm" stroke="var(--accent)" strokeWidth={2} dot={{ fill: "var(--accent)", strokeWidth: 0, r: 3 }} />
+                  </R.LineChart>
+                </R.ResponsiveContainer>
+              </div>
+            )}
+            {on && sel && (sel.points.length <= 1 || !R) && (
+              <div className="muted fade-up" style={{ fontSize: 12, padding: "2px 2px 10px" }}>
+                {sel.points.length <= 1 ? t("Serve più di una sessione per il trend") : t("Grafico non disponibile")}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+// ── Misure corporee (cm): local-first + sync best-effort col foglio Misure ──
+const _MEASURE_FIELDS = [
+  { id: "vita",    label: "Vita" },
+  { id: "fianchi", label: "Fianchi" },
+  { id: "torace",  label: "Torace" },
+  { id: "braccio", label: "Braccio" },
+  { id: "coscia",  label: "Coscia" },
+];
+
+const MisureView = ({ isDesktop }) => {
+  const t = useT();
+  const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
+  const [log, setLog] = React.useState(() => window.storage ? window.storage.get("bodyMeasures", []) : []);
+  const [editing, setEditing] = React.useState(false);
+  const [vals, setVals] = React.useState({});
+  const [savedMsg, setSavedMsg] = React.useState("");
+
+  // Pull dal foglio Misure (merge per data, cloud vince). Finché il .gs non è
+  // rideployato la chiamata fallisce → si resta local-only, senza errori.
+  React.useEffect(() => {
+    if (!window.sheetsAPI || !window.sheetsAPI.getMisure || !window.storage) return;
+    window.sheetsAPI.getMisure().then(rows => {
+      if (!Array.isArray(rows) || !rows.length) return;
+      const map = {};
+      window.storage.get("bodyMeasures", []).forEach(e => { if (e && e.date) map[e.date] = e; });
+      rows.forEach(e => { if (e && e.date) map[e.date] = Object.assign({}, map[e.date], e); });
+      const merged = Object.values(map).sort((a, b) => a.date.localeCompare(b.date)).slice(-120);
+      window.storage.set("bodyMeasures", merged);
+      setLog(merged);
+    }).catch(() => {});
+  }, []);
+
+  const latest = log.length ? log[log.length - 1] : {};
+  const firstVal = (id) => { for (const e of log) { if (e[id] > 0) return e[id]; } return null; };
+
+  const openEdit = () => {
+    const v = {};
+    _MEASURE_FIELDS.forEach(f => { v[f.id] = latest[f.id] ? String(latest[f.id]) : ""; });
+    setVals(v);
+    setEditing(true);
+  };
+
+  const save = () => {
+    const entry = { date: today };
+    let any = false;
+    _MEASURE_FIELDS.forEach(f => {
+      const n = parseFloat(String(vals[f.id] || "").replace(",", "."));
+      if (n > 0) { entry[f.id] = Math.round(n * 10) / 10; any = true; }
+    });
+    if (!any) { setEditing(false); return; }
+    const next = log.filter(e => e.date !== today).concat([Object.assign({}, log.find(e => e.date === today), entry)]);
+    next.sort((a, b) => a.date.localeCompare(b.date));
+    if (window.storage) window.storage.set("bodyMeasures", next.slice(-120));
+    setLog(next.slice(-120));
+    setEditing(false);
+    setSavedMsg("✓ " + t("Misure salvate"));
+    setTimeout(() => setSavedMsg(""), 2500);
+    if (window.sheetsAPI && window.sheetsAPI.saveMisure) window.sheetsAPI.saveMisure(entry).catch(() => {});
+  };
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: isDesktop ? "repeat(5, 1fr)" : "repeat(3, 1fr)", gap: 8, marginBottom: 12 }}>
+        {_MEASURE_FIELDS.map(f => {
+          const cur = latest[f.id];
+          const first = firstVal(f.id);
+          const delta = (cur > 0 && first > 0 && cur !== first) ? Math.round((cur - first) * 10) / 10 : null;
+          return (
+            <div key={f.id} className="card" style={{ padding: "10px 8px", textAlign: "center" }}>
+              <div className="num" style={{ fontSize: 17, fontWeight: 700 }}>{cur > 0 ? cur : "—"}</div>
+              <div className="muted" style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 2 }}>{t(f.label)}</div>
+              {delta != null && (
+                <div className="tnum" style={{ fontSize: 10, fontWeight: 600, marginTop: 2, color: delta < 0 ? "var(--success)" : "#FF9F0A" }}>
+                  {delta > 0 ? "+" : ""}{delta}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {editing ? (
+        <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isDesktop ? "repeat(5, 1fr)" : "repeat(3, 1fr)", gap: 8 }}>
+            {_MEASURE_FIELDS.map(f => (
+              <div key={f.id}>
+                <div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>{t(f.label)}</div>
+                <input
+                  inputMode="decimal"
+                  value={vals[f.id] || ""}
+                  onChange={(e) => setVals(v => Object.assign({}, v, { [f.id]: e.target.value.replace(/[^0-9.,]/g, "") }))}
+                  placeholder="cm"
+                  className="input input-mono"
+                  style={{ width: "100%", padding: "9px 8px", fontSize: 14, textAlign: "center" }}
+                />
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn" style={{ flex: 1 }} onClick={() => setEditing(false)}>{t("Annulla")}</button>
+            <button className="btn primary" style={{ flex: 2 }} onClick={save}>{t("Salva misure")}</button>
+          </div>
+        </div>
+      ) : (
+        <button className="btn" style={{ width: "100%", padding: 12, fontSize: 14 }} onClick={openEdit}>
+          <Icon name="plus" size={14} /> {log.length ? t("Aggiorna misure") : t("Registra le prime misure")}
+        </button>
+      )}
+      {savedMsg && <div className="fade-up" style={{ textAlign: "center", fontSize: 12.5, color: "var(--success)", marginTop: 8 }}>{savedMsg}</div>}
+
+      {log.length > 1 && (
+        <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+          <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--text-3)", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>{t("Ultime rilevazioni")}</div>
+          {log.slice(-5).reverse().map((e, i) => (
+            <div key={e.date} style={{ display: "flex", gap: 10, padding: "6px 0", borderTop: i > 0 ? "1px solid var(--border)" : 0, fontSize: 12 }}>
+              <span className="num muted" style={{ width: 76, flexShrink: 0 }}>{e.date}</span>
+              <span className="tnum" style={{ color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {_MEASURE_FIELDS.filter(f => e[f.id] > 0).map(f => `${t(f.label)} ${e[f.id]}`).join(" · ")}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── Storico screen ─────────────────────────────────────────────────────────
 const Storico = ({ device, onNav }) => {
   const isDesktop = device === "desktop";
@@ -379,15 +597,18 @@ const Storico = ({ device, onNav }) => {
         </div>
       )}
 
-      {/* Tab selector — segmented control iOS, coerente con Dieta/Impostazioni */}
-      <div className="segmented">
+      {/* Tab selector — segmented control iOS; con 6 tab scorre in orizzontale */}
+      <div className="segmented" style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
         {[
           { id: "peso",     label: `⚖️ ${t("Peso")}` },
+          { id: "forza",    label: `🏆 ${t("Forza")}` },
           { id: "volume",   label: `💪 ${t("Volume")}` },
+          { id: "misure",   label: `📏 ${t("Misure")}` },
           { id: "cardio",   label: `🏃 ${t("Cardio")}` },
           { id: "checkin",  label: `📋 ${t("Check-in")}` },
         ].map(tb => (
-          <button key={tb.id} className={tab === tb.id ? "on" : ""} onClick={() => setTab(tb.id)}>
+          <button key={tb.id} className={tab === tb.id ? "on" : ""} onClick={() => setTab(tb.id)}
+            style={{ whiteSpace: "nowrap", flex: "1 0 auto", minWidth: 76 }}>
             {tb.label}
           </button>
         ))}
@@ -415,6 +636,26 @@ const Storico = ({ device, onNav }) => {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Forza tab */}
+      {tab === "forza" && (
+        <div className="card" style={{ padding: isDesktop ? 22 : 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 12 }}>
+            {t("Massimale stimato per esercizio")}
+          </div>
+          <ForzaView isDesktop={isDesktop} />
+        </div>
+      )}
+
+      {/* Misure tab */}
+      {tab === "misure" && (
+        <div className="card" style={{ padding: isDesktop ? 22 : 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 12 }}>
+            {t("Misure corporee")} (cm)
+          </div>
+          <MisureView isDesktop={isDesktop} />
         </div>
       )}
 

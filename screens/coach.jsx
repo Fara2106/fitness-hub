@@ -86,6 +86,24 @@ ESCLUDERE SEMPRE dalla dieta: pasta di ceci, lenticchie, piselli, bevanda di man
     }
   }
 
+  // ── Aderenza dieta di oggi (pasti spuntati in Dieta) ──────────────────────
+  if (st) {
+    const mealChecked = st.get(`dietaCheck_${today}`, {});
+    const done = Object.keys(mealChecked).filter(k => mealChecked[k]).length;
+    if (done > 0) prompt += `\nPasti già consumati oggi (spuntati): ${done}.`;
+  }
+
+  // ── Misure corporee più recenti ───────────────────────────────────────────
+  if (st) {
+    const measures = st.get("bodyMeasures", []);
+    const lastM = measures.length ? measures[measures.length - 1] : null;
+    if (lastM) {
+      const parts = ["vita", "fianchi", "torace", "braccio", "coscia"]
+        .filter(k => lastM[k] > 0).map(k => `${k} ${lastM[k]}cm`).join(", ");
+      if (parts) prompt += `\nMisure corporee (${lastM.date}): ${parts}.`;
+    }
+  }
+
   // ── Scheda allenamento (file caricato) ─────────────────────────────────────
   if (schedaData) {
     const txt = schedaData.length > 3000 ? schedaData.slice(0, 3000) + "\n[…troncato]" : schedaData;

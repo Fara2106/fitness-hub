@@ -274,7 +274,7 @@ const ExerciseCard = ({
   ex, completed, onToggleSet, onRest,
   occupied, onOccupied, isDesktop,
   substituted, onSubstitute,
-  sheetsWeights, savedPesos, onPesosChange,
+  sheetsWeights, savedPesos, onPesosChange, exNote,
 }) => {
   const t = useT();
   const [pesos, setPesos] = React.useState(() => {
@@ -357,6 +357,12 @@ const ExerciseCard = ({
               <span className="pill" style={{ fontSize: 10.5, padding: "3px 8px", color: "var(--text-3)" }}>{ex.ripRange} rip</span>
             )}
           </div>
+          {exNote && (
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 5, display: "flex", alignItems: "center", gap: 5 }}>
+              <span>📝</span>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{exNote}</span>
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
           <button
@@ -458,10 +464,125 @@ const ExerciseCard = ({
   );
 };
 
+// ── Nota setup per esercizio (persistente, es. "sedile 4, presa media") ─────
+const ExNoteRow = ({ name, note, onSave }) => {
+  const t = useT();
+  const [editing, setEditing] = React.useState(false);
+  const [val, setVal] = React.useState(note || "");
+  React.useEffect(() => { setVal(note || ""); setEditing(false); }, [name]);
+
+  const commit = () => { onSave(name, val.trim()); setEditing(false); };
+
+  if (editing) {
+    return (
+      <div style={{ display: "flex", gap: 6, width: "100%", maxWidth: 340 }}>
+        <input
+          autoFocus
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") commit(); }}
+          onBlur={commit}
+          placeholder={t("es. sedile 4, presa media…")}
+          className="input"
+          style={{ flex: 1, fontSize: 13, padding: "8px 10px" }}
+        />
+      </div>
+    );
+  }
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      style={{
+        background: "transparent", border: 0, cursor: "pointer",
+        display: "inline-flex", alignItems: "center", gap: 6,
+        fontSize: 12.5, color: note ? "var(--text-2)" : "var(--text-3)",
+        padding: "4px 8px", maxWidth: 340,
+      }}
+      title={t("Nota setup (macchina, sedile, presa…)")}
+    >
+      <span style={{ flexShrink: 0 }}>📝</span>
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {note || t("Aggiungi nota setup")}
+      </span>
+    </button>
+  );
+};
+
+// ── Riepilogo di fine sessione ──────────────────────────────────────────────
+const SessionSummaryOverlay = ({ data, onClose }) => {
+  const t = useT();
+  if (!data) return null;
+  const deltaTon = (data.prevTonnage != null && data.prevTonnage > 0)
+    ? Math.round((data.tonnage - data.prevTonnage) / data.prevTonnage * 100) : null;
+  const stat = (label, value, sub) => (
+    <div className="card" style={{ padding: "14px 12px", textAlign: "center" }}>
+      <div className="num" style={{ fontSize: 22, fontWeight: 700 }}>{value}</div>
+      <div className="muted" style={{ fontSize: 10.5, marginTop: 3, textTransform: "uppercase", letterSpacing: 0.4 }}>{label}</div>
+      {sub && <div className="tnum" style={{ fontSize: 11, marginTop: 2, color: "var(--text-2)" }}>{sub}</div>}
+    </div>
+  );
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 9992,
+      background: "var(--bg)", display: "flex", flexDirection: "column",
+      padding: "max(env(safe-area-inset-top), 20px) 20px calc(env(safe-area-inset-bottom) + 20px)",
+      overflowY: "auto",
+    }}>
+      <div style={{ textAlign: "center", margin: "18px 0 6px", fontSize: 40 }}>💪</div>
+      <h2 style={{ textAlign: "center", fontSize: 24, fontWeight: 700, letterSpacing: -0.02 }}>{t("Sessione completata")}</h2>
+      <div className="muted" style={{ textAlign: "center", fontSize: 13, marginTop: 4, marginBottom: 18 }}>
+        {data.exCount} {t("esercizi")} · {data.setsDone} {t("serie")}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+        {stat(t("Durata"), data.durationMin != null ? `${data.durationMin}′` : "—")}
+        {stat(t("Tonnellaggio"), data.tonnage ? `${data.tonnage}` : "—", data.tonnage ? "kg" : null)}
+        {stat(t("Serie"), data.setsDone)}
+        {stat(t("vs precedente"), deltaTon != null ? `${deltaTon > 0 ? "+" : ""}${deltaTon}%` : "—",
+          data.prevTonnage != null ? `${t("prima")}: ${data.prevTonnage} kg` : null)}
+      </div>
+
+      {data.prs && data.prs.length > 0 && (
+        <div className="card" style={{ padding: 14, marginBottom: 14, border: "1px solid rgba(48,209,88,0.4)" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--success)", marginBottom: 6 }}>
+            🏆 {data.prs.length === 1 ? t("Nuovo record!") : `${data.prs.length} ${t("nuovi record!")}`}
+          </div>
+          <div className="tnum" style={{ fontSize: 12.5, color: "var(--text-2)" }}>
+            {data.prs.map(p => `${t(p.esercizio)} ${p.peso} kg`).join(" · ")}
+          </div>
+        </div>
+      )}
+
+      {data.perExercise && data.perExercise.length > 0 && (
+        <div className="card" style={{ padding: "6px 14px", marginBottom: 16 }}>
+          {data.perExercise.map((e, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderTop: i > 0 ? "1px solid var(--border)" : 0 }}>
+              <div style={{ flex: 1, fontSize: 13.5, fontWeight: 500, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t(e.name)}</div>
+              {e.top != null && <div className="num" style={{ fontSize: 13, fontWeight: 600 }}>{e.top} kg</div>}
+              {e.delta != null && (
+                <span className="tnum" style={{
+                  fontSize: 11.5, fontWeight: 700, borderRadius: 999, padding: "2px 8px",
+                  background: e.delta > 0 ? "rgba(48,209,88,0.15)" : e.delta < 0 ? "rgba(255,159,10,0.15)" : "var(--card-2)",
+                  color: e.delta > 0 ? "var(--success)" : e.delta < 0 ? "#FF9F0A" : "var(--text-3)",
+                }}>{e.delta > 0 ? `↑ +${e.delta}` : e.delta < 0 ? `↓ ${e.delta}` : "="}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <button className="btn primary" style={{ width: "100%", padding: 15, fontSize: 16, fontWeight: 600, marginTop: "auto" }} onClick={onClose}>
+        {t("Fatto")}
+      </button>
+    </div>
+  );
+};
+
 // ── Workout Player (vista a schermo intero, un esercizio alla volta) ────────
 const WorkoutPlayer = ({
   dayKey, dayName, exercises, cursor, setCursor,
   completion, substitutions, pesosRef, sheetsWeights, prMap,
+  pesiHistory, deload, exNotes, onSaveNote,
   autoRest, setAutoRest, onPatch, onClose, onFinish,
 }) => {
   const t = useT();
@@ -528,6 +649,18 @@ const WorkoutPlayer = ({
   const curNum  = WP ? WP.parseWeight(pesoVal) : null;
   const isPR    = prBest != null && curNum != null && curNum > prBest;
 
+  // Seduta scarica (check-in scadenti / fastidi): sostituisce la progressione
+  // con un suggerimento ridotto del ~10%.
+  const isDeload = !!(deload && deload.deload);
+  const deloadW  = isDeload && window.Insights ? window.Insights.deloadWeight(lastRaw) : null;
+
+  // Storico reale dell'esercizio (ultime 3 sessioni da Sheets/getPesi).
+  const exHistory = React.useMemo(() => {
+    if (!window.Insights || !pesiHistory) return [];
+    return window.Insights.exerciseSessions(pesiHistory, exName, 3);
+  }, [pesiHistory, exName]);
+  const exNote = (exNotes || {})[(exName || "").toLowerCase()];
+
   return (
     <div style={{
       position: "fixed", inset: 0, zIndex: 9990,
@@ -582,6 +715,27 @@ const WorkoutPlayer = ({
               fontSize: 12.5, fontWeight: 700, color: "var(--success)",
               background: "rgba(48,209,88,0.15)", borderRadius: 999, padding: "5px 12px",
             }}>🏆 {t("Nuovo record!")}</span>
+          ) : isDeload ? (
+            // Autoregolazione: check-in scadenti/fastidi → niente progressione,
+            // suggerimento scarico (tocca per applicare, se il peso è numerico).
+            deloadW != null ? (
+              <button
+                onClick={() => setPeso(String(deloadW))}
+                className="pressable tnum"
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 5,
+                  fontSize: 12.5, fontWeight: 600, color: "#FF9F0A",
+                  background: "rgba(255,159,10,0.14)", border: "1px solid rgba(255,159,10,0.3)",
+                  borderRadius: 999, padding: "6px 12px", cursor: "pointer",
+                }}
+                title={t("Recupero incompleto — oggi meglio scaricare")}
+              >🪫 {t("Scarico")}: {t("prova")} {deloadW} kg</button>
+            ) : (
+              <span className="tnum" style={{
+                fontSize: 12.5, fontWeight: 600, color: "#FF9F0A",
+                background: "rgba(255,159,10,0.14)", borderRadius: 999, padding: "5px 12px",
+              }}>🪫 {t("Seduta scarica consigliata")}</span>
+            )
           ) : sug ? (
             <button
               onClick={() => setPeso(String(sug.next))}
@@ -606,6 +760,27 @@ const WorkoutPlayer = ({
             }} />
           ))}
         </div>
+
+        {/* Storico reale: ultime sessioni di QUESTO esercizio (da Sheets) */}
+        {exHistory.length > 0 && (
+          <div className="card" style={{ width: "100%", maxWidth: 340, padding: "10px 14px", marginTop: 10, textAlign: "left" }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text-3)", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>
+              {t("Ultime sessioni")}
+            </div>
+            {exHistory.map((h, i) => (
+              <div key={h.date} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderTop: i > 0 ? "1px solid var(--border)" : 0 }}>
+                <span className="num muted" style={{ fontSize: 11.5, width: 40, flexShrink: 0 }}>{h.date.slice(5).replace("-", "/")}</span>
+                <span className="tnum" style={{ flex: 1, fontSize: 12, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {h.sets.map(s => `${s.peso}×${s.rip}`).join(" · ")}
+                </span>
+                {h.top != null && <span className="num" style={{ fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{h.top}</span>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Nota setup persistente (macchina, sedile, presa…) */}
+        <ExNoteRow name={exName} note={exNote} onSave={onSaveNote} />
       </div>
 
       {/* Peek prossimo */}
@@ -653,6 +828,14 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   const [showConfetti, setShowConfetti] = React.useState(false);
   const [notes, setNotes]   = React.useState(() => window.storage ? window.storage.get(`notes_${_todayK()}`, "") : "");
   const [sheetsWeights, setSheetsWeights] = React.useState(null);
+  // Storico completo per-esercizio da Sheets (getPesi): alimenta la card
+  // "Ultime sessioni" nel Player e il confronto nel riepilogo di chiusura.
+  const [pesiHistory, setPesiHistory] = React.useState(null);
+  // Note setup persistenti per esercizio ("sedile 4, presa media"), sincate.
+  const [exNotes, setExNotes] = React.useState(() => window.storage ? window.storage.get("exNotes", {}) : {});
+  const exNotesPushTid = React.useRef(null);
+  // Riepilogo di fine sessione (overlay dopo il salvataggio).
+  const [summary, setSummary] = React.useState(null);
   // Record personali (PR) per esercizio: { nome: { peso, date } } — persistiti,
   // aggiornati alla chiusura sessione; il Player li usa per il badge "record".
   const [prMap, setPrMap] = React.useState(() => window.storage ? window.storage.get("prMap", {}) : {});
@@ -679,6 +862,15 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
 
   // Persiste una patch nel blocco piatto e aggiorna lo stato locale.
   const patchProg = (patch) => {
+    // Prima serie completata del giorno → timestamp di inizio sessione
+    // (usato dal riepilogo di chiusura per la durata reale).
+    if (patch.completion && window.storage) {
+      const k = `gymStart_${_todayK()}`;
+      if (!window.storage.get(k, null) &&
+          Object.values(patch.completion).some(arr => (arr || []).some(Boolean))) {
+        window.storage.set(k, Date.now());
+      }
+    }
     window.writeSchedaProg(window.storage, _todayK(), patch);
     setProg(p => ({
       completion:    Object.assign({}, p.completion,    patch.completion),
@@ -686,6 +878,36 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
       pesos:         Object.assign({}, p.pesos,          patch.pesos),
     }));
   };
+
+  // Nota setup: salva in locale subito, push cloud (chiave "exNotes") con debounce.
+  const saveExNote = (name, text) => {
+    const key = (name || "").toLowerCase();
+    if (!key) return;
+    setExNotes(prev => {
+      const next = Object.assign({}, prev);
+      if (text) next[key] = text; else delete next[key];
+      if (window.storage) window.storage.set("exNotes", next);
+      clearTimeout(exNotesPushTid.current);
+      exNotesPushTid.current = setTimeout(() => {
+        if (window._saveSettingRetry) window._saveSettingRetry("exNotes", JSON.stringify(next));
+      }, 1500);
+      return next;
+    });
+  };
+
+  // Seduta scarica? Check-in di oggi + due giorni precedenti (autoregolazione).
+  const deload = React.useMemo(() => {
+    if (!window.Insights) return { deload: false, reason: null };
+    const list = [checkIn];
+    if (window.storage) {
+      for (let i = 1; i <= 2; i++) {
+        const d = new Date(); d.setDate(d.getDate() - i);
+        const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        list.push(window.storage.get(`checkIn_${k}`, null));
+      }
+    }
+    return window.Insights.deloadAdvice(list);
+  }, [checkIn]);
 
   // Cambia SOLO il giorno mostrato. Lo stato è keyed-by-id e vive per tutti i
   // giorni insieme → niente swap, niente bleed.
@@ -706,6 +928,12 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
       if (!data || typeof data !== "object") return;
       // data: { "nome esercizio": [peso_set1, peso_set2, ...] }
       setSheetsWeights(data);
+    }).catch(() => {});
+    // Storico completo (ultime 12 serie per esercizio, raggruppate per data
+    // da Insights.exerciseSessions): card nel Player + confronto nel riepilogo.
+    window.sheetsAPI.getPesi().then(data => {
+      if (!data || typeof data !== "object") return;
+      setPesiHistory(data);
     }).catch(() => {});
   }, []);
 
@@ -756,6 +984,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   const handleSaveSession = async () => {
     if (saving) return;
     setSaving(true);
+    let sessionPRs = []; // PR battuti in QUESTA chiusura → riepilogo
     try {
       const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
       // Persist notes
@@ -798,11 +1027,26 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
           if (res.newPRs.length) {
             window.storage.set("prMap", res.prMap);
             setPrMap(res.prMap);
+            sessionPRs = res.newPRs;
             setNewPRs(res.newPRs);
             if (navigator.vibrate) navigator.vibrate([40, 60, 40, 60, 80]);
             setTimeout(() => setNewPRs([]), 5000);
           }
         }
+      }
+
+      // Riepilogo di fine sessione: durata reale (gymStart_), tonnellaggio,
+      // confronto con le sessioni precedenti (getPesi) e PR appena battuti.
+      // PRIMA del push a Sheets: il riepilogo riguarda l'allenamento (già
+      // persistito in locale) e deve apparire anche se la rete manca.
+      if (window.Insights) {
+        const startTs = window.storage ? window.storage.get(`gymStart_${today}`, null) : null;
+        const s = window.Insights.sessionSummary({
+          exercises, dayKey: scheda, completion, substitutions,
+          pesos: pesosRef.current, exIdFn: window.exId,
+          startTs, endTs: Date.now(), pesiMap: pesiHistory || {},
+        });
+        setSummary(Object.assign({}, s, { prs: sessionPRs }));
       }
 
       if (window.sheetsAPI) {
@@ -953,6 +1197,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
               substituted={substitutions[id]}
               onSubstitute={(name) => patchProg({ substitutions: { [id]: name } })}
               sheetsWeights={sheetsWeights}
+              exNote={exNotes[((substitutions[id] || ex.name) || "").toLowerCase()]}
               savedPesos={pesosRef.current[id]}
               onPesosChange={(pesos) => {
                 pesosRef.current[id] = pesos;
@@ -1029,12 +1274,26 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
           pesosRef={pesosRef}
           sheetsWeights={sheetsWeights}
           prMap={prMap}
+          pesiHistory={pesiHistory}
+          deload={deload}
+          exNotes={exNotes}
+          onSaveNote={saveExNote}
           autoRest={autoRest}
           setAutoRest={setAutoRest}
           onPatch={patchProg}
           onClose={() => setMode("list")}
-          onFinish={() => setMode("list")}
+          onFinish={() => {
+            // Fine dell'ultimo esercizio → chiudi il player e salva la sessione
+            // (con riepilogo). Se non c'è nulla di completato, solo chiusura.
+            setMode("list");
+            if (completedSets > 0) handleSaveSession();
+          }}
         />
+      )}
+
+      {/* Riepilogo di fine sessione (dopo il salvataggio) */}
+      {summary && (
+        <SessionSummaryOverlay data={summary} onClose={() => setSummary(null)} />
       )}
 
       {/* Celebrazione record personali (PR) */}
