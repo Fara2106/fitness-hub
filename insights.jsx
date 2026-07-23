@@ -172,6 +172,67 @@
     return v > 0 && v < p ? v : null;
   }
 
+  // ── Media mobile del peso (finestra su giorni di calendario) ──────────────
+  // weightLog asc [{date, weight}] → [{date, ma}] (media delle misurazioni
+  // negli ultimi `win` giorni fino a quella data inclusa).
+  function movingAverage(weightLog, win) {
+    win = win || 7;
+    const log = (weightLog || []).filter(e => e && e.date && e.weight > 0);
+    return log.map(e => {
+      const from = new Date(e.date + "T12:00:00");
+      from.setDate(from.getDate() - (win - 1));
+      const fromKey = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, "0")}-${String(from.getDate()).padStart(2, "0")}`;
+      const slice = log.filter(x => x.date >= fromKey && x.date <= e.date);
+      const avg = slice.reduce((s, x) => s + x.weight, 0) / slice.length;
+      return { date: e.date, ma: Math.round(avg * 100) / 100 };
+    });
+  }
+
+  // ── Proiezione verso l'obiettivo peso ─────────────────────────────────────
+  // Regressione lineare sui pesi degli ultimi `days` giorni → ritmo kg/settimana
+  // e, se un target è impostato e il trend va nella direzione giusta, la data
+  // stimata di arrivo. null se i dati non bastano (<2 punti nel periodo).
+  function weightProjection(weightLog, targetKg, days) {
+    days = days || 21;
+    const log = (weightLog || []).filter(e => e && e.date && e.weight > 0);
+    if (log.length < 2) return null;
+    const lastDate = log[log.length - 1].date;
+    const cut = new Date(lastDate + "T12:00:00");
+    cut.setDate(cut.getDate() - days);
+    const cutKey = `${cut.getFullYear()}-${String(cut.getMonth() + 1).padStart(2, "0")}-${String(cut.getDate()).padStart(2, "0")}`;
+    const pts = log.filter(e => e.date >= cutKey);
+    if (pts.length < 2) return null;
+    const t0 = new Date(pts[0].date + "T12:00:00").getTime();
+    const xs = pts.map(e => (new Date(e.date + "T12:00:00").getTime() - t0) / 86400000);
+    const ys = pts.map(e => e.weight);
+    const n = xs.length;
+    const mx = xs.reduce((a, b) => a + b, 0) / n;
+    const my = ys.reduce((a, b) => a + b, 0) / n;
+    let num = 0, den = 0;
+    for (let i = 0; i < n; i++) { num += (xs[i] - mx) * (ys[i] - my); den += (xs[i] - mx) * (xs[i] - mx); }
+    if (!den) return null;
+    const slopePerDay = num / den;
+    const current = ys[ys.length - 1];
+    const out = { ratePerWeek: Math.round(slopePerDay * 7 * 100) / 100, current };
+    const target = _num(targetKg);
+    if (target != null) {
+      out.target = target;
+      const diff = target - current;
+      if (Math.abs(diff) <= 0.3) {
+        out.reached = true;
+      } else if (slopePerDay !== 0 && (diff > 0) === (slopePerDay > 0)) {
+        const daysTo = diff / slopePerDay;
+        if (daysTo > 0 && daysTo < 730) {
+          const eta = new Date(lastDate + "T12:00:00");
+          eta.setDate(eta.getDate() + Math.round(daysTo));
+          out.etaDays = Math.round(daysTo);
+          out.etaDate = `${eta.getFullYear()}-${String(eta.getMonth() + 1).padStart(2, "0")}-${String(eta.getDate()).padStart(2, "0")}`;
+        }
+      }
+    }
+    return out;
+  }
+
   // ── Aderenza pasti ────────────────────────────────────────────────────────
   function mealAdherence(checkedMap, totalMeals) {
     const done = Object.keys(checkedMap || {}).filter(k => checkedMap[k]).length;
@@ -250,5 +311,6 @@
   window.Insights = {
     e1rm, exerciseSessions, sessionSummary, weeklyReport,
     deloadAdvice, deloadWeight, mealAdherence, foodSwaps,
+    movingAverage, weightProjection,
   };
 })();

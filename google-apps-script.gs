@@ -56,6 +56,7 @@ function doGet(e) {
       case "getCheckIn":       return _getCheckIn(p.date);
       case "getSettings":      return _getSettings();
       case "getMisure":        return _getMisure();
+      case "getSessioni":      return _getSessioni();
       case "getAll":           return _getAll();
       default:
         return _json({ success: true, message: "Lorenzo Fitness Hub API v2", endpoints: ["getPesoCorporeo","getPesi","getUltimiPesi","getCheckIn","getSettings","getAll","savePeso","savePesoCorporeo","saveSessione","saveMovimento","saveCheckIn","saveSettings"] });
@@ -82,6 +83,7 @@ function doPost(e) {
       case "saveMovimento":     return _saveMovimento(body);
       case "saveCheckIn":       return _saveCheckIn(body);
       case "saveMisure":        return _saveMisure(body);
+      case "saveBackup":        return _saveBackup(body);
       case "saveSettings":      return _saveSettings(body);
       default:
         return _err("Azione sconosciuta: " + body.action);
@@ -325,6 +327,43 @@ function _saveCheckIn(body) {
   }
   sh.appendRow([date, Number(body.sleep) || 0, Number(body.energy) || 0, body.ailments || ""]);
   return _json({ success: true, action: "inserted", date });
+}
+
+// ── GET: registro sessioni (ultime 60, per la tab Registro in Storico) ─────
+function _getSessioni() {
+  const sh = _getSheet("Sessioni");
+  const data = sh.getDataRange().getValues();
+  if (data.length <= 1) return _json([]);
+  const rows = data.slice(1).filter(r => r[0]).map(r => ({
+    date: r[0] instanceof Date
+      ? Utilities.formatDate(r[0], Session.getScriptTimeZone(), "yyyy-MM-dd")
+      : String(r[0]),
+    type:          String(r[1] || ""),
+    setsCompleted: Number(r[3]) || 0,
+    totalSets:     Number(r[4]) || 0,
+    notes:         String(r[5] || ""),
+    ora:           String(r[6] || ""),
+  })).slice(-60);
+  return _json(rows);
+}
+
+// ── POST: backup automatico (snapshot JSON dello storage, senza segreti) ────
+// L'app lo invia ~1 volta a settimana dopo una sync riuscita. Il foglio
+// "Backup" viene riscritto ogni volta: riga _meta + chunk da 40k caratteri
+// (limite cella Sheets: 50k). Per ripristinare: concatenare i chunk in ordine
+// → JSON con lo stesso formato dell'export manuale (Impostazioni → Backup).
+function _saveBackup(body) {
+  const json = String(body.json || "");
+  if (!json) return _err("json mancante");
+  const sh = _getSheet("Backup");
+  sh.clearContents();
+  const CHUNK = 40000;
+  const rows = [["_meta", new Date().toISOString() + " · " + json.length + " chars"]];
+  for (var i = 0; i < json.length; i += CHUNK) {
+    rows.push([String(rows.length), json.substring(i, i + CHUNK)]);
+  }
+  sh.getRange(1, 1, rows.length, 2).setValues(rows);
+  return _json({ success: true, chunks: rows.length - 1 });
 }
 
 // ── Misure corporee (cm): Data | Vita | Fianchi | Torace | Braccio | Coscia ─

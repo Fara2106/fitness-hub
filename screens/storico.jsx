@@ -45,8 +45,14 @@ const WeightChart = ({ data, isDesktop }) => {
   const first = data[0]?.weight;
   const trend = last - first;
 
+  // Media mobile 7 giorni: smussa il rumore giorno-per-giorno (acqua, sale…)
+  // e mostra il trend vero. Linea tratteggiata ambra sopra i punti reali.
+  const maMap = window.Insights
+    ? window.Insights.movingAverage(data, 7).reduce((m, p) => { m[p.date] = p.ma; return m; }, {})
+    : {};
   const formatted = data.map(d => ({
     ...d,
+    ma: maMap[d.date],
     label: d.date ? d.date.slice(5) : d.date,  // "MM-DD"
   }));
 
@@ -102,8 +108,141 @@ const WeightChart = ({ data, isDesktop }) => {
             dot={{ fill: "var(--accent)", strokeWidth: 0, r: 3 }}
             activeDot={{ r: 5 }}
           />
+          <Line
+            type="monotone" dataKey="ma"
+            stroke="#FF9F0A" strokeWidth={1.6} strokeDasharray="5 3"
+            dot={false} activeDot={false} isAnimationActive={false}
+          />
         </LineChart>
       </ResponsiveContainer>
+      <div className="muted" style={{ fontSize: 10.5, marginTop: 4, display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end" }}>
+        <span style={{ display: "inline-block", width: 16, borderTop: "2px dashed #FF9F0A" }} />
+        {t("Media 7 giorni")}
+      </div>
+    </div>
+  );
+};
+
+// ── Obiettivo peso + proiezione al ritmo attuale ────────────────────────────
+const GoalRow = ({ weightLog }) => {
+  const t = useT();
+  const [goal, setGoal] = React.useState(() => {
+    const g = window.storage ? window.storage.get("weightGoal", "") : "";
+    return g ? String(g) : "";
+  });
+
+  const save = (v) => {
+    setGoal(v);
+    const n = parseFloat(String(v).replace(",", "."));
+    if (window.storage) window.storage.set("weightGoal", n > 0 ? n : "");
+    if (window._saveSettingRetry && n > 0) window._saveSettingRetry("weightGoal", n);
+  };
+
+  const proj = (window.Insights && weightLog && weightLog.length >= 2)
+    ? window.Insights.weightProjection(weightLog, goal || null)
+    : null;
+
+  const fmtEta = (iso) => {
+    try { return new Date(iso + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" }); }
+    catch (_) { return iso; }
+  };
+
+  return (
+    <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--border)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-2)", flex: 1 }}>🎯 {t("Obiettivo")}</div>
+        <input
+          inputMode="decimal"
+          value={goal}
+          onChange={(e) => save(e.target.value.replace(/[^0-9.,]/g, ""))}
+          placeholder="kg"
+          className="input input-mono"
+          style={{ width: 76, padding: "8px 10px", fontSize: 14, textAlign: "center" }}
+        />
+        <span className="muted" style={{ fontSize: 12 }}>kg</span>
+      </div>
+      {proj && (
+        <div className="tnum" style={{ fontSize: 12, color: "var(--text-2)", marginTop: 8, lineHeight: 1.5 }}>
+          {t("Ritmo attuale")}: <strong style={{ color: proj.ratePerWeek <= 0 ? "var(--success)" : "#FF9F0A" }}>
+            {proj.ratePerWeek > 0 ? "+" : ""}{proj.ratePerWeek} {t("kg/sett")}
+          </strong>
+          {proj.reached
+            ? <> · {t("Obiettivo raggiunto 🎉")}</>
+            : proj.etaDate
+              ? <> · {t("a questo ritmo arrivi a")} <strong style={{ color: "var(--text)" }}>{proj.target} kg</strong> ~{fmtEta(proj.etaDate)}</>
+              : (proj.target ? <> · {t("il trend attuale si allontana dall'obiettivo")}</> : null)}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Registro sessioni: dal foglio Sessioni (o fallback locale gym_/muscleSets_) ─
+const RegistroView = ({ isDesktop }) => {
+  const t = useT();
+  const [rows, setRows] = React.useState(null); // null = caricamento
+
+  const localFallback = () => {
+    if (!window.storage || !window.storage.keys) return [];
+    return window.storage.keys()
+      .filter(k => /^gym_\d{4}-\d{2}-\d{2}$/.test(k) && window.storage.get(k, false))
+      .map(k => k.slice(4)).sort().reverse().slice(0, 30)
+      .map(date => {
+        const ms = window.storage.get(`muscleSets_${date}`, null) || {};
+        const sets = Object.values(ms).reduce((s, n) => s + (Number(n) || 0), 0);
+        return {
+          date, type: "", setsCompleted: sets, totalSets: 0,
+          notes: window.storage.get(`notes_${date}`, ""), local: true,
+          groups: Object.keys(ms).join(" · "),
+        };
+      });
+  };
+
+  React.useEffect(() => {
+    if (!window.sheetsAPI || !window.sheetsAPI.getSessioni) { setRows(localFallback()); return; }
+    window.sheetsAPI.getSessioni()
+      .then(r => setRows(Array.isArray(r) && r.length ? r.slice().reverse() : localFallback()))
+      .catch(() => setRows(localFallback()));
+  }, []);
+
+  if (rows === null) return <UISkeleton h={140} r={14} />;
+  if (!rows.length) {
+    return <UIEmpty icon="calendar" title={t("Nessuna sessione registrata")} sub={t("Chiudi una sessione dalla Scheda per vederla qui")} style={{ padding: "20px 16px" }} />;
+  }
+
+  const fmtDay = (iso) => {
+    try { return new Date(iso + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "2-digit" }); }
+    catch (_) { return iso; }
+  };
+
+  return (
+    <div>
+      {rows.map((r, i) => (
+        <div key={r.date + "-" + i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 0", borderTop: i > 0 ? "1px solid var(--border)" : 0 }}>
+          <div style={{ width: 86, flexShrink: 0 }}>
+            <div className="num" style={{ fontSize: 12.5, fontWeight: 600 }}>{fmtDay(r.date)}</div>
+            {r.ora && <div className="num muted" style={{ fontSize: 10.5, marginTop: 1 }}>{r.ora}</div>}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              {r.type ? <span className="pill" style={{ fontSize: 10.5, padding: "2px 8px", fontWeight: 600 }}>{r.type}</span> : null}
+              <span className="tnum" style={{ fontSize: 12.5, color: "var(--text-2)" }}>
+                {r.setsCompleted}{r.totalSets ? `/${r.totalSets}` : ""} {t("serie")}
+              </span>
+            </div>
+            {(r.groups || r.notes) && (
+              <div className="muted" style={{ fontSize: 11.5, marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {r.groups || r.notes}
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+      {rows[0] && rows[0].local && (
+        <div className="muted" style={{ fontSize: 10.5, marginTop: 8, textAlign: "center" }}>
+          {t("Solo dati locali — aggiorna il backend per lo storico completo")}
+        </div>
+      )}
     </div>
   );
 };
@@ -320,6 +459,17 @@ const ForzaView = ({ isDesktop }) => {
       .catch(() => setPesiMap({}));
   }, []);
 
+  // Recharts arriva on-demand (ensureRecharts): poll finché non è pronto,
+  // così il grafico del trend appare appena caricato (come in WeightChart).
+  const [chartReady, setChartReady] = React.useState(!!window.Recharts);
+  React.useEffect(() => {
+    if (chartReady) return;
+    const id = setInterval(() => {
+      if (window.Recharts) { setChartReady(true); clearInterval(id); }
+    }, 300);
+    return () => clearInterval(id);
+  }, []);
+
   // Per esercizio: e1RM migliore per sessione (asc) → ultimo valore + delta.
   const list = React.useMemo(() => {
     if (!pesiMap || !window.Insights) return [];
@@ -346,7 +496,7 @@ const ForzaView = ({ isDesktop }) => {
   }
 
   const sel = list.find(e => e.name === selected) || null;
-  const R = window.Recharts;
+  const R = chartReady ? window.Recharts : null;
 
   return (
     <div>
@@ -531,6 +681,12 @@ const Storico = ({ device, onNav }) => {
   const t = useT();
   const [tab, setTab] = React.useState("peso");
 
+  // Recharts è lazy (non più in index.html): parte il fetch all'ingresso in
+  // Storico; WeightChart/ForzaView hanno già il poll su window.Recharts.
+  React.useEffect(() => {
+    if (window.ensureRecharts) window.ensureRecharts().catch(() => {});
+  }, []);
+
   const [weightLog, setWeightLog] = React.useState(() => {
     if (!window.storage) return [];
     return window.storage.get("weightLog", []).slice(-60);
@@ -604,6 +760,7 @@ const Storico = ({ device, onNav }) => {
           { id: "forza",    label: `🏆 ${t("Forza")}` },
           { id: "volume",   label: `💪 ${t("Volume")}` },
           { id: "misure",   label: `📏 ${t("Misure")}` },
+          { id: "registro", label: `📖 ${t("Registro")}` },
           { id: "cardio",   label: `🏃 ${t("Cardio")}` },
           { id: "checkin",  label: `📋 ${t("Check-in")}` },
         ].map(tb => (
@@ -621,6 +778,8 @@ const Storico = ({ device, onNav }) => {
             {t("Trend peso corporeo")}
           </div>
           <WeightChart data={weightLog} isDesktop={isDesktop} />
+
+          {weightLog.length >= 2 && <GoalRow weightLog={weightLog} />}
 
           {weightLog.length > 0 && (
             <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
@@ -656,6 +815,16 @@ const Storico = ({ device, onNav }) => {
             {t("Misure corporee")} (cm)
           </div>
           <MisureView isDesktop={isDesktop} />
+        </div>
+      )}
+
+      {/* Registro tab */}
+      {tab === "registro" && (
+        <div className="card" style={{ padding: isDesktop ? 22 : 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>
+            {t("Registro sessioni")}
+          </div>
+          <RegistroView isDesktop={isDesktop} />
         </div>
       )}
 

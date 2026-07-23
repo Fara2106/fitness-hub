@@ -122,6 +122,15 @@
   if (window.storage.onReady) window.storage.onReady(apply);else apply();
 })();
 const _PROXY = "https://fitness-hub-proxy.lorefara97.workers.dev";
+const _QUEUEABLE = {
+  savePeso: 1,
+  savePesoCorporeo: 1,
+  saveSessione: 1,
+  saveMovimento: 1,
+  saveCheckIn: 1,
+  saveMisure: 1
+};
+let _draining = false;
 window.sheetsAPI = {
   async get(params) {
     const url = new URL(_PROXY, location.origin);
@@ -135,18 +144,71 @@ window.sheetsAPI = {
     if (json && json.success === false) throw new Error(json.error || "Sheets error");
     return json;
   },
-  async post(body) {
-    const res = await fetch(_PROXY, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(body)
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  async _send(body) {
+    let res;
+    try {
+      res = await fetch(_PROXY, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
+      });
+    } catch (e) {
+      const err = new Error(e.message || "rete non disponibile");
+      err._net = true;
+      throw err;
+    }
+    if (!res.ok) {
+      const err = new Error(`HTTP ${res.status}`);
+      err._net = true;
+      throw err;
+    }
     const json = await res.json();
     if (json && json.success === false) throw new Error(json.error || "Sheets error");
     return json;
+  },
+  async post(body) {
+    try {
+      return await this._send(body);
+    } catch (e) {
+      if (e._net && _QUEUEABLE[body.action] && window.storage) {
+        const q = window.storage.get("sheetsQueue", []) || [];
+        q.push({
+          body,
+          ts: Date.now()
+        });
+        window.storage.set("sheetsQueue", q.slice(-300));
+        console.warn("[queue] rete giù → accodata", body.action, `(${q.length} in coda)`);
+        return {
+          success: true,
+          queued: true
+        };
+      }
+      throw e;
+    }
+  },
+  async drainQueue() {
+    if (_draining || !window.storage) return;
+    let q = window.storage.get("sheetsQueue", []) || [];
+    if (!q.length) return;
+    _draining = true;
+    console.log("[queue] drain:", q.length, "operazioni in coda");
+    try {
+      while (q.length) {
+        try {
+          await this._send(q[0].body);
+        } catch (e) {
+          if (e._net) return;
+          console.warn("[queue] scartata (errore backend):", q[0].body.action, e.message);
+        }
+        q = q.slice(1);
+        window.storage.set("sheetsQueue", q);
+      }
+      console.log("[queue] coda svuotata ✓");
+    } finally {
+      _draining = false;
+    }
   },
   async getPesi() {
     return this.get({
@@ -228,6 +290,11 @@ window.sheetsAPI = {
       action: "getAll"
     });
   },
+  async getSessioni() {
+    return this.get({
+      action: "getSessioni"
+    });
+  },
   async testConnection() {
     const data = await this.get({
       action: "getPesoCorporeo"
@@ -238,6 +305,15 @@ window.sheetsAPI = {
     };
   }
 };
+window.addEventListener("online", () => {
+  window.sheetsAPI.drainQueue();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") window.sheetsAPI.drainQueue();
+});
+if (window.storage && window.storage.onReady) {
+  window.storage.onReady(() => setTimeout(() => window.sheetsAPI.drainQueue(), 4000));
+}
 window.groqAPI = {
   hasLocalKey() {
     return !!(window.storage && (window.storage.get("groqApiKey", "") || "").trim());
@@ -258,7 +334,8 @@ window.groqAPI = {
     messages,
     systemPrompt,
     model = "llama-3.3-70b-versatile",
-    maxTokens = 512
+    maxTokens = 512,
+    onDelta
   }) {
     const apiKey = (window.storage.get("groqApiKey", "") || "").trim();
     const msgs = systemPrompt ? [{
@@ -271,6 +348,7 @@ window.groqAPI = {
       max_tokens: maxTokens,
       temperature: 0.75
     };
+    if (onDelta) payload.stream = true;
     const res = apiKey ? await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -292,6 +370,40 @@ window.groqAPI = {
         errMsg = (typeof e.error === "string" ? e.error : e.error?.message) || errMsg;
       } catch (_) {}
       throw new Error(errMsg);
+    }
+    const ctype = res.headers.get("content-type") || "";
+    if (onDelta && res.body && ctype.indexOf("text/event-stream") !== -1) {
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "",
+        full = "";
+      while (true) {
+        const {
+          done,
+          value
+        } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, {
+          stream: true
+        });
+        const lines = buf.split("\n");
+        buf = lines.pop();
+        for (const line of lines) {
+          const s = line.trim();
+          if (!s.startsWith("data:")) continue;
+          const data = s.slice(5).trim();
+          if (data === "[DONE]") continue;
+          try {
+            const d = JSON.parse(data).choices?.[0]?.delta?.content;
+            if (d) {
+              full += d;
+              onDelta(full);
+            }
+          } catch (_) {}
+        }
+      }
+      if (full.trim()) return full.trim();
+      throw new Error("Risposta vuota dal modello");
     }
     const data = await res.json();
     const content = data.choices?.[0]?.message?.content?.trim();
@@ -2606,6 +2718,60 @@ const I18N_DICT = {
   "Ultime rilevazioni": {
     en: "Latest entries"
   },
+  "Registro": {
+    en: "Log"
+  },
+  "Registro sessioni": {
+    en: "Session log"
+  },
+  "Nessuna sessione registrata": {
+    en: "No sessions logged"
+  },
+  "Chiudi una sessione dalla Scheda per vederla qui": {
+    en: "Close a session from the Workout tab to see it here"
+  },
+  "Solo dati locali — aggiorna il backend per lo storico completo": {
+    en: "Local data only — update the backend for the full history"
+  },
+  "Media 7 giorni": {
+    en: "7-day average"
+  },
+  "Obiettivo": {
+    en: "Goal"
+  },
+  "Ritmo attuale": {
+    en: "Current pace"
+  },
+  "kg/sett": {
+    en: "kg/wk"
+  },
+  "a questo ritmo arrivi a": {
+    en: "at this pace you'll reach"
+  },
+  "Obiettivo raggiunto 🎉": {
+    en: "Goal reached 🎉"
+  },
+  "il trend attuale si allontana dall'obiettivo": {
+    en: "the current trend is moving away from the goal"
+  },
+  "Sessione salvata — sync quando torni online": {
+    en: "Session saved — will sync when you're back online"
+  },
+  "Condividi": {
+    en: "Share"
+  },
+  "Extra": {
+    en: "Extra"
+  },
+  "Aggiungi articolo…": {
+    en: "Add item…"
+  },
+  "Aggiungi": {
+    en: "Add"
+  },
+  "Rimuovi": {
+    en: "Remove"
+  },
   "Backup": {
     en: "Backup"
   },
@@ -3653,6 +3819,27 @@ window.UISheet = UISheet;
 window.UIEmpty = UIEmpty;
 window.UISkeleton = UISkeleton;
 window.UIAnimatedNumber = UIAnimatedNumber;
+window.ensureRecharts = (() => {
+  let promise = null;
+  const inject = (src, integrity) => new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.integrity = integrity;
+    s.crossOrigin = "anonymous";
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("CDN non raggiungibile: " + src));
+    document.head.appendChild(s);
+  });
+  return function ensureRecharts() {
+    if (window.Recharts) return Promise.resolve(window.Recharts);
+    if (promise) return promise;
+    promise = inject("https://cdn.jsdelivr.net/npm/prop-types@15.8.1/prop-types.min.js", "sha384-/AfDwVDXNopzPvhxMPQ11y1OCpR6mVkWx47qzSwIiquvxkcMkZddEzDNtIOtfCpk").then(() => inject("https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js", "sha384-d1XH4LhwLW8j0l6VXMP8yJabdGY9ZqtZk7k7PaPk5NoUCcZ/hDkL5aaKioKQbcZg")).then(() => window.Recharts).catch(e => {
+      promise = null;
+      throw e;
+    });
+    return promise;
+  };
+})();
 })();
 
 // ══ motion.jsx ══
@@ -4585,6 +4772,68 @@ window.writeSchedaProg = writeSchedaProg;
     const v = Math.round(target / step) * step;
     return v > 0 && v < p ? v : null;
   }
+  function movingAverage(weightLog, win) {
+    win = win || 7;
+    const log = (weightLog || []).filter(e => e && e.date && e.weight > 0);
+    return log.map(e => {
+      const from = new Date(e.date + "T12:00:00");
+      from.setDate(from.getDate() - (win - 1));
+      const fromKey = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, "0")}-${String(from.getDate()).padStart(2, "0")}`;
+      const slice = log.filter(x => x.date >= fromKey && x.date <= e.date);
+      const avg = slice.reduce((s, x) => s + x.weight, 0) / slice.length;
+      return {
+        date: e.date,
+        ma: Math.round(avg * 100) / 100
+      };
+    });
+  }
+  function weightProjection(weightLog, targetKg, days) {
+    days = days || 21;
+    const log = (weightLog || []).filter(e => e && e.date && e.weight > 0);
+    if (log.length < 2) return null;
+    const lastDate = log[log.length - 1].date;
+    const cut = new Date(lastDate + "T12:00:00");
+    cut.setDate(cut.getDate() - days);
+    const cutKey = `${cut.getFullYear()}-${String(cut.getMonth() + 1).padStart(2, "0")}-${String(cut.getDate()).padStart(2, "0")}`;
+    const pts = log.filter(e => e.date >= cutKey);
+    if (pts.length < 2) return null;
+    const t0 = new Date(pts[0].date + "T12:00:00").getTime();
+    const xs = pts.map(e => (new Date(e.date + "T12:00:00").getTime() - t0) / 86400000);
+    const ys = pts.map(e => e.weight);
+    const n = xs.length;
+    const mx = xs.reduce((a, b) => a + b, 0) / n;
+    const my = ys.reduce((a, b) => a + b, 0) / n;
+    let num = 0,
+      den = 0;
+    for (let i = 0; i < n; i++) {
+      num += (xs[i] - mx) * (ys[i] - my);
+      den += (xs[i] - mx) * (xs[i] - mx);
+    }
+    if (!den) return null;
+    const slopePerDay = num / den;
+    const current = ys[ys.length - 1];
+    const out = {
+      ratePerWeek: Math.round(slopePerDay * 7 * 100) / 100,
+      current
+    };
+    const target = _num(targetKg);
+    if (target != null) {
+      out.target = target;
+      const diff = target - current;
+      if (Math.abs(diff) <= 0.3) {
+        out.reached = true;
+      } else if (slopePerDay !== 0 && diff > 0 === slopePerDay > 0) {
+        const daysTo = diff / slopePerDay;
+        if (daysTo > 0 && daysTo < 730) {
+          const eta = new Date(lastDate + "T12:00:00");
+          eta.setDate(eta.getDate() + Math.round(daysTo));
+          out.etaDays = Math.round(daysTo);
+          out.etaDate = `${eta.getFullYear()}-${String(eta.getMonth() + 1).padStart(2, "0")}-${String(eta.getDate()).padStart(2, "0")}`;
+        }
+      }
+    }
+    return out;
+  }
   function mealAdherence(checkedMap, totalMeals) {
     const done = Object.keys(checkedMap || {}).filter(k => checkedMap[k]).length;
     const total = Number(totalMeals) || 0;
@@ -4708,7 +4957,9 @@ window.writeSchedaProg = writeSchedaProg;
     deloadAdvice,
     deloadWeight,
     mealAdherence,
-    foodSwaps
+    foodSwaps,
+    movingAverage,
+    weightProjection
   };
 })();
 })();
@@ -7188,8 +7439,33 @@ const SessionSummaryOverlay = ({
   onClose
 }) => {
   const t = useT();
+  const [copied, setCopied] = React.useState(false);
   if (!data) return null;
   const deltaTon = data.prevTonnage != null && data.prevTonnage > 0 ? Math.round((data.tonnage - data.prevTonnage) / data.prevTonnage * 100) : null;
+  const share = async () => {
+    const lines = [`💪 ${t("Sessione completata")} — ${new Date().toLocaleDateString()}`, `${data.exCount} ${t("esercizi")} · ${data.setsDone} ${t("serie")}` + (data.durationMin != null ? ` · ${data.durationMin}′` : "") + (data.tonnage ? ` · ${data.tonnage} kg ${t("Tonnellaggio").toLowerCase()}` : "")];
+    if (deltaTon != null) lines.push(`${t("vs precedente")}: ${deltaTon > 0 ? "+" : ""}${deltaTon}%`);
+    if (data.prs && data.prs.length) {
+      lines.push(`🏆 ${data.prs.map(p => `${p.esercizio} ${p.peso} kg`).join(" · ")}`);
+    }
+    const text = lines.join("\n");
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          text
+        });
+        return;
+      }
+      throw new Error("no-share");
+    } catch (e) {
+      if (e && e.name === "AbortError") return;
+      try {
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch (_) {}
+    }
+  };
   const stat = (label, value, sub) => React.createElement("div", {
     className: "card",
     style: {
@@ -7318,17 +7594,31 @@ const SessionSummaryOverlay = ({
       background: e.delta > 0 ? "rgba(48,209,88,0.15)" : e.delta < 0 ? "rgba(255,159,10,0.15)" : "var(--card-2)",
       color: e.delta > 0 ? "var(--success)" : e.delta < 0 ? "#FF9F0A" : "var(--text-3)"
     }
-  }, e.delta > 0 ? `↑ +${e.delta}` : e.delta < 0 ? `↓ ${e.delta}` : "=")))), React.createElement("button", {
+  }, e.delta > 0 ? `↑ +${e.delta}` : e.delta < 0 ? `↓ ${e.delta}` : "=")))), React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 10,
+      marginTop: "auto"
+    }
+  }, React.createElement("button", {
+    className: "btn",
+    style: {
+      flex: 1,
+      padding: 15,
+      fontSize: 15,
+      fontWeight: 600
+    },
+    onClick: share
+  }, copied ? "✓ " + t("Copiato") : t("Condividi")), React.createElement("button", {
     className: "btn primary",
     style: {
-      width: "100%",
+      flex: 2,
       padding: 15,
       fontSize: 16,
-      fontWeight: 600,
-      marginTop: "auto"
+      fontWeight: 600
     },
     onClick: onClose
-  }, t("Fatto")));
+  }, t("Fatto"))));
 };
 const WorkoutPlayer = ({
   dayKey,
@@ -7935,14 +8225,16 @@ const Scheda = ({
           prs: sessionPRs
         }));
       }
+      let queuedOffline = false;
       if (window.sheetsAPI) {
-        await window.sheetsAPI.saveSessione({
+        const sessRes = await window.sheetsAPI.saveSessione({
           date: today,
           type: scheda,
           setsCompleted: completedSets,
           totalSets,
           notes
         });
+        queuedOffline = !!(sessRes && sessRes.queued);
         const savePromises = [];
         exercises.forEach((ex, exIdx) => {
           const id = window.exId(scheda, exIdx);
@@ -7965,7 +8257,7 @@ const Scheda = ({
         });
         await Promise.allSettled(savePromises);
       }
-      setSaveMsg("✓ " + t("Sessione salvata"));
+      setSaveMsg("✓ " + (queuedOffline ? t("Sessione salvata — sync quando torni online") : t("Sessione salvata")));
     } catch (err) {
       setSaveMsg("⚠️ " + (err.message || t("Errore salvataggio")));
     } finally {
@@ -10460,6 +10752,33 @@ const Spesa = ({
       [k]: !checked[k]
     });
   };
+  const [extra, setExtra] = React.useState(() => window.storage ? window.storage.get("spesaExtra", []) : []);
+  const [newItem, setNewItem] = React.useState("");
+  const saveExtra = next => {
+    setExtra(next);
+    if (window.storage) window.storage.set("spesaExtra", next);
+    if (window._saveSettingRetry) window._saveSettingRetry("spesaExtra", JSON.stringify(next));
+  };
+  const addExtra = () => {
+    const name = newItem.trim();
+    if (!name) return;
+    saveExtra([...extra, {
+      id: Date.now(),
+      name
+    }]);
+    setNewItem("");
+  };
+  const removeExtra = id => {
+    saveExtra(extra.filter(e => e.id !== id));
+    const k = `extra-${id}`;
+    if (checked[k]) {
+      const c = {
+        ...checked
+      };
+      delete c[k];
+      setChecked(c);
+    }
+  };
   const changeFreq = f => {
     setFreq(f);
     setChecked({});
@@ -10467,7 +10786,7 @@ const Spesa = ({
   const reset = () => {
     setChecked({});
   };
-  const totalItems = CATEGORIES.reduce((n, c) => n + c.items.length, 0);
+  const totalItems = CATEGORIES.reduce((n, c) => n + c.items.length, 0) + extra.length;
   const totalDone = Object.values(checked).filter(Boolean).length;
   return React.createElement("div", {
     className: "fade-up",
@@ -10634,7 +10953,140 @@ const Spesa = ({
     onToggle: toggle,
     isDesktop: isDesktop,
     freq: freq
-  }))));
+  }))), React.createElement("div", {
+    className: "card lift",
+    style: {
+      padding: 0,
+      overflow: "hidden"
+    }
+  }, React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 12,
+      padding: "14px 16px",
+      background: "linear-gradient(90deg, rgba(191,90,242,0.13) 0%, transparent 100%)",
+      borderLeft: "3px solid #BF5AF2"
+    }
+  }, React.createElement("div", {
+    style: {
+      width: 32,
+      height: 32,
+      borderRadius: 9,
+      background: "rgba(191,90,242,0.13)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center"
+    }
+  }, React.createElement(Icon, {
+    name: "plus",
+    size: 16,
+    color: "#BF5AF2"
+  })), React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 600,
+      letterSpacing: -0.01
+    }
+  }, t("Extra")), React.createElement("div", {
+    className: "num muted",
+    style: {
+      fontSize: 11.5
+    }
+  }, extra.filter(e => checked[`extra-${e.id}`]).length, " / ", extra.length))), extra.map(e => React.createElement("div", {
+    key: e.id,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 12,
+      padding: "12px 16px",
+      borderTop: "1px solid var(--border)",
+      opacity: checked[`extra-${e.id}`] ? 0.5 : 1
+    }
+  }, React.createElement("div", {
+    onClick: ev => {
+      if (!checked[`extra-${e.id}`] && window.Motion) window.Motion.pop(ev.currentTarget);
+      toggle(`extra-${e.id}`);
+    },
+    className: `check ${checked[`extra-${e.id}`] ? "on" : ""}`,
+    style: {
+      width: 22,
+      height: 22,
+      cursor: "pointer",
+      flexShrink: 0
+    }
+  }, React.createElement(Icon, {
+    name: "check",
+    size: 12,
+    color: "#062810"
+  })), React.createElement("div", {
+    onClick: () => toggle(`extra-${e.id}`),
+    style: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: 14.5,
+      fontWeight: 500,
+      cursor: "pointer",
+      textDecoration: checked[`extra-${e.id}`] ? "line-through" : "none",
+      color: checked[`extra-${e.id}`] ? "var(--text-2)" : "var(--text)"
+    }
+  }, e.name), React.createElement("button", {
+    onClick: () => removeExtra(e.id),
+    "aria-label": t("Rimuovi"),
+    style: {
+      width: 28,
+      height: 28,
+      borderRadius: 999,
+      background: "transparent",
+      border: 0,
+      color: "var(--text-3)",
+      cursor: "pointer",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0
+    }
+  }, React.createElement(Icon, {
+    name: "x",
+    size: 13,
+    strokeWidth: 2.2
+  })))), React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      padding: "12px 16px",
+      borderTop: extra.length ? "1px solid var(--border)" : 0
+    }
+  }, React.createElement("input", {
+    value: newItem,
+    onChange: e => setNewItem(e.target.value),
+    onKeyDown: e => {
+      if (e.key === "Enter") addExtra();
+    },
+    placeholder: t("Aggiungi articolo…"),
+    className: "input",
+    style: {
+      flex: 1,
+      fontSize: 14,
+      padding: "10px 12px"
+    }
+  }), React.createElement("button", {
+    className: "btn",
+    style: {
+      padding: "0 16px",
+      fontSize: 13,
+      fontWeight: 600
+    },
+    onClick: addExtra,
+    disabled: !newItem.trim()
+  }, React.createElement(Icon, {
+    name: "plus",
+    size: 14
+  }), " ", t("Aggiungi")))));
 };
 window.Spesa = Spesa;
 })();
@@ -10893,11 +11345,12 @@ const Coach = ({
       text: greeting
     }]);
   };
+  const [partial, setPartial] = React.useState(null);
   React.useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, busy]);
+  }, [messages, busy, partial]);
   const send = async text => {
     const q = (text ?? input).trim();
     if (!q || busy) return;
@@ -10922,7 +11375,8 @@ const Coach = ({
           lang
         }),
         model: "llama-3.3-70b-versatile",
-        maxTokens: 512
+        maxTokens: 512,
+        onDelta: txt => setPartial(txt)
       });
       setMessages(ms => [...ms, {
         role: "assistant",
@@ -10936,6 +11390,7 @@ const Coach = ({
         text: isNoKey ? "⚙️ " + t("API key Groq non configurata. Vai in Impostazioni → Coach per inserirla. È gratuita su console.groq.com") : `⚠️ ${errText}`
       }]);
     } finally {
+      setPartial(null);
       setBusy(false);
     }
   };
@@ -11077,7 +11532,12 @@ const Coach = ({
   }, t("Oggi")), messages.map((m, i) => React.createElement(Bubble, {
     key: i,
     m: m
-  })), busy && React.createElement("div", {
+  })), busy && partial != null && React.createElement(Bubble, {
+    m: {
+      role: "assistant",
+      text: partial
+    }
+  }), busy && partial == null && React.createElement("div", {
     className: "fade-up",
     style: {
       display: "flex",
@@ -11313,8 +11773,13 @@ const WeightChart = ({
   const last = data[data.length - 1]?.weight;
   const first = data[0]?.weight;
   const trend = last - first;
+  const maMap = window.Insights ? window.Insights.movingAverage(data, 7).reduce((m, p) => {
+    m[p.date] = p.ma;
+    return m;
+  }, {}) : {};
   const formatted = data.map(d => ({
     ...d,
+    ma: maMap[d.date],
     label: d.date ? d.date.slice(5) : d.date
   }));
   const CustomTooltip = ({
@@ -11416,7 +11881,233 @@ const WeightChart = ({
     activeDot: {
       r: 5
     }
-  }))));
+  }), React.createElement(Line, {
+    type: "monotone",
+    dataKey: "ma",
+    stroke: "#FF9F0A",
+    strokeWidth: 1.6,
+    strokeDasharray: "5 3",
+    dot: false,
+    activeDot: false,
+    isAnimationActive: false
+  }))), React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 10.5,
+      marginTop: 4,
+      display: "flex",
+      alignItems: "center",
+      gap: 5,
+      justifyContent: "flex-end"
+    }
+  }, React.createElement("span", {
+    style: {
+      display: "inline-block",
+      width: 16,
+      borderTop: "2px dashed #FF9F0A"
+    }
+  }), t("Media 7 giorni")));
+};
+const GoalRow = ({
+  weightLog
+}) => {
+  const t = useT();
+  const [goal, setGoal] = React.useState(() => {
+    const g = window.storage ? window.storage.get("weightGoal", "") : "";
+    return g ? String(g) : "";
+  });
+  const save = v => {
+    setGoal(v);
+    const n = parseFloat(String(v).replace(",", "."));
+    if (window.storage) window.storage.set("weightGoal", n > 0 ? n : "");
+    if (window._saveSettingRetry && n > 0) window._saveSettingRetry("weightGoal", n);
+  };
+  const proj = window.Insights && weightLog && weightLog.length >= 2 ? window.Insights.weightProjection(weightLog, goal || null) : null;
+  const fmtEta = iso => {
+    try {
+      return new Date(iso + "T12:00:00").toLocaleDateString(undefined, {
+        day: "numeric",
+        month: "short"
+      });
+    } catch (_) {
+      return iso;
+    }
+  };
+  return React.createElement("div", {
+    style: {
+      marginTop: 14,
+      paddingTop: 14,
+      borderTop: "1px solid var(--border)"
+    }
+  }, React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      fontWeight: 600,
+      color: "var(--text-2)",
+      flex: 1
+    }
+  }, "🎯 ", t("Obiettivo")), React.createElement("input", {
+    inputMode: "decimal",
+    value: goal,
+    onChange: e => save(e.target.value.replace(/[^0-9.,]/g, "")),
+    placeholder: "kg",
+    className: "input input-mono",
+    style: {
+      width: 76,
+      padding: "8px 10px",
+      fontSize: 14,
+      textAlign: "center"
+    }
+  }), React.createElement("span", {
+    className: "muted",
+    style: {
+      fontSize: 12
+    }
+  }, "kg")), proj && React.createElement("div", {
+    className: "tnum",
+    style: {
+      fontSize: 12,
+      color: "var(--text-2)",
+      marginTop: 8,
+      lineHeight: 1.5
+    }
+  }, t("Ritmo attuale"), ": ", React.createElement("strong", {
+    style: {
+      color: proj.ratePerWeek <= 0 ? "var(--success)" : "#FF9F0A"
+    }
+  }, proj.ratePerWeek > 0 ? "+" : "", proj.ratePerWeek, " ", t("kg/sett")), proj.reached ? React.createElement(React.Fragment, null, " · ", t("Obiettivo raggiunto 🎉")) : proj.etaDate ? React.createElement(React.Fragment, null, " · ", t("a questo ritmo arrivi a"), " ", React.createElement("strong", {
+    style: {
+      color: "var(--text)"
+    }
+  }, proj.target, " kg"), " ~", fmtEta(proj.etaDate)) : proj.target ? React.createElement(React.Fragment, null, " · ", t("il trend attuale si allontana dall'obiettivo")) : null));
+};
+const RegistroView = ({
+  isDesktop
+}) => {
+  const t = useT();
+  const [rows, setRows] = React.useState(null);
+  const localFallback = () => {
+    if (!window.storage || !window.storage.keys) return [];
+    return window.storage.keys().filter(k => /^gym_\d{4}-\d{2}-\d{2}$/.test(k) && window.storage.get(k, false)).map(k => k.slice(4)).sort().reverse().slice(0, 30).map(date => {
+      const ms = window.storage.get(`muscleSets_${date}`, null) || {};
+      const sets = Object.values(ms).reduce((s, n) => s + (Number(n) || 0), 0);
+      return {
+        date,
+        type: "",
+        setsCompleted: sets,
+        totalSets: 0,
+        notes: window.storage.get(`notes_${date}`, ""),
+        local: true,
+        groups: Object.keys(ms).join(" · ")
+      };
+    });
+  };
+  React.useEffect(() => {
+    if (!window.sheetsAPI || !window.sheetsAPI.getSessioni) {
+      setRows(localFallback());
+      return;
+    }
+    window.sheetsAPI.getSessioni().then(r => setRows(Array.isArray(r) && r.length ? r.slice().reverse() : localFallback())).catch(() => setRows(localFallback()));
+  }, []);
+  if (rows === null) return React.createElement(UISkeleton, {
+    h: 140,
+    r: 14
+  });
+  if (!rows.length) {
+    return React.createElement(UIEmpty, {
+      icon: "calendar",
+      title: t("Nessuna sessione registrata"),
+      sub: t("Chiudi una sessione dalla Scheda per vederla qui"),
+      style: {
+        padding: "20px 16px"
+      }
+    });
+  }
+  const fmtDay = iso => {
+    try {
+      return new Date(iso + "T12:00:00").toLocaleDateString(undefined, {
+        weekday: "short",
+        day: "2-digit",
+        month: "2-digit"
+      });
+    } catch (_) {
+      return iso;
+    }
+  };
+  return React.createElement("div", null, rows.map((r, i) => React.createElement("div", {
+    key: r.date + "-" + i,
+    style: {
+      display: "flex",
+      alignItems: "flex-start",
+      gap: 10,
+      padding: "10px 0",
+      borderTop: i > 0 ? "1px solid var(--border)" : 0
+    }
+  }, React.createElement("div", {
+    style: {
+      width: 86,
+      flexShrink: 0
+    }
+  }, React.createElement("div", {
+    className: "num",
+    style: {
+      fontSize: 12.5,
+      fontWeight: 600
+    }
+  }, fmtDay(r.date)), r.ora && React.createElement("div", {
+    className: "num muted",
+    style: {
+      fontSize: 10.5,
+      marginTop: 1
+    }
+  }, r.ora)), React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      flexWrap: "wrap"
+    }
+  }, r.type ? React.createElement("span", {
+    className: "pill",
+    style: {
+      fontSize: 10.5,
+      padding: "2px 8px",
+      fontWeight: 600
+    }
+  }, r.type) : null, React.createElement("span", {
+    className: "tnum",
+    style: {
+      fontSize: 12.5,
+      color: "var(--text-2)"
+    }
+  }, r.setsCompleted, r.totalSets ? `/${r.totalSets}` : "", " ", t("serie"))), (r.groups || r.notes) && React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 11.5,
+      marginTop: 3,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, r.groups || r.notes)))), rows[0] && rows[0].local && React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 10.5,
+      marginTop: 8,
+      textAlign: "center"
+    }
+  }, t("Solo dati locali — aggiorna il backend per lo storico completo")));
 };
 const CheckInTrend = ({
   isDesktop
@@ -11772,6 +12463,17 @@ const ForzaView = ({
     }
     window.sheetsAPI.getPesi().then(d => setPesiMap(d && typeof d === "object" ? d : {})).catch(() => setPesiMap({}));
   }, []);
+  const [chartReady, setChartReady] = React.useState(!!window.Recharts);
+  React.useEffect(() => {
+    if (chartReady) return;
+    const id = setInterval(() => {
+      if (window.Recharts) {
+        setChartReady(true);
+        clearInterval(id);
+      }
+    }, 300);
+    return () => clearInterval(id);
+  }, []);
   const list = React.useMemo(() => {
     if (!pesiMap || !window.Insights) return [];
     return Object.keys(pesiMap).map(name => {
@@ -11814,7 +12516,7 @@ const ForzaView = ({
     });
   }
   const sel = list.find(e => e.name === selected) || null;
-  const R = window.Recharts;
+  const R = chartReady ? window.Recharts : null;
   return React.createElement("div", null, React.createElement("div", {
     className: "muted",
     style: {
@@ -12166,6 +12868,9 @@ const Storico = ({
   const isDesktop = device === "desktop";
   const t = useT();
   const [tab, setTab] = React.useState("peso");
+  React.useEffect(() => {
+    if (window.ensureRecharts) window.ensureRecharts().catch(() => {});
+  }, []);
   const [weightLog, setWeightLog] = React.useState(() => {
     if (!window.storage) return [];
     return window.storage.get("weightLog", []).slice(-60);
@@ -12291,6 +12996,9 @@ const Storico = ({
     id: "misure",
     label: `📏 ${t("Misure")}`
   }, {
+    id: "registro",
+    label: `📖 ${t("Registro")}`
+  }, {
     id: "cardio",
     label: `🏃 ${t("Cardio")}`
   }, {
@@ -12322,6 +13030,8 @@ const Storico = ({
   }, t("Trend peso corporeo")), React.createElement(WeightChart, {
     data: weightLog,
     isDesktop: isDesktop
+  }), weightLog.length >= 2 && React.createElement(GoalRow, {
+    weightLog: weightLog
   }), weightLog.length > 0 && React.createElement("div", {
     style: {
       marginTop: 16,
@@ -12388,6 +13098,22 @@ const Storico = ({
       marginBottom: 12
     }
   }, t("Misure corporee"), " (cm)"), React.createElement(MisureView, {
+    isDesktop: isDesktop
+  })), tab === "registro" && React.createElement("div", {
+    className: "card",
+    style: {
+      padding: isDesktop ? 22 : 16
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 11,
+      fontWeight: 600,
+      color: "var(--text-3)",
+      letterSpacing: 0.5,
+      textTransform: "uppercase",
+      marginBottom: 8
+    }
+  }, t("Registro sessioni")), React.createElement(RegistroView, {
     isDesktop: isDesktop
   })), tab === "volume" && React.createElement("div", {
     className: "card",
@@ -14525,6 +15251,17 @@ async function _cloudSync(opts) {
         } catch (_) {}
       }
       if (s.spesaFreq) st.set("spesaFreq", Number(s.spesaFreq) || 1);
+      if (s.spesaExtra) {
+        try {
+          st.set("spesaExtra", JSON.parse(s.spesaExtra));
+        } catch (_) {}
+      }
+      if (s.weightGoal && parseFloat(s.weightGoal) > 0) st.set("weightGoal", parseFloat(s.weightGoal));
+      if (s.exNotes) {
+        try {
+          st.set("exNotes", JSON.parse(s.exNotes));
+        } catch (_) {}
+      }
       if (s.bodyWeight && parseFloat(s.bodyWeight) > 0) {
         st.set("bodyWeight", parseFloat(s.bodyWeight));
         console.log("[sync pull] bodyWeight (settings) →", s.bodyWeight);
@@ -14547,10 +15284,45 @@ async function _cloudSync(opts) {
     }
     if (cloudKeys) _cloudPushMissing(cloudKeys);else console.warn("[sync] pull settings fallito → push saltato (anti-clobber)");
     _setSyncState(settingsRes.ok || pesiRes.ok ? "ok" : "error");
+    if (settingsRes.ok) _maybeAutoBackup();
   } catch (e) {
     console.warn("[sync] error:", e);
     _setSyncState("error");
   }
+}
+let _backupTriedThisSession = false;
+function _maybeAutoBackup() {
+  if (_backupTriedThisSession || !window.storage || !window.sheetsAPI) return;
+  const st = window.storage;
+  const last = st.get("lastAutoBackup", null);
+  if (last && Date.now() - last < 6.5 * 86400000) return;
+  _backupTriedThisSession = true;
+  try {
+    const data = {};
+    st.keys().sort().forEach(k => {
+      if (k === "groqApiKey" || k === "errorLog" || k === "sheetsQueue") return;
+      data[k] = st.get(k, null);
+    });
+    const json = JSON.stringify({
+      _lfhBackup: 1,
+      exportedAt: new Date().toISOString(),
+      auto: true,
+      data
+    });
+    if (json.length > 900000) {
+      console.warn("[backup] snapshot troppo grande, salto");
+      return;
+    }
+    window.sheetsAPI.post({
+      action: "saveBackup",
+      json
+    }).then(r => {
+      if (r && r.success && !r.queued) {
+        st.set("lastAutoBackup", Date.now());
+        console.log("[backup] auto-backup su Sheets ✓ (" + (r.chunks || "?") + " chunk)");
+      }
+    }).catch(e => console.warn("[backup] non riuscito (backend senza saveBackup?):", e.message));
+  } catch (_) {}
 }
 function _cloudPushMissing(cloudKeys) {
   if (!window.sheetsAPI || !window.storage) return;
@@ -14560,7 +15332,7 @@ function _cloudPushMissing(cloudKeys) {
       _saveSettingRetry(key, value);
     }
   };
-  const KEYS = ["bodyWeight", "onboardingDone", "spesaFreq"];
+  const KEYS = ["bodyWeight", "onboardingDone", "spesaFreq", "weightGoal"];
   KEYS.forEach(k => {
     const local = st.get(k, "");
     if (local && !cloudKeys[k]) {
@@ -14577,6 +15349,12 @@ function _cloudPushMissing(cloudKeys) {
   if (sc && Object.keys(sc).length > 0 && !cloudKeys.spesaChecked2) {
     save("spesaChecked2", JSON.stringify(sc));
   }
+  [["spesaExtra", []], ["exNotes", {}]].forEach(([k, empty]) => {
+    const local = st.get(k, empty);
+    if (local && Object.keys(local).length > 0 && !cloudKeys[k]) {
+      save(k, JSON.stringify(local));
+    }
+  });
 }
 window._cloudPushAll = function () {
   if (!window.sheetsAPI || !window.storage) return Promise.resolve();
@@ -14589,9 +15367,14 @@ window._cloudPushAll = function () {
   };
   push("bodyWeight", st.get("bodyWeight", ""));
   push("spesaFreq", st.get("spesaFreq", ""));
+  push("weightGoal", st.get("weightGoal", ""));
   push("onboardingDone", st.get("onboardingDone", false) ? "true" : "");
   const sc = st.get("spesaChecked", null);
   if (sc && Object.keys(sc).length > 0) push("spesaChecked2", JSON.stringify(sc));
+  const se = st.get("spesaExtra", []);
+  if (se && se.length > 0) push("spesaExtra", JSON.stringify(se));
+  const en = st.get("exNotes", {});
+  if (en && Object.keys(en).length > 0) push("exNotes", JSON.stringify(en));
   const scheda = st.get("schedaData", null);
   if (scheda) push("schedaData", scheda);
   const dieta = st.get("dietaData", null);

@@ -91,14 +91,20 @@ export default {
           messages:    p.messages,
           max_tokens:  Math.min(Number(p.max_tokens) || 512, 1024),
           temperature: typeof p.temperature === "number" ? p.temperature : 0.75,
+          stream:      p.stream === true,   // SSE: la risposta viene inoltrata in streaming
         };
         const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": "Bearer " + groqKey },
           body: JSON.stringify(body),
         });
-        const text = await r.text();
-        return new Response(text, { status: r.status, headers });
+        // Pass-through del body così com'è: se il client ha chiesto stream:true
+        // la risposta è SSE (text/event-stream) e va inoltrata in streaming,
+        // non bufferizzata — l'app mostra la risposta parola per parola.
+        const outHeaders = Object.assign({}, headers, {
+          "Content-Type": r.headers.get("content-type") || "application/json",
+        });
+        return new Response(r.body, { status: r.status, headers: outHeaders });
       } catch (err) {
         return new Response(JSON.stringify({ success: false, error: err.message }), { status: 500, headers });
       }

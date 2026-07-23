@@ -367,6 +367,30 @@ console.log("\nSuite Insights — e1RM, storico esercizio, riepilogo, report, de
     ok("foodSwaps testo '80g pasta | …': base pasta → patate 375g", swaps2.some(s => s.name === "Patate" && s.grams === 375));
     const swaps3 = I.foodSwaps("Proteina (scegli 1): 150g tonno | 110g primo sale", "");
     ok("foodSwaps testo '150g tonno': equivalenti proteici presenti", swaps3.some(s => s.name.indexOf("Pollo") === 0));
+
+    // movingAverage (finestra calendario)
+    const wlog = [
+      { date: "2026-07-10", weight: 101 }, { date: "2026-07-12", weight: 100 },
+      { date: "2026-07-20", weight: 99 },
+    ];
+    const ma = I.movingAverage(wlog, 7);
+    ok("movingAverage: primo punto = peso stesso", ma[0].ma === 101);
+    ok("movingAverage: 12/07 media di 10+12 = 100.5", ma[1].ma === 100.5);
+    ok("movingAverage: 20/07 fuori finestra dai precedenti → 99", ma[2].ma === 99);
+
+    // weightProjection
+    const wl2 = [];
+    for (let i = 0; i < 15; i++) {
+      const d = new Date("2026-07-01T12:00:00"); d.setDate(d.getDate() + i);
+      wl2.push({ date: d.toISOString().slice(0, 10), weight: 101 - i * 0.1 }); // −0.7 kg/sett
+    }
+    const proj = I.weightProjection(wl2, 98);
+    ok("weightProjection: ritmo ≈ −0.7 kg/sett", proj && Math.abs(proj.ratePerWeek + 0.7) < 0.05);
+    ok("weightProjection: eta presente verso il target (98 da 99.6)", proj && proj.etaDays > 0 && !!proj.etaDate);
+    const projWrong = I.weightProjection(wl2, 110); // trend scende, target sopra
+    ok("weightProjection: direzione sbagliata → niente eta", projWrong && !projWrong.etaDate && !projWrong.reached);
+    ok("weightProjection: target ≈ attuale → reached", (I.weightProjection(wl2, wl2[wl2.length - 1].weight) || {}).reached === true);
+    ok("weightProjection: <2 punti → null", I.weightProjection([{ date: "2026-07-01", weight: 100 }], 95) === null);
   }
 }
 

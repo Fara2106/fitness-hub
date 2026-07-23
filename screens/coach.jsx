@@ -224,11 +224,14 @@ const Coach = ({ device, onNav, activities = [], checkIn, bodyWeight }) => {
     setMessages([{ role: "assistant", text: greeting }]);
   };
 
+  // Risposta in streaming: testo parziale accumulato mentre il modello scrive.
+  const [partial, setPartial] = React.useState(null);
+
   React.useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, busy]);
+  }, [messages, busy, partial]);
 
   const send = async (text) => {
     const q = (text ?? input).trim();
@@ -249,6 +252,7 @@ const Coach = ({ device, onNav, activities = [], checkIn, bodyWeight }) => {
         systemPrompt: _buildSystemPrompt({ activities, checkIn, bodyWeight, lang }),
         model: "llama-3.3-70b-versatile",
         maxTokens: 512,
+        onDelta: (txt) => setPartial(txt),   // SSE: bolla che si riempie parola per parola
       });
 
       setMessages(ms => [...ms, { role: "assistant", text: reply }]);
@@ -262,6 +266,7 @@ const Coach = ({ device, onNav, activities = [], checkIn, bodyWeight }) => {
           : `⚠️ ${errText}`,
       }]);
     } finally {
+      setPartial(null);
       setBusy(false);
     }
   };
@@ -356,7 +361,8 @@ const Coach = ({ device, onNav, activities = [], checkIn, bodyWeight }) => {
           >
             <div style={{ textAlign: "center", fontSize: 11, fontWeight: 600, color: "var(--text-3)", margin: "2px 0 8px" }}>{t("Oggi")}</div>
             {messages.map((m, i) => <Bubble key={i} m={m} />)}
-            {busy && (
+            {busy && partial != null && <Bubble m={{ role: "assistant", text: partial }} />}
+            {busy && partial == null && (
               <div className="fade-up" style={{ display: "flex", gap: 8, alignItems: "flex-end", marginBottom: 4 }}>
                 <CoachAvatar small />
                 <div style={{

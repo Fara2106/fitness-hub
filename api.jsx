@@ -24,6 +24,18 @@
 // Sostituisci con il tuo URL Cloudflare Worker dopo il deploy.
 const _PROXY = "https://fitness-hub-proxy.lorefara97.workers.dev";
 
+// ── Coda offline ────────────────────────────────────────────────────────────
+// Le scritture DATI (righe: serie, sessioni, peso, check-in, movimenti, misure)
+// fallite per RETE finiscono in una coda persistita ("sheetsQueue") e vengono
+// ritentate in ordine al ritorno online / in foreground. Senza, una sessione
+// chiusa in palestra senza segnale non arrivava MAI su Sheets → storico
+// esercizio, e1RM e riepiloghi restavano bucati per sempre.
+// NB: gli errori LOGICI del backend ("Non autorizzato", azione sconosciuta)
+// NON vanno in coda: ritentarli è inutile. Le settings restano fuori (le
+// ri-pusha già la sync con _saveSettingRetry/_cloudPushMissing).
+const _QUEUEABLE = { savePeso: 1, savePesoCorporeo: 1, saveSessione: 1, saveMovimento: 1, saveCheckIn: 1, saveMisure: 1 };
+let _draining = false;
+
 window.sheetsAPI = {
   async get(params) {
     const url = new URL(_PROXY, location.origin);
@@ -39,16 +51,67 @@ window.sheetsAPI = {
     return json;
   },
 
-  async post(body) {
-    const res = await fetch(_PROXY, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  // Invio grezzo: distingue gli errori di rete (err._net = true, ritentabili)
+  // dagli errori logici del backend (success:false → throw semplice).
+  async _send(body) {
+    let res;
+    try {
+      res = await fetch(_PROXY, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      const err = new Error(e.message || "rete non disponibile");
+      err._net = true;
+      throw err;
+    }
+    if (!res.ok) {
+      const err = new Error(`HTTP ${res.status}`);
+      err._net = true;
+      throw err;
+    }
     const json = await res.json();
     if (json && json.success === false) throw new Error(json.error || "Sheets error");
     return json;
+  },
+
+  async post(body) {
+    try {
+      return await this._send(body);
+    } catch (e) {
+      if (e._net && _QUEUEABLE[body.action] && window.storage) {
+        const q = window.storage.get("sheetsQueue", []) || [];
+        q.push({ body, ts: Date.now() });
+        window.storage.set("sheetsQueue", q.slice(-300));
+        console.warn("[queue] rete giù → accodata", body.action, `(${q.length} in coda)`);
+        return { success: true, queued: true };
+      }
+      throw e;
+    }
+  },
+
+  // Svuota la coda in ordine. Errore di rete → stop (ancora offline, riproverà);
+  // errore logico → l'operazione viene scartata (ritentarla non può riuscire).
+  async drainQueue() {
+    if (_draining || !window.storage) return;
+    let q = window.storage.get("sheetsQueue", []) || [];
+    if (!q.length) return;
+    _draining = true;
+    console.log("[queue] drain:", q.length, "operazioni in coda");
+    try {
+      while (q.length) {
+        try {
+          await this._send(q[0].body);
+        } catch (e) {
+          if (e._net) return; // ancora offline: riprova al prossimo trigger
+          console.warn("[queue] scartata (errore backend):", q[0].body.action, e.message);
+        }
+        q = q.slice(1);
+        window.storage.set("sheetsQueue", q);
+      }
+      console.log("[queue] coda svuotata ✓");
+    } finally { _draining = false; }
   },
 
   // ── GET endpoints ──
@@ -76,6 +139,8 @@ window.sheetsAPI = {
   // getAll → risponde col messaggio info di default: _cloudSync lo rileva
   // (manca .settings) e ricade sulle due chiamate separate.
   async getAll()         { return this.get({ action: "getAll" }); },
+  // Registro sessioni (foglio Sessioni) — richiede il .gs aggiornato.
+  async getSessioni()    { return this.get({ action: "getSessioni" }); },
 
   // Test connessione
   async testConnection() {
@@ -83,6 +148,15 @@ window.sheetsAPI = {
     return { ok: true, rows: Array.isArray(data) ? data.length : "?" };
   },
 };
+
+// Trigger del drain: ritorno online, rientro in foreground, avvio (post-init).
+window.addEventListener("online", () => { window.sheetsAPI.drainQueue(); });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") window.sheetsAPI.drainQueue();
+});
+if (window.storage && window.storage.onReady) {
+  window.storage.onReady(() => setTimeout(() => window.sheetsAPI.drainQueue(), 4000));
+}
 
 // ── Groq API ───────────────────────────────────────────────────────────────
 // Due strade, in ordine di preferenza:
@@ -107,13 +181,17 @@ window.groqAPI = {
     } catch (_) { return false; }
   },
 
-  async complete({ messages, systemPrompt, model = "llama-3.3-70b-versatile", maxTokens = 512 }) {
+  // onDelta (opzionale): callback col testo parziale accumulato → risposta in
+  // streaming (SSE). Se il server risponde JSON (proxy legacy, errori) si
+  // ricade in automatico sul percorso non-stream.
+  async complete({ messages, systemPrompt, model = "llama-3.3-70b-versatile", maxTokens = 512, onDelta }) {
     const apiKey = (window.storage.get("groqApiKey", "") || "").trim();
 
     const msgs = systemPrompt
       ? [{ role: "system", content: systemPrompt }, ...messages]
       : messages;
     const payload = { model, messages: msgs, max_tokens: maxTokens, temperature: 0.75 };
+    if (onDelta) payload.stream = true;
 
     const res = apiKey
       ? await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -137,6 +215,33 @@ window.groqAPI = {
         errMsg = (typeof e.error === "string" ? e.error : e.error?.message) || errMsg;
       } catch (_) {}
       throw new Error(errMsg);
+    }
+
+    // Streaming SSE: accumula i delta e notifica onDelta col testo parziale.
+    const ctype = res.headers.get("content-type") || "";
+    if (onDelta && res.body && ctype.indexOf("text/event-stream") !== -1) {
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "", full = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop();
+        for (const line of lines) {
+          const s = line.trim();
+          if (!s.startsWith("data:")) continue;
+          const data = s.slice(5).trim();
+          if (data === "[DONE]") continue;
+          try {
+            const d = JSON.parse(data).choices?.[0]?.delta?.content;
+            if (d) { full += d; onDelta(full); }
+          } catch (_) {}
+        }
+      }
+      if (full.trim()) return full.trim();
+      throw new Error("Risposta vuota dal modello");
     }
 
     const data = await res.json();

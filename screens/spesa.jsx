@@ -221,6 +221,34 @@ const Spesa = ({ device, spesaChecked, setSpesaChecked, spesaFreq, setSpesaFreq 
     setChecked({ ...checked, [k]: !checked[k] });
   };
 
+  // Articoli extra manuali (oltre a quelli generati dalla dieta). Id stabile
+  // (timestamp) → le spunte non si spostano quando rimuovi un articolo.
+  // Sincati come chiave Settings "spesaExtra" (pull in _cloudSync).
+  const [extra, setExtra] = React.useState(() =>
+    window.storage ? window.storage.get("spesaExtra", []) : []
+  );
+  const [newItem, setNewItem] = React.useState("");
+  const saveExtra = (next) => {
+    setExtra(next);
+    if (window.storage) window.storage.set("spesaExtra", next);
+    if (window._saveSettingRetry) window._saveSettingRetry("spesaExtra", JSON.stringify(next));
+  };
+  const addExtra = () => {
+    const name = newItem.trim();
+    if (!name) return;
+    saveExtra([...extra, { id: Date.now(), name }]);
+    setNewItem("");
+  };
+  const removeExtra = (id) => {
+    saveExtra(extra.filter(e => e.id !== id));
+    const k = `extra-${id}`;
+    if (checked[k]) {
+      const c = { ...checked };
+      delete c[k];
+      setChecked(c);
+    }
+  };
+
   const changeFreq = (f) => {
     setFreq(f);
     setChecked({}); // reset lista quando cambia frequenza
@@ -230,7 +258,7 @@ const Spesa = ({ device, spesaChecked, setSpesaChecked, spesaFreq, setSpesaFreq 
     setChecked({});
   };
 
-  const totalItems = CATEGORIES.reduce((n, c) => n + c.items.length, 0);
+  const totalItems = CATEGORIES.reduce((n, c) => n + c.items.length, 0) + extra.length;
   const totalDone = Object.values(checked).filter(Boolean).length;
 
   return (
@@ -307,6 +335,67 @@ const Spesa = ({ device, spesaChecked, setSpesaChecked, spesaFreq, setSpesaFreq 
         {CATEGORIES.map(cat => (
           <CategorySection key={cat.id} cat={cat} checked={checked} onToggle={toggle} isDesktop={isDesktop} freq={freq} />
         ))}
+      </div>
+
+      {/* Articoli extra manuali */}
+      <div className="card lift" style={{ padding: 0, overflow: "hidden" }}>
+        <div style={{
+          display: "flex", alignItems: "center", gap: 12, padding: "14px 16px",
+          background: "linear-gradient(90deg, rgba(191,90,242,0.13) 0%, transparent 100%)",
+          borderLeft: "3px solid #BF5AF2",
+        }}>
+          <div style={{ width: 32, height: 32, borderRadius: 9, background: "rgba(191,90,242,0.13)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Icon name="plus" size={16} color="#BF5AF2" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: -0.01 }}>{t("Extra")}</div>
+            <div className="num muted" style={{ fontSize: 11.5 }}>
+              {extra.filter(e => checked[`extra-${e.id}`]).length} / {extra.length}
+            </div>
+          </div>
+        </div>
+        {extra.map(e => (
+          <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderTop: "1px solid var(--border)", opacity: checked[`extra-${e.id}`] ? 0.5 : 1 }}>
+            <div
+              onClick={(ev) => {
+                if (!checked[`extra-${e.id}`] && window.Motion) window.Motion.pop(ev.currentTarget);
+                toggle(`extra-${e.id}`);
+              }}
+              className={`check ${checked[`extra-${e.id}`] ? "on" : ""}`}
+              style={{ width: 22, height: 22, cursor: "pointer", flexShrink: 0 }}
+            >
+              <Icon name="check" size={12} color="#062810" />
+            </div>
+            <div
+              onClick={() => toggle(`extra-${e.id}`)}
+              style={{
+                flex: 1, minWidth: 0, fontSize: 14.5, fontWeight: 500, cursor: "pointer",
+                textDecoration: checked[`extra-${e.id}`] ? "line-through" : "none",
+                color: checked[`extra-${e.id}`] ? "var(--text-2)" : "var(--text)",
+              }}
+            >{e.name}</div>
+            <button
+              onClick={() => removeExtra(e.id)}
+              aria-label={t("Rimuovi")}
+              style={{ width: 28, height: 28, borderRadius: 999, background: "transparent", border: 0, color: "var(--text-3)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+            >
+              <Icon name="x" size={13} strokeWidth={2.2} />
+            </button>
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: 8, padding: "12px 16px", borderTop: extra.length ? "1px solid var(--border)" : 0 }}>
+          <input
+            value={newItem}
+            onChange={(e) => setNewItem(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") addExtra(); }}
+            placeholder={t("Aggiungi articolo…")}
+            className="input"
+            style={{ flex: 1, fontSize: 14, padding: "10px 12px" }}
+          />
+          <button className="btn" style={{ padding: "0 16px", fontSize: 13, fontWeight: 600 }} onClick={addExtra} disabled={!newItem.trim()}>
+            <Icon name="plus" size={14} /> {t("Aggiungi")}
+          </button>
+        </div>
       </div>
     </div>
   );

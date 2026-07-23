@@ -511,9 +511,36 @@ const ExNoteRow = ({ name, note, onSave }) => {
 // ── Riepilogo di fine sessione ──────────────────────────────────────────────
 const SessionSummaryOverlay = ({ data, onClose }) => {
   const t = useT();
+  const [copied, setCopied] = React.useState(false);
   if (!data) return null;
   const deltaTon = (data.prevTonnage != null && data.prevTonnage > 0)
     ? Math.round((data.tonnage - data.prevTonnage) / data.prevTonnage * 100) : null;
+
+  // Condivisione: share sheet nativo (iOS) o copia negli appunti come fallback.
+  const share = async () => {
+    const lines = [
+      `💪 ${t("Sessione completata")} — ${new Date().toLocaleDateString()}`,
+      `${data.exCount} ${t("esercizi")} · ${data.setsDone} ${t("serie")}` +
+        (data.durationMin != null ? ` · ${data.durationMin}′` : "") +
+        (data.tonnage ? ` · ${data.tonnage} kg ${t("Tonnellaggio").toLowerCase()}` : ""),
+    ];
+    if (deltaTon != null) lines.push(`${t("vs precedente")}: ${deltaTon > 0 ? "+" : ""}${deltaTon}%`);
+    if (data.prs && data.prs.length) {
+      lines.push(`🏆 ${data.prs.map(p => `${p.esercizio} ${p.peso} kg`).join(" · ")}`);
+    }
+    const text = lines.join("\n");
+    try {
+      if (navigator.share) { await navigator.share({ text }); return; }
+      throw new Error("no-share");
+    } catch (e) {
+      if (e && e.name === "AbortError") return;
+      try {
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch (_) {}
+    }
+  };
   const stat = (label, value, sub) => (
     <div className="card" style={{ padding: "14px 12px", textAlign: "center" }}>
       <div className="num" style={{ fontSize: 22, fontWeight: 700 }}>{value}</div>
@@ -571,9 +598,14 @@ const SessionSummaryOverlay = ({ data, onClose }) => {
         </div>
       )}
 
-      <button className="btn primary" style={{ width: "100%", padding: 15, fontSize: 16, fontWeight: 600, marginTop: "auto" }} onClick={onClose}>
-        {t("Fatto")}
-      </button>
+      <div style={{ display: "flex", gap: 10, marginTop: "auto" }}>
+        <button className="btn" style={{ flex: 1, padding: 15, fontSize: 15, fontWeight: 600 }} onClick={share}>
+          {copied ? "✓ " + t("Copiato") : t("Condividi")}
+        </button>
+        <button className="btn primary" style={{ flex: 2, padding: 15, fontSize: 16, fontWeight: 600 }} onClick={onClose}>
+          {t("Fatto")}
+        </button>
+      </div>
     </div>
   );
 };
@@ -1049,15 +1081,18 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
         setSummary(Object.assign({}, s, { prs: sessionPRs }));
       }
 
+      let queuedOffline = false;
       if (window.sheetsAPI) {
-        // 1. Salva riepilogo sessione
-        await window.sheetsAPI.saveSessione({
+        // 1. Salva riepilogo sessione (se la rete manca finisce nella coda
+        //    offline di api.jsx e riparte da sola al ritorno online)
+        const sessRes = await window.sheetsAPI.saveSessione({
           date: today,
           type: scheda,
           setsCompleted: completedSets,
           totalSets,
           notes,
         });
+        queuedOffline = !!(sessRes && sessRes.queued);
 
         // 2. Salva ogni serie completata su SerieAllenamento
         const savePromises = [];
@@ -1088,7 +1123,9 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
         // Fire-and-forget le serie (non bloccare UI se fallisce una)
         await Promise.allSettled(savePromises);
       }
-      setSaveMsg("✓ " + t("Sessione salvata"));
+      setSaveMsg("✓ " + (queuedOffline
+        ? t("Sessione salvata — sync quando torni online")
+        : t("Sessione salvata")));
     } catch (err) {
       setSaveMsg("⚠️ " + (err.message || t("Errore salvataggio")));
     } finally {

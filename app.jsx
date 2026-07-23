@@ -247,6 +247,13 @@ async function _cloudSync(opts) {
         try { st.set("spesaChecked", JSON.parse(spesaCloud)); console.log("[sync pull] spesaChecked ✓"); } catch(_) {}
       }
       if (s.spesaFreq)  st.set("spesaFreq", Number(s.spesaFreq) || 1);
+      if (s.spesaExtra) {
+        try { st.set("spesaExtra", JSON.parse(s.spesaExtra)); } catch (_) {}
+      }
+      if (s.weightGoal && parseFloat(s.weightGoal) > 0) st.set("weightGoal", parseFloat(s.weightGoal));
+      if (s.exNotes) {
+        try { st.set("exNotes", JSON.parse(s.exNotes)); } catch (_) {}
+      }
       // groqApiKey: NON sincronizzata (sicurezza) — la chiave resta solo sul device,
       // così non finisce nel foglio Settings esposto dal backend pubblico.
       if (s.bodyWeight && parseFloat(s.bodyWeight) > 0) {
@@ -278,7 +285,40 @@ async function _cloudSync(opts) {
 
     _setSyncState(settingsRes.ok || pesiRes.ok ? "ok" : "error");
 
+    // Backup automatico settimanale (best-effort, dopo una sync riuscita)
+    if (settingsRes.ok) _maybeAutoBackup();
+
   } catch (e) { console.warn("[sync] error:", e); _setSyncState("error"); }
+}
+
+// ── Backup automatico su Sheets (foglio "Backup", ~1 volta a settimana) ─────
+// Protegge i dati per-giorno che vivono SOLO in IndexedDB (schedaProg_/gym_/
+// coachChat_…): se iOS evicta lo storage, il JSON nel foglio è l'ultima rete.
+// Esclusi i segreti (groqApiKey) e il rumore (errorLog, sheetsQueue).
+// Feature-detect: col .gs vecchio (senza saveBackup) fallisce in silenzio e
+// NON aggiorna lastAutoBackup; un solo tentativo per sessione.
+let _backupTriedThisSession = false;
+function _maybeAutoBackup() {
+  if (_backupTriedThisSession || !window.storage || !window.sheetsAPI) return;
+  const st = window.storage;
+  const last = st.get("lastAutoBackup", null);
+  if (last && (Date.now() - last) < 6.5 * 86400000) return;
+  _backupTriedThisSession = true;
+  try {
+    const data = {};
+    st.keys().sort().forEach(k => {
+      if (k === "groqApiKey" || k === "errorLog" || k === "sheetsQueue") return;
+      data[k] = st.get(k, null);
+    });
+    const json = JSON.stringify({ _lfhBackup: 1, exportedAt: new Date().toISOString(), auto: true, data });
+    if (json.length > 900000) { console.warn("[backup] snapshot troppo grande, salto"); return; }
+    window.sheetsAPI.post({ action: "saveBackup", json }).then(r => {
+      if (r && r.success && !r.queued) {
+        st.set("lastAutoBackup", Date.now());
+        console.log("[backup] auto-backup su Sheets ✓ (" + (r.chunks || "?") + " chunk)");
+      }
+    }).catch(e => console.warn("[backup] non riuscito (backend senza saveBackup?):", e.message));
+  } catch (_) {}
 }
 
 // ── Cloud push: pusha al cloud tutto ciò che manca ────────────────────────
@@ -293,7 +333,7 @@ function _cloudPushMissing(cloudKeys) {
 
   // Chiavi semplici (string/number). groqApiKey ESCLUSA di proposito: è un
   // segreto → resta device-local, non va nel foglio Settings esposto.
-  const KEYS = ["bodyWeight", "onboardingDone", "spesaFreq"];
+  const KEYS = ["bodyWeight", "onboardingDone", "spesaFreq", "weightGoal"];
   KEYS.forEach(k => {
     const local = st.get(k, "");
     if (local && !cloudKeys[k]) {
@@ -314,6 +354,14 @@ function _cloudPushMissing(cloudKeys) {
   if (sc && Object.keys(sc).length > 0 && !cloudKeys.spesaChecked2) {
     save("spesaChecked2", JSON.stringify(sc));
   }
+
+  // Chiavi JSON (oggetti/array piccoli)
+  [["spesaExtra", []], ["exNotes", {}]].forEach(([k, empty]) => {
+    const local = st.get(k, empty);
+    if (local && Object.keys(local).length > 0 && !cloudKeys[k]) {
+      save(k, JSON.stringify(local));
+    }
+  });
 }
 
 // ── Push forzato di TUTTO al cloud (per bottone "Sincronizza ora") ────────
@@ -330,10 +378,17 @@ window._cloudPushAll = function() {
   // Tutte le chiavi sincronizzabili (groqApiKey ESCLUSA: segreto device-local)
   push("bodyWeight",    st.get("bodyWeight", ""));
   push("spesaFreq",     st.get("spesaFreq", ""));
+  push("weightGoal",    st.get("weightGoal", ""));
   push("onboardingDone", st.get("onboardingDone", false) ? "true" : "");
 
   const sc = st.get("spesaChecked", null);
   if (sc && Object.keys(sc).length > 0) push("spesaChecked2", JSON.stringify(sc));
+
+  const se = st.get("spesaExtra", []);
+  if (se && se.length > 0) push("spesaExtra", JSON.stringify(se));
+
+  const en = st.get("exNotes", {});
+  if (en && Object.keys(en).length > 0) push("exNotes", JSON.stringify(en));
 
   const scheda = st.get("schedaData", null);
   if (scheda) push("schedaData", scheda);

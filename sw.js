@@ -4,7 +4,7 @@
  * (le chiamate API richiedono sempre internet)
  */
 
-const CACHE_NAME = "fitness-hub-v3-20260723191625";
+const CACHE_NAME = "fitness-hub-v3-20260723201542";
 const BASE = "/fitness-hub";
 
 const STATIC_ASSETS = [
@@ -17,6 +17,9 @@ const STATIC_ASSETS = [
   // Bundle unico precompilato (dev/build.mjs) al posto dei singoli .jsx:
   // i sorgenti non vengono più caricati dal browser.
   BASE + "/app.compiled.js",
+  // Bootstrap esternalizzati (CSP senza 'unsafe-inline')
+  BASE + "/boot-theme.js",
+  BASE + "/boot.js",
 ];
 
 // ── Install: pre-cacha tutti i file statici ──────────────────────────────────
