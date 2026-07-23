@@ -2,6 +2,13 @@
 <html lang="it">
 <head>
 <meta charset="UTF-8" />
+<script>
+/* launch.html è SOLO un launcher di sviluppo locale (Babel standalone, niente
+   CSP). GitHub Pages onora .nojekyll e serve TUTTO il repo verbatim (gli
+   exclude di _config.yml sono ignorati) → sull'origin di produzione questa
+   pagina va neutralizzata: redirect immediato all'app vera. */
+if (location.hostname.endsWith("github.io")) location.replace("./");
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Lorenzo Fitness Hub</title>
 <link rel="stylesheet" href="styles.css" />

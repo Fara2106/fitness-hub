@@ -18,7 +18,7 @@ Breaking these turns the app into a blank page.
 
 ## Validate changes (`npm test` + build)
 
-**`npm test`** runs a zero-dependency Node harness (`test/run.mjs`, uses only `@babel/core` + `node:vm`): a **smoke suite** that Babel-transforms every `.jsx` in root/`screens`/`dev` (fails loudly on any syntax error), **parser unit tests** that run `parser.jsx` in a `window`-shim sandbox and assert `parseScheda`/`parseDieta`/`foodEmoji` against fixtures in `test/fixtures/`, plus suite for `schedaState`/`motion`/`progress` and the **Suite bundle** (drift check: `app.compiled.js` byte-identico a `buildBundle()` — se fallisce, lancia `npm run build`). Run it after any edit. (`test/` and `dev/` are excluded from the Pages build.)
+**`npm test`** runs a zero-dependency Node harness (`test/run.mjs`, uses only `@babel/core` + `node:vm`): a **smoke suite** that Babel-transforms every `.jsx` in root/`screens`/`dev` (fails loudly on any syntax error), **parser unit tests** that run `parser.jsx` in a `window`-shim sandbox and assert `parseScheda`/`parseDieta`/`foodEmoji` against fixtures in `test/fixtures/`, plus suite for `schedaState`/`motion`/`progress` and the **Suite bundle** (drift check: `app.compiled.js` byte-identico a `buildBundle()` — se fallisce, lancia `npm run build`). Run it after any edit. (`test/` e `dev/` non sono usati dall'app a runtime; NB: Pages serve comunque tutto il repo, vedi §Deploy.)
 
 Single-file check (subset of the smoke suite, when you want just one file):
 ```bash
@@ -35,7 +35,7 @@ Lorenzo has granted full git autonomy to agents running on his Mac (which has th
 
 **Deploying app code** = run `Deploy GitHub Pages.command` (or replicate it): clear stale git locks → bump `CACHE_NAME` in `sw.js` → bump every `?v=…` in `index.html` → **`node dev/build.mjs`** (rigenera `app.compiled.js`; se fallisce il deploy si ferma) → `git add -A` + commit + `git push origin main`. The cache bumps are **mandatory for any change to app files** (`.jsx`/`.css`/`.html`/`sw.js`/icons) — without them the SW serves stale code.
 
-**Docs/config-only changes** (`docs/`, `CLAUDE.md`, `.gitignore`, memory) don't affect the live app — `docs/` is excluded from the Pages build. Commit + push these **without** bumping caches, so users' SW cache isn't needlessly invalidated. Do NOT run the full deploy script for docs-only commits.
+**Docs/config-only changes** (`docs/`, `CLAUDE.md`, `.gitignore`, memory) don't affect the live app — Commit + push these **without** bumping caches, so users' SW cache isn't needlessly invalidated. Do NOT run the full deploy script for docs-only commits. **NB (scoperto 2026-07-23): Pages ora onora `.nojekyll` e serve TUTTO il repo verbatim** — gli `exclude` di `_config.yml` sono ignorati (docs/test/dev/launch.html sono raggiungibili sull'origin). Nessun segreto può MAI stare nel repo (è comunque pubblico); `launch.html` ha un guard JS che su github.io redirige all'app.
 
 iOS service worker is "sticky" — after a code deploy, close the PWA from multitasking and reopen so the new SW takes over. Still confirm before pushing when the intent is ambiguous; this autonomy covers work Lorenzo has asked for, not unrelated pushes.
 
