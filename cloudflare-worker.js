@@ -36,6 +36,30 @@ const SHEETS_URL =
 
 const ALLOWED_ORIGINS = ["https://fara2106.github.io"];
 
+// ── Rate limit best-effort (in-memory, per-isolate) ─────────────────────────
+// Senza KV/Durable Objects il contatore vive nella memoria dell'isolate: non è
+// ermetico (isolate diversi = contatori diversi, reset al riciclo), ma taglia
+// abusi e scan da una singola sorgente a costo zero. Finestre per-IP:
+//  - "groq": 20 POST /5 min  (uso legittimo del Coach: pochi messaggi/minuto)
+//  - "all":  150 req /5 min  (la sync fa ~13 GET/5min; la chiusura sessione
+//    può sparare ~30-40 POST in burst → 150 lascia margine abbondante)
+const RL_WINDOW_MS = 5 * 60 * 1000;
+const RL = new Map(); // "ip|bucket" → { start, n }
+function rateLimited(ip, bucket, limit) {
+  const now = Date.now();
+  const key = (ip || "?") + "|" + bucket;
+  let e = RL.get(key);
+  if (!e || now - e.start > RL_WINDOW_MS) { e = { start: now, n: 0 }; RL.set(key, e); }
+  e.n++;
+  if (RL.size > 5000) {                       // pruning grossolano anti-crescita
+    for (const [k, v] of RL) {
+      if (now - v.start > RL_WINDOW_MS) RL.delete(k);
+      if (RL.size <= 2500) break;
+    }
+  }
+  return e.n > limit;
+}
+
 function corsHeaders(origin) {
   const allow = ALLOWED_ORIGINS.indexOf(origin) !== -1 ? origin : ALLOWED_ORIGINS[0];
   return {
@@ -67,6 +91,15 @@ export default {
       );
     }
 
+    // Rate limit globale per IP (best-effort, vedi sopra).
+    const clientIp = request.headers.get("CF-Connecting-IP") || "";
+    if (rateLimited(clientIp, "all", 150)) {
+      return new Response(
+        JSON.stringify({ success: false, error: "troppe richieste, riprova tra qualche minuto" }),
+        { status: 429, headers }
+      );
+    }
+
     // ── Route /groq: ponte verso l'API Groq con chiave server-side ──────────
     if (new URL(request.url).pathname === "/groq") {
       const groqKey = env && env.GROQ_API_KEY;   // SECRET del Worker, NON nel repo
@@ -88,6 +121,14 @@ export default {
         return new Response(
           JSON.stringify({ success: false, error: "Groq non configurato sul proxy (secret GROQ_API_KEY mancante)" }),
           { status: 501, headers }
+        );
+      }
+      // Rate limit dedicato (più stretto del globale): la chiave server-side
+      // non deve diventare un proxy LLM gratuito per nessuno.
+      if (rateLimited(clientIp, "groq", 20)) {
+        return new Response(
+          JSON.stringify({ success: false, error: "troppe richieste al Coach, riprova tra qualche minuto" }),
+          { status: 429, headers }
         );
       }
       try {
