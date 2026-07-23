@@ -244,28 +244,24 @@ window.UIAnimatedNumber = UIAnimatedNumber;
 // ~500 KB usati solo da Storico: iniettati al primo ingresso invece che a ogni
 // avvio (index.html non li carica più). prop-types DEVE precedere Recharts
 // (l'UMD legge il globale window.PropTypes — senza, crash "oneOfType of
-// undefined"). Stessi SRI che stavano in index.html; jsdelivr è già in CSP.
+// undefined"). Dal 2026-07-23 i file sono VENDORIZZATI in vendor/ (stesso
+// origin, coperti dal precache SW → grafici anche offline; byte verificati
+// contro gli SRI storici al momento del vendoring).
 window.ensureRecharts = (() => {
   let promise = null;
-  const inject = (src, integrity) => new Promise((resolve, reject) => {
+  const inject = (src) => new Promise((resolve, reject) => {
     const s = document.createElement("script");
     s.src = src;
-    s.integrity = integrity;
-    s.crossOrigin = "anonymous";
     s.onload = () => resolve();
-    s.onerror = () => reject(new Error("CDN non raggiungibile: " + src));
+    s.onerror = () => reject(new Error("script non raggiungibile: " + src));
     document.head.appendChild(s);
   });
   return function ensureRecharts() {
     if (window.Recharts) return Promise.resolve(window.Recharts);
     if (promise) return promise;
-    promise = inject(
-      "https://cdn.jsdelivr.net/npm/prop-types@15.8.1/prop-types.min.js",
-      "sha384-/AfDwVDXNopzPvhxMPQ11y1OCpR6mVkWx47qzSwIiquvxkcMkZddEzDNtIOtfCpk"
-    ).then(() => inject(
-      "https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js",
-      "sha384-d1XH4LhwLW8j0l6VXMP8yJabdGY9ZqtZk7k7PaPk5NoUCcZ/hDkL5aaKioKQbcZg"
-    )).then(() => window.Recharts)
+    promise = inject("vendor/prop-types.min.js")
+      .then(() => inject("vendor/Recharts.js"))
+      .then(() => window.Recharts)
       .catch(e => { promise = null; throw e; });
     return promise;
   };

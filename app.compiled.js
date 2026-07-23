@@ -3821,19 +3821,17 @@ window.UISkeleton = UISkeleton;
 window.UIAnimatedNumber = UIAnimatedNumber;
 window.ensureRecharts = (() => {
   let promise = null;
-  const inject = (src, integrity) => new Promise((resolve, reject) => {
+  const inject = src => new Promise((resolve, reject) => {
     const s = document.createElement("script");
     s.src = src;
-    s.integrity = integrity;
-    s.crossOrigin = "anonymous";
     s.onload = () => resolve();
-    s.onerror = () => reject(new Error("CDN non raggiungibile: " + src));
+    s.onerror = () => reject(new Error("script non raggiungibile: " + src));
     document.head.appendChild(s);
   });
   return function ensureRecharts() {
     if (window.Recharts) return Promise.resolve(window.Recharts);
     if (promise) return promise;
-    promise = inject("https://cdn.jsdelivr.net/npm/prop-types@15.8.1/prop-types.min.js", "sha384-/AfDwVDXNopzPvhxMPQ11y1OCpR6mVkWx47qzSwIiquvxkcMkZddEzDNtIOtfCpk").then(() => inject("https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js", "sha384-d1XH4LhwLW8j0l6VXMP8yJabdGY9ZqtZk7k7PaPk5NoUCcZ/hDkL5aaKioKQbcZg")).then(() => window.Recharts).catch(e => {
+    promise = inject("vendor/prop-types.min.js").then(() => inject("vendor/Recharts.js")).then(() => window.Recharts).catch(e => {
       promise = null;
       throw e;
     });

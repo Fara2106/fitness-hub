@@ -4,7 +4,7 @@
  * (le chiamate API richiedono sempre internet)
  */
 
-const CACHE_NAME = "fitness-hub-v3-20260723201542";
+const CACHE_NAME = "fitness-hub-v3-20260723210702";
 const BASE = "/fitness-hub";
 
 const STATIC_ASSETS = [
@@ -20,6 +20,13 @@ const STATIC_ASSETS = [
   // Bootstrap esternalizzati (CSP senza 'unsafe-inline')
   BASE + "/boot-theme.js",
   BASE + "/boot.js",
+  // Librerie vendorizzate (stesso origin dal 2026-07-23): precache completo
+  // → l'app si avvia e disegna i grafici anche del tutto offline.
+  BASE + "/vendor/react.production.min.js",
+  BASE + "/vendor/react-dom.production.min.js",
+  BASE + "/vendor/gsap.min.js",
+  BASE + "/vendor/prop-types.min.js",
+  BASE + "/vendor/Recharts.js",
 ];
 
 // ── Install: pre-cacha tutti i file statici ──────────────────────────────────

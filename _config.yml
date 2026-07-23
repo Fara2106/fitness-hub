@@ -11,3 +11,6 @@ exclude:
   - test/
   - "*.command"
   - Deploy GitHub Pages.command
+  # launch.html è SOLO un launcher di sviluppo locale (Babel standalone, niente
+  # CSP): non va servito sull'origin di produzione.
+  - launch.html

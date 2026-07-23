@@ -73,6 +73,17 @@ export default {
       if (request.method === "GET") {
         return new Response(JSON.stringify({ success: true, groq: !!groqKey }), { headers });
       }
+      // Qui l'Origin è OBBLIGATORIA e deve essere in allowlist (a differenza
+      // della rotta Sheets, dove il gate vero è il token): la chiave Groq
+      // server-side non va prestata a client anonimi. Un non-browser può
+      // falsificare l'header, ma il costo di abuso si alza e gli scan
+      // automatici vengono tagliati fuori.
+      if (ALLOWED_ORIGINS.indexOf(origin) === -1) {
+        return new Response(
+          JSON.stringify({ success: false, error: "forbidden origin" }),
+          { status: 403, headers }
+        );
+      }
       if (!groqKey) {
         return new Response(
           JSON.stringify({ success: false, error: "Groq non configurato sul proxy (secret GROQ_API_KEY mancante)" }),
@@ -81,8 +92,16 @@ export default {
       }
       try {
         const p = await request.json().catch(() => null);
-        if (!p || !Array.isArray(p.messages)) {
+        if (!p || !Array.isArray(p.messages) || p.messages.length > 24) {
           return new Response(JSON.stringify({ success: false, error: "payload non valido" }), { status: 400, headers });
+        }
+        // Cap sul volume: il prompt legittimo dell'app (system con scheda+dieta
+        // troncate a 3000 char l'una + 10 messaggi di storia) sta largamente
+        // sotto — payload enormi = abuso, non Coach.
+        let totalChars = 0;
+        for (const m of p.messages) totalChars += String((m && m.content) || "").length;
+        if (totalChars > 24000) {
+          return new Response(JSON.stringify({ success: false, error: "payload troppo grande" }), { status: 400, headers });
         }
         // Solo i campi attesi, con tetto sui token: il Worker non è un proxy
         // generico verso Groq, fa esattamente quello che serve al Coach.
