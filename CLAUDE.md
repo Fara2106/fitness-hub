@@ -7,17 +7,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Stack constraints — DO NOT VIOLATE
 
-This project has no build step. Breaking these turns the app into a blank page.
+Breaking these turns the app into a blank page.
 
-- **React 18 via CDN + Babel standalone.** Every component is exposed as a global: end each component file with `window.NomeComponente = NomeComponente;`. **Never** use ES `import`/`export`.
+- **React 18 via CDN + JSX precompilato al deploy (dal 2026-07-23).** Il browser carica UN solo bundle, `app.compiled.js`, generato da `dev/build.mjs` (`npm run build`): Babel standalone NON esiste più a runtime (via anche `unsafe-eval` dalla CSP). I sorgenti restano i `.jsx` del repo; ogni file è wrappato in una IIFE nel bundle → **ogni riferimento cross-file DEVE passare da `window.*`**: end each component file with `window.NomeComponente = NomeComponente;`. **Never** use ES `import`/`export`.
+- **Dopo OGNI modifica a un `.jsx`: `npm run build`** (rigenera `app.compiled.js`, che è committato). `npm test` ha una Suite bundle che fallisce se il bundle è stale. Il deploy script esegue il build da solo.
+- **Nuovo file `.jsx`** → aggiungilo a `BUNDLE_FILES` in `dev/build.mjs` nella posizione giusta (l'ordine conta: un globale va definito PRIMA del file che lo usa). `index.html` non elenca più i singoli file.
 - **Persistence is `window.storage` only** (IndexedDB-backed, reads sync after init). **Never** use `localStorage`/`sessionStorage`.
 - **No `<form>` tags** — wire `onClick`/`onChange` directly.
-- **No bundler.** JSX files are loaded in a fixed order by `index.html` via `<script type="text/babel" src="...?v=BUILD">`. A new file must be added to that list (load order matters: a global must be defined before a file that uses it).
-- After any edit, run `npm test` (Node harness, see below) and/or the Babel preset check. No browser test suite — verification is compile-check + parser unit tests + on-device QA.
+- After any edit, run `npm run build` + `npm test`. No browser test suite — verification is compile-check + unit tests + QA (Playwright locale e/o on-device).
 
-## Validate changes (`npm test` + Babel)
+## Validate changes (`npm test` + build)
 
-**`npm test`** runs a zero-dependency Node harness (`test/run.mjs`, uses only `@babel/core` + `node:vm`): a **smoke suite** that Babel-transforms every `.jsx` in root/`screens`/`dev` (fails loudly on any syntax error) and **parser unit tests** that run `parser.jsx` in a `window`-shim sandbox and assert `parseScheda`/`parseDieta`/`foodEmoji` against fixtures in `test/fixtures/`. Run it after any edit. (`test/` and `dev/` are excluded from the Pages build.)
+**`npm test`** runs a zero-dependency Node harness (`test/run.mjs`, uses only `@babel/core` + `node:vm`): a **smoke suite** that Babel-transforms every `.jsx` in root/`screens`/`dev` (fails loudly on any syntax error), **parser unit tests** that run `parser.jsx` in a `window`-shim sandbox and assert `parseScheda`/`parseDieta`/`foodEmoji` against fixtures in `test/fixtures/`, plus suite for `schedaState`/`motion`/`progress` and the **Suite bundle** (drift check: `app.compiled.js` byte-identico a `buildBundle()` — se fallisce, lancia `npm run build`). Run it after any edit. (`test/` and `dev/` are excluded from the Pages build.)
 
 Single-file check (subset of the smoke suite, when you want just one file):
 ```bash
@@ -32,7 +33,7 @@ Also cross-check when relevant:
 
 Lorenzo has granted full git autonomy to agents running on his Mac (which has the git credentials): agents **may `git commit`, `git push origin main`, and run the full deploy**. (This replaces the old "never commit/push" rule, which assumed a credential-less sandbox.) Sandbox/Cowork sessions without `.git` access still can't — in that case edit local files only and tell Lorenzo to deploy.
 
-**Deploying app code** = run `Deploy GitHub Pages.command` (or replicate it): clear stale git locks → bump `CACHE_NAME` in `sw.js` → bump every `?v=…` in `index.html` → `git add -A` + commit + `git push origin main`. The cache bumps are **mandatory for any change to app files** (`.jsx`/`.css`/`.html`/`sw.js`/icons) — without them the SW serves stale code.
+**Deploying app code** = run `Deploy GitHub Pages.command` (or replicate it): clear stale git locks → bump `CACHE_NAME` in `sw.js` → bump every `?v=…` in `index.html` → **`node dev/build.mjs`** (rigenera `app.compiled.js`; se fallisce il deploy si ferma) → `git add -A` + commit + `git push origin main`. The cache bumps are **mandatory for any change to app files** (`.jsx`/`.css`/`.html`/`sw.js`/icons) — without them the SW serves stale code.
 
 **Docs/config-only changes** (`docs/`, `CLAUDE.md`, `.gitignore`, memory) don't affect the live app — `docs/` is excluded from the Pages build. Commit + push these **without** bumping caches, so users' SW cache isn't needlessly invalidated. Do NOT run the full deploy script for docs-only commits.
 
@@ -40,21 +41,21 @@ iOS service worker is "sticky" — after a code deploy, close the PWA from multi
 
 ## Architecture
 
-**Frontend** (`index.html` load order): React/Babel/Recharts CDNs → `storage.jsx`, `api.jsx`, `push.jsx`, `defaults.jsx`, `parser.jsx` → `i18n.jsx`, `icons.jsx`, `ui.jsx`, `anatomy.jsx`, `nav.jsx`, `schedaState.jsx` → `screens/*` → `app.jsx` → mount. Device is auto-detected (`mobile`/`desktop`) and passed as a `device` prop to all components. (`defaults.jsx` = testo grezzo di `scheda.txt`/`dieta.txt` come `window.SCHEDA_TXT_FALLBACK`/`DIETA_TXT_FALLBACK`, GENERATO da `dev/gen-defaults.mjs`, drift-test in `test/run.mjs`; `schedaState.jsx` = logica pura keyed-by-id della Scheda, `window.exId`/`getDayState`/`read`/`writeSchedaProg`.)
+**Frontend**: `index.html` carica React/prop-types/Recharts/GSAP dalle CDN (con SRI) e poi UN solo script: **`app.compiled.js`** (generato da `dev/build.mjs`). L'ordine dei sorgenti vive in `BUNDLE_FILES` (`dev/build.mjs`): `storage, api, push, defaults, parser` → `i18n, icons, ui, motion, anatomy, nav, schedaState, progress` → `screens/*` → `app.jsx` → `mount.jsx` (bootstrap: device iniziale + `ReactDOM.createRoot`). In `index.html` restano gli script inline di bootstrap: anti-flash tema, fix ResizeObserver, **logger errori** (`window._errLog` + storage `errorLog`, vista in Impostazioni → Diagnostica), registrazione SW + banner Aggiorna. Device is auto-detected (`mobile`/`desktop`) and passed as a `device` prop to all components. (`defaults.jsx` = testo grezzo di `scheda.txt`/`dieta.txt` come `window.SCHEDA_TXT_FALLBACK`/`DIETA_TXT_FALLBACK`, GENERATO da `dev/gen-defaults.mjs`, drift-test in `test/run.mjs`; `schedaState.jsx` = logica pura keyed-by-id della Scheda, `window.exId`/`getDayState`/`read`/`writeSchedaProg`.)
 
 - `app.jsx` — `AppFrame`: routing, global state, `StatusBar`, and the whole cloud-sync engine (`_cloudSync`, `_cloudPushMissing`, `_cloudPushAll`, `_saveSettingRetry`).
-- `api.jsx` — `window.sheetsAPI` (REST to the backend; **every GET appends `_cb=Date.now()` + `fetch(...,{cache:"no-store"})`** to defeat stale HTTP cache) and `window.groqAPI` (AI coach, `llama-3.3-70b-versatile`). Also `playBeep`, `todayKey`, `getTodaySession`. NB: `_setDefaults()` must run inside `window.storage.onReady()` (running before IndexedDB loads overwrites saved settings).
+- `api.jsx` — `window.sheetsAPI` (REST to the backend; **every GET appends `_cb=Date.now()` + `fetch(...,{cache:"no-store"})`** to defeat stale HTTP cache; `getAll` = peso+settings in una chiamata) and `window.groqAPI` (AI coach, `llama-3.3-70b-versatile`): **con chiave locale → chiamata diretta a Groq; SENZA chiave → POST al proxy `/groq` sul Worker** (chiave nel secret `GROQ_API_KEY` di Cloudflare; `proxyAvailable()` = probe GET usato da coach.jsx per sbloccare la chat). Also `playBeep`, `todayKey`, `getTodaySession`. NB: `_setDefaults()` must run inside `window.storage.onReady()` (running before IndexedDB loads overwrites saved settings).
 - `storage.jsx` — `window.storage` over IndexedDB with a `_pending` write queue drained on DB open (fixes lost writes before init). API: `get/set/remove/clear/isReady/onReady`.
 - `nav.jsx` — `TabBar`/`Sidebar`. **`storico` is intentionally not in the TabBar**; it's reached via Impostazioni → Progressi → Storico.
 - `screens/` — `dashboard, scheda, dieta, spesa, coach, storico, impostazioni, onboarding`.
 
 **Backend** (deployed; source kept in repo for reference):
 - `google-apps-script.gs` — REST backend over Google Sheets (`PesoCorporeo`, `SerieAllenamento`, `Sessioni`, `Movimenti`, `CheckIn`, `Settings`). `Settings` is a Key|Value sheet; `_getSettings` flattens rows to a flat object, `_saveSettings` upserts by key.
-- `cloudflare-worker.js` — dumb CORS proxy (no caching) at `fitness-hub-proxy.lorefara97.workers.dev`; ALL Apps Script calls go through it.
+- `cloudflare-worker.js` — CORS proxy (no caching) at `fitness-hub-proxy.lorefara97.workers.dev`; ALL Apps Script calls go through it. Dal 2026-07-23 ha anche la **route `/groq`** (POST = ponte verso api.groq.com col secret `GROQ_API_KEY`; GET = probe `{groq:true/false}`).
 
 ## Cross-device sync (via the `Settings` sheet)
 
-- `_cloudSync(opts)` pulls `getPesoCorporeo` + `getSettings` with per-call timeouts. **Anti-clobber: if the settings pull fails, `cloudKeys=null` and nothing is pushed** (prevents re-pushing stale local data). Cloud-wins on conflicts (last-writer-wins; no field-level merge).
+- `_cloudSync(opts)` tenta prima **`getAll`** (peso+settings in UNA chiamata, metà latenza/quota); feature-detect: backend vecchio senza `getAll` → risposta senza `.settings` → flag `_getAllUnsupported` e fallback alle due chiamate `getPesoCorporeo` + `getSettings` (per-call timeouts). **Anti-clobber: if the settings pull fails, `cloudKeys=null` and nothing is pushed** (prevents re-pushing stale local data). Cloud-wins on conflicts (last-writer-wins; no field-level merge).
 - `_cloudPushMissing` pushes (with retry) only keys present locally but absent in cloud, and only if the pull succeeded.
 - Periodic pull every 45s while visible + re-sync on `visibilitychange` foreground.
 - Synced keys: `groqApiKey`, `schedaData`/`dietaData`, `spesaChecked2`, `spesaFreq`, `bodyWeight`, `onboardingDone`. (Mesociclo/`weekNum` and RPE were removed from the app on 2026-07-14; the Sheets `Settimana`/`RPE` columns remain physically but now receive 0.)
@@ -75,6 +76,8 @@ Workout progress (completion/substitutions/pesos) persiste in `schedaProg_<date>
 - Local data files `scheda.txt` / `dieta.txt` are parsed by `parser.jsx`; il fallback quando lo storage è vuoto è il **testo grezzo** embedded in `defaults.jsx` (`SCHEDA_TXT_FALLBACK`/`DIETA_TXT_FALLBACK`, parsato dallo stesso parser, drift-test byte-identico ai `.txt`). Rigenera con `npm run gen:defaults` dopo aver modificato i `.txt`. (`_DEFAULT_DAYS` strutturato in `scheda.jsx` è stato ELIMINATO il 2026-07-15.)
 
 ## Stato lavori
+
+**Perf + sicurezza + robustezza — 2026-07-23.** (1) **JSX precompilato**: `dev/build.mjs` → `app.compiled.js` (bundle unico committato, IIFE per file, drift-test in `npm test`, build integrato nel deploy script); Babel standalone eliminato da index.html (≈3 MB in meno + zero compile on-device) e **`unsafe-eval` rimosso dalla CSP**; preconnect alle CDN + proxy. (2) **Groq via proxy**: route `/groq` nel Worker (secret `GROQ_API_KEY`), client con fallback (chiave locale → diretta; senza → proxy), probe in coach.jsx. (3) **Backup**: Impostazioni → Backup, export/ripristino JSON di tutto lo storage (validato, confirm prima di sovrascrivere); `navigator.storage.persist()` all'avvio contro l'eviction iOS. (4) **Diagnostica**: logger `window._errLog`+`errorLog` in index.html, vista in Impostazioni (copia/svuota). (5) **`getAll`** nel .gs + `_cloudSync` feature-detect. QA Playwright 19/19 su bundle compilato (tutte le schermate + logger + backup e2e). **AZIONI RESTANTI A LORENZO (entrambe backward-compatible, l'app funziona anche senza):** a) ri-deploy del Worker `fitness-hub-proxy` col nuovo `cloudflare-worker.js` + secret `GROQ_API_KEY` (= chiave gsk_ da console.groq.com) → Coach senza chiave per-device; b) ri-deploy di `google-apps-script.gs` in Apps Script → sync a 1 chiamata invece di 2.
 
 **UI Premium Polish — COMPLETO + DEPLOYATO 2026-07-17** (deploy `cbb9569`, CACHE `v3-20260717073423`, Pages `built`). Spec/piano: `docs/superpowers/{specs,plans}/2026-07-16-ui-premium-polish*`. Contenuto: GSAP 3.13.0 core via CDN (NON in precache SW: il fetch handler bypassa cross-origin) + `motion.jsx` (`window.Motion`: `enabled/screenEnter/pop/countTo`, no-op senza gsap o con reduced-motion, Suite Motion in `npm test`); token materiali in styles.css (`--shadow-1/2/3`, `--hair` [prima usato da nav.jsx ma MAI definito], `--hair-top`, `--glass`, `.skeleton`, `.pressable`); stagger d'ingresso schermata centralizzato in `AppFrame` (effect su `state.screen`, target `.lfh-scroll`); `UIEmpty`/`UISkeleton`/`UIAnimatedNumber` in ui.jsx + pressable automatico su UICard/UIRow/UIButton/TabBar; per-schermata: peso animato, skeleton grafico/coach, empty state disegnati, pop GSAP sulle spunte, confetti brand, tnum; **pull-to-refresh in Home** (rubber-band nativo iOS via scrollTop negativo, listener nativi passivi, gated da `Motion.enabled()`, riusa `pullAndApply` via `syncNowRef`; montato DOPO `<Screen>` — se torna primo figlio ruba il fallback di screenEnter). Fix QA: TimerOverlay con colori fissi (overlay sempre scuro → in light `--text` era illeggibile; eccezione motivata alla regola CSS-vars). **QA on-device pendente:** rubber-band PTR reale + resa vetro `backdrop-filter` Safari (sheet/TabBar/pill, entrambi i temi). Follow-up minori nel ledger `.superpowers/sdd/progress.md`.
 

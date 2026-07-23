@@ -86,6 +86,17 @@
     isReady()   { return _rdy; },
   };
 
+  // Storage persistente: chiede a iOS/Safari di NON evictare IndexedDB quando
+  // la PWA resta inutilizzata a lungo (i dati per-giorno vivono SOLO qui finché
+  // la sessione non è chiusa su Sheets). Best-effort: se negato, nulla cambia.
+  try {
+    if (typeof navigator !== "undefined" && navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist().then(granted => {
+        if (!granted) console.log("[storage] persist() negato dal browser (best-effort)");
+      }).catch(() => {});
+    }
+  } catch (_) {}
+
   // Bootstrap: open DB → load all rows → signal ready
   _open()
     .then(d => {

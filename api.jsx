@@ -67,6 +67,10 @@ window.sheetsAPI = {
   // ── Settings sync (cross-device) ──
   async getSettings()    { return this.get({ action: "getSettings" }); },
   async saveSettings(d)  { return this.post({ action: "saveSettings", ...d }); },
+  // Peso + settings in UNA chiamata (metà latenza/quota). Backend vecchio senza
+  // getAll → risponde col messaggio info di default: _cloudSync lo rileva
+  // (manca .settings) e ricade sulle due chiamate separate.
+  async getAll()         { return this.get({ action: "getAll" }); },
 
   // Test connessione
   async testConnection() {
@@ -76,32 +80,69 @@ window.sheetsAPI = {
 };
 
 // ── Groq API ───────────────────────────────────────────────────────────────
+// Due strade, in ordine di preferenza:
+//   1. chiave locale sul device (Impostazioni → AI Coach) → chiamata diretta;
+//   2. NESSUNA chiave locale → POST al proxy Worker (route /groq), che inietta
+//      la chiave dal secret GROQ_API_KEY di Cloudflare. Così i device nuovi
+//      funzionano senza configurare nulla e nessuna chiave vive nel client.
+// Finché il Worker non ha il secret, la route risponde con un errore chiaro.
 window.groqAPI = {
+  hasLocalKey() {
+    return !!(window.storage && (window.storage.get("groqApiKey", "") || "").trim());
+  },
+
+  // Probe: il proxy sa fare da ponte Groq? (GET /groq → { groq: true/false }).
+  // Col Worker legacy (senza route) la risposta non ha `groq` → false.
+  async proxyAvailable() {
+    try {
+      const res = await fetch(_PROXY + "/groq?_cb=" + Date.now(), { cache: "no-store" });
+      if (!res.ok) return false;
+      const j = await res.json();
+      return !!(j && j.groq === true);
+    } catch (_) { return false; }
+  },
+
   async complete({ messages, systemPrompt, model = "llama-3.3-70b-versatile", maxTokens = 512 }) {
-    const apiKey = window.storage.get("groqApiKey", "");
-    if (!apiKey) throw new Error("API key Groq non configurata. Vai in Impostazioni ⚙️");
+    const apiKey = (window.storage.get("groqApiKey", "") || "").trim();
 
     const msgs = systemPrompt
       ? [{ role: "system", content: systemPrompt }, ...messages]
       : messages;
+    const payload = { model, messages: msgs, max_tokens: maxTokens, temperature: 0.75 };
 
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({ model, messages: msgs, max_tokens: maxTokens, temperature: 0.75 }),
-    });
+    const res = apiKey
+      ? await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(payload),
+        })
+      : await fetch(_PROXY + "/groq", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
 
     if (!res.ok) {
       let errMsg = `HTTP ${res.status}`;
-      try { const e = await res.json(); errMsg = e.error?.message || errMsg; } catch (_) {}
+      try {
+        const e = await res.json();
+        errMsg = (typeof e.error === "string" ? e.error : e.error?.message) || errMsg;
+      } catch (_) {}
       throw new Error(errMsg);
     }
 
     const data = await res.json();
-    return data.choices?.[0]?.message?.content?.trim() || "";
+    // Worker legacy (inoltra ad Apps Script) o route /groq senza secret:
+    // risposta JSON senza choices → messaggio azionabile invece di testo vuoto.
+    const content = data.choices?.[0]?.message?.content?.trim();
+    if (!content) {
+      if (data && data.success === false) throw new Error("API key Groq non configurata (né sul device né sul proxy). Vai in Impostazioni ⚙️");
+      throw new Error("Risposta vuota dal modello");
+    }
+    return content;
   },
 
   async testConnection() {

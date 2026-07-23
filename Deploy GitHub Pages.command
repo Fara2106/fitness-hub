@@ -65,6 +65,18 @@ sed -i '' "s/?v=[A-Za-z0-9]*/?v=${SW_HASH}/g" index.html
 echo "   asset ?v= → ${SW_HASH}"
 echo ""
 
+# ── Build bundle precompilato (JSX → app.compiled.js) ─
+# Il browser carica SOLO app.compiled.js: senza questo passo il deploy
+# servirebbe il bundle vecchio anche con i .jsx aggiornati.
+echo "🛠  Precompilo i JSX (dev/build.mjs)..."
+if ! node dev/build.mjs; then
+  echo ""
+  echo "❌ Build fallita (dev/build.mjs) — deploy annullato."
+  read -p "  Premi INVIO per chiudere..."
+  exit 1
+fi
+echo ""
+
 # ── Commit e push ────────────────────────────────
 # Rimuove eventuali lock rimasti da un processo git interrotto
 echo "🔓 Rimuovo eventuali lock git residui..."

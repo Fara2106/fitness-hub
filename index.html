@@ -5,10 +5,11 @@
 <!-- Content-Security-Policy (difesa in profondità). connect-src BLINDATO ai soli
      host legittimi (proxy Sheets, worker push, Groq) → anche se venisse iniettato
      codice, non potrebbe esfiltrare dati verso domini terzi. script-src richiede
-     'unsafe-eval' (Babel standalone compila JSX a runtime) e 'unsafe-inline' (script
-     di bootstrap inline). object-src none, base-uri self bloccano vettori classici.
+     'unsafe-inline' (script di bootstrap inline); NIENTE più 'unsafe-eval': il JSX
+     è precompilato al deploy (app.compiled.js via dev/build.mjs), Babel standalone
+     non esiste più a runtime. object-src none, base-uri self bloccano vettori classici.
      NB: frame-ancestors/X-Frame non sono impostabili via <meta> su GitHub Pages. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://fitness-hub-proxy.lorefara97.workers.dev https://fitness-hub-push.lorefara97.workers.dev https://api.groq.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://fitness-hub-proxy.lorefara97.workers.dev https://fitness-hub-push.lorefara97.workers.dev https://api.groq.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'" />
 <!-- maximum-scale=1 + user-scalable=no: blocca il pinch-zoom E l'auto-zoom iOS sul focus
      degli input (che, con #root a posizione fissa, lasciava una fascia vuota in basso).
      In PWA standalone iOS rispetta questi vincoli. -->
@@ -27,7 +28,12 @@
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png" />
 <link rel="manifest" href="manifest.json" />
-<link rel="stylesheet" href="styles.css?v=20260720151828" />
+<!-- Preconnect: apre in anticipo TLS verso le CDN (React/Recharts/GSAP) e il
+     proxy Sheets (primo sync) → prima richiesta più rapida a freddo. -->
+<link rel="preconnect" href="https://unpkg.com" crossorigin />
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+<link rel="preconnect" href="https://fitness-hub-proxy.lorefara97.workers.dev" crossorigin />
+<link rel="stylesheet" href="styles.css?v=20260723184439" />
 <style>
   /* Banda nera in basso su iOS standalone — CAUSA RADICE MISURATA on-device (PWA):
      innerH/clientH/height:100%/position:fixed;bottom:0/svh/dvh valgono TUTTI il viewport
@@ -104,12 +110,59 @@
 })();
 </script>
 
-<!-- React + Babel -->
-<!-- production.min: build minificata (10KB+132KB vs 110KB+1MB dev), niente warning
-     di sviluppo in console. Per debug locale si può tornare a *.development.js. -->
+<!-- Log errori locale (Impostazioni → Diagnostica). Registrato DOPO lo swallow
+     ResizeObserver (che ferma la propagazione dei suoi falsi positivi). Tiene
+     gli ultimi 50 errori JS in window._errLog e li persiste in storage
+     ("errorLog") appena IndexedDB è pronto: i bug solo-iOS diventano leggibili
+     dal device invece di restare invisibili. -->
+<script>
+(function () {
+  var MAX = 50;
+  var LOG = window._errLog = [];
+  var toFlush = [];
+  function flush() {
+    var st = window.storage;
+    if (!st || !toFlush.length) return;
+    if (!st.isReady()) { st.onReady(flush); return; }
+    try {
+      var prev = st.get("errorLog", []) || [];
+      st.set("errorLog", prev.concat(toFlush).slice(-MAX));
+      toFlush = [];
+      window.dispatchEvent(new Event("lfh-err"));
+    } catch (_) {}
+  }
+  function push(type, msg, stack) {
+    try {
+      var entry = {
+        t: new Date().toISOString(),
+        type: type,
+        msg: String(msg || "").slice(0, 300),
+        stack: String(stack || "").slice(0, 600),
+      };
+      LOG.push(entry);
+      if (LOG.length > MAX) LOG.shift();
+      toFlush.push(entry);
+      flush();
+    } catch (_) {}
+  }
+  window.addEventListener("error", function (e) {
+    if (!e || !e.message) return; // gli errori di caricamento risorse non arrivano qui (no bubble)
+    var where = e.filename ? " @ " + String(e.filename).split("/").pop() + ":" + e.lineno : "";
+    push("error", e.message + where, e.error && e.error.stack);
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var r = e && e.reason;
+    push("promise", (r && (r.message || r)) || "unhandledrejection", r && r.stack);
+  });
+})();
+</script>
+
+<!-- React (production.min: build minificate + SRI; per debug locale si può
+     tornare a *.development.js ricalcolando gli hash). Babel standalone NON c'è
+     più: il JSX è precompilato al deploy in app.compiled.js (dev/build.mjs) →
+     niente ~3 MB di compilatore né secondi di compile a ogni avvio. -->
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 
 <!-- Recharts (jsdelivr è più affidabile di unpkg) -->
 <!-- prop-types PRIMA di Recharts: l'UMD di Recharts lo richiede come globale
@@ -122,48 +175,11 @@
 <!-- GSAP core (motion premium). Se la CDN è bloccata l'app funziona identica: motion.jsx fa da guard. -->
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/gsap.min.js" integrity="sha384-HOvlOYPIs/zjoIkWUGXkVmXsjr8GuZLV+Q+rcPwmJOVZVpvTSXQChiN4t9Euv9Vc" crossorigin="anonymous"></script>
 
-<!-- Core utilities (?v=20260720151828: versionato, bumpato a ogni deploy → niente cache stale) -->
-<script type="text/babel" src="storage.jsx?v=20260720151828"></script>
-<script type="text/babel" src="api.jsx?v=20260720151828"></script>
-<script type="text/babel" src="push.jsx?v=20260720151828"></script>
-<script type="text/babel" src="defaults.jsx?v=20260720151828"></script>
-<script type="text/babel" src="parser.jsx?v=20260720151828"></script>
-
-<!-- Components -->
-<script type="text/babel" src="i18n.jsx?v=20260720151828"></script>
-<script type="text/babel" src="icons.jsx?v=20260720151828"></script>
-<script type="text/babel" src="ui.jsx?v=20260720151828"></script>
-<script type="text/babel" src="motion.jsx?v=20260720151828"></script>
-<script type="text/babel" src="anatomy.jsx?v=20260720151828"></script>
-<script type="text/babel" src="nav.jsx?v=20260720151828"></script>
-<script type="text/babel" src="schedaState.jsx?v=20260720151828"></script>
-<script type="text/babel" src="progress.jsx?v=20260720151828"></script>
-
-<!-- Screens -->
-<script type="text/babel" src="screens/onboarding.jsx?v=20260720151828"></script>
-<script type="text/babel" src="screens/dashboard.jsx?v=20260720151828"></script>
-<script type="text/babel" src="screens/scheda.jsx?v=20260720151828"></script>
-<script type="text/babel" src="screens/dieta.jsx?v=20260720151828"></script>
-<script type="text/babel" src="screens/spesa.jsx?v=20260720151828"></script>
-<script type="text/babel" src="screens/coach.jsx?v=20260720151828"></script>
-<script type="text/babel" src="screens/storico.jsx?v=20260720151828"></script>
-<script type="text/babel" src="screens/impostazioni.jsx?v=20260720151828"></script>
-<script type="text/babel" src="screens/promemoria.jsx?v=20260720151828"></script>
-
-<!-- App frame -->
-<script type="text/babel" src="app.jsx?v=20260720151828"></script>
-
-<!-- Mount: auto-detect device -->
-<script type="text/babel" data-presets="env,react">
-const _isMobile = window.innerWidth < 768
-  || /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-
-ReactDOM.createRoot(document.getElementById("root")).render(
-  <div style={{ width: "100%", height: "100%" }}>
-    <AppFrame device={_isMobile ? "mobile" : "desktop"} />
-  </div>
-);
-</script>
+<!-- App precompilata: UNICO bundle con tutti i .jsx (core → components →
+     screens → app.jsx → mount.jsx), generato da dev/build.mjs (`npm run build`).
+     L'ordine dei file vive in BUNDLE_FILES; il drift è coperto da npm test.
+     ?v=20260723184439 versionato, bumpato a ogni deploy → niente cache stale. -->
+<script src="app.compiled.js?v=20260723184439"></script>
 <!-- Service Worker (PWA offline support) -->
 <script>
 if ('serviceWorker' in navigator) {

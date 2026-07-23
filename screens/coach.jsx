@@ -255,11 +255,19 @@ const Coach = ({ device, onNav, activities = [], checkIn, bodyWeight }) => {
     }
   };
 
-  // API key presente? (letta una volta al mount; il cambio tab rimonta Coach → si aggiorna)
-  const hasKey = React.useMemo(
-    () => !!(window.storage && (window.storage.get("groqApiKey", "") || "").trim()),
-    []
+  // Coach configurato? Chiave locale sul device OPPURE proxy /groq attivo sul
+  // Worker (chiave server-side): senza chiave locale si fa un probe async e la
+  // chat si sblocca appena il proxy risponde. Il cambio tab rimonta Coach → si
+  // aggiorna anche dopo aver inserito la chiave in Impostazioni.
+  const [hasKey, setHasKey] = React.useState(
+    () => !!(window.storage && (window.storage.get("groqApiKey", "") || "").trim())
   );
+  React.useEffect(() => {
+    if (hasKey || !window.groqAPI || !window.groqAPI.proxyAvailable) return;
+    let alive = true;
+    window.groqAPI.proxyAvailable().then(ok => { if (alive && ok) setHasKey(true); });
+    return () => { alive = false; };
+  }, []);
 
   // Chip di contesto reali (sessione · peso · check-in), derivate dai dati veri
   const ctxChips = [{ emoji: sess ? "🏋️" : "🛌", label: sess ? `${t("Oggi")} · ${sess.label}` : t("Riposo") }];

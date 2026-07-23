@@ -162,6 +162,10 @@ async function _reconcileRepoFiles() {
 }
 window._reconcileRepoFiles = _reconcileRepoFiles;
 
+// getAll non supportato dal backend? Rilevato alla prima sync della sessione:
+// da lì in poi si usano direttamente le due chiamate legacy (zero retry inutili).
+let _getAllUnsupported = false;
+
 async function _cloudSync(opts) {
   if (!window.sheetsAPI || !window.storage) return;
   const st = window.storage;
@@ -174,10 +178,32 @@ async function _cloudSync(opts) {
   _setSyncState("syncing");
 
   try {
-    const [pesiRes, settingsRes] = await Promise.all([
-      _safe(window.sheetsAPI.getPesoCorporeo(), pesiMs),
-      _safe(window.sheetsAPI.getSettings(),     settingsMs),
-    ]);
+    // Percorso preferito: getAll = peso + settings in UNA chiamata (metà
+    // latenza e metà quota Apps Script). Feature-detect: il backend vecchio
+    // risponde al GET con il messaggio info di default (senza .settings) →
+    // fallback alle due chiamate separate per il resto della sessione.
+    let pesiRes = null, settingsRes = null;
+    if (_getAllUnsupported === false && window.sheetsAPI.getAll) {
+      const allRes = await _safe(window.sheetsAPI.getAll(), Math.max(pesiMs, settingsMs));
+      const v = allRes.ok ? allRes.value : null;
+      if (v && Array.isArray(v.pesoCorporeo) && v.settings && typeof v.settings === "object") {
+        pesiRes     = { ok: true, value: v.pesoCorporeo };
+        settingsRes = { ok: true, value: v.settings };
+      } else if (allRes.ok) {
+        _getAllUnsupported = true;
+        console.log("[sync] getAll non supportato dal backend → fallback 2 chiamate");
+      } else {
+        // Errore di rete/timeout: inutile insistere subito con altre due
+        // chiamate (stessa rete) — questo giro fallisce, riprova il prossimo.
+        pesiRes = settingsRes = { ok: false, err: allRes.err };
+      }
+    }
+    if (!settingsRes) {
+      [pesiRes, settingsRes] = await Promise.all([
+        _safe(window.sheetsAPI.getPesoCorporeo(), pesiMs),
+        _safe(window.sheetsAPI.getSettings(),     settingsMs),
+      ]);
+    }
 
     // 1. Peso corporeo (foglio PesoCorporeo)
     // Robustezza: fondi lo storico cloud nel weightLog locale (dedup per data,

@@ -55,8 +55,9 @@ function doGet(e) {
       case "getUltimiPesi":    return _getUltimiPesi();
       case "getCheckIn":       return _getCheckIn(p.date);
       case "getSettings":      return _getSettings();
+      case "getAll":           return _getAll();
       default:
-        return _json({ success: true, message: "Lorenzo Fitness Hub API v2", endpoints: ["getPesoCorporeo","getPesi","getUltimiPesi","getCheckIn","getSettings","savePeso","savePesoCorporeo","saveSessione","saveMovimento","saveCheckIn","saveSettings"] });
+        return _json({ success: true, message: "Lorenzo Fitness Hub API v2", endpoints: ["getPesoCorporeo","getPesi","getUltimiPesi","getCheckIn","getSettings","getAll","savePeso","savePesoCorporeo","saveSessione","saveMovimento","saveCheckIn","saveSettings"] });
     }
   } catch (err) {
     return _err(err.message || "Errore GET");
@@ -117,12 +118,12 @@ function _today() {
 }
 
 // ── GET: peso corporeo (last 90 days) ─────────────────────────────────────
-function _getPesoCorporeo() {
+function _getPesoCorporeoRows() {
   const sh = _getSheet("PesoCorporeo");
   const data = sh.getDataRange().getValues();
-  if (data.length <= 1) return _json([]);
+  if (data.length <= 1) return [];
 
-  const rows = data.slice(1)
+  return data.slice(1)
     .filter(r => r[0] && r[1])
     .map(r => ({
       date:   r[0] instanceof Date
@@ -132,8 +133,23 @@ function _getPesoCorporeo() {
     }))
     .filter(r => r.weight > 0)
     .slice(-90);
+}
 
-  return _json(rows);
+function _getPesoCorporeo() {
+  return _json(_getPesoCorporeoRows());
+}
+
+// ── GET: getAll — peso + settings in UNA chiamata ─────────────────────────
+// La sync dell'app faceva 2 GET ogni 45s (getPesoCorporeo + getSettings):
+// questa le fonde → metà latenza e metà quota Apps Script. Il client fa
+// feature-detect: se il backend è vecchio (questa azione manca) ricade sulle
+// due chiamate separate.
+function _getAll() {
+  return _json({
+    success: true,
+    pesoCorporeo: _getPesoCorporeoRows(),
+    settings: _getSettingsObj(),
+  });
 }
 
 // ── GET: all pesi per esercizio (last 3 sessions each) ────────────────────
@@ -309,14 +325,18 @@ function _saveCheckIn(body) {
 }
 
 // ── GET: settings (cross-device sync) ─────────────────────────────────────
-function _getSettings() {
+function _getSettingsObj() {
   const sh = _getSheet("Settings");
   const data = sh.getDataRange().getValues();
   const result = {};
   data.slice(1).forEach(function(r) {
     if (r[0]) result[String(r[0])] = String(r[1] || "");
   });
-  return _json(result);
+  return result;
+}
+
+function _getSettings() {
+  return _json(_getSettingsObj());
 }
 
 // ── POST: save setting ─────────────────────────────────────────────────────

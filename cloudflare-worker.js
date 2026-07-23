@@ -18,6 +18,16 @@
  *     (Progetto → Impostazioni → Proprietà script) e ri-deploya il .gs.
  *  Finché APP_TOKEN NON è impostato su ENTRAMBI, tutto resta funzionante (legacy).
  *
+ * PROXY GROQ (2026-07-23) — route /groq:
+ *  - POST /groq: inoltra la chat a api.groq.com iniettando la chiave dal SECRET
+ *    GROQ_API_KEY del Worker → i device SENZA chiave locale usano il Coach senza
+ *    configurare nulla, e nessuna chiave vive più nel client.
+ *  - GET /groq: probe → { success:true, groq:true/false } (l'app la usa per
+ *    capire se il proxy è pronto).
+ *  Setup: Worker → Settings → Variables and Secrets → SECRET GROQ_API_KEY =
+ *  <chiave gsk_… da console.groq.com>. Finché NON è impostata, POST /groq
+ *  risponde 501 con errore chiaro e l'app mostra il messaggio "configura".
+ *
  * FREE TIER: 100.000 richieste/giorno.
  */
 
@@ -55,6 +65,43 @@ export default {
         JSON.stringify({ success: false, error: "forbidden origin" }),
         { status: 403, headers }
       );
+    }
+
+    // ── Route /groq: ponte verso l'API Groq con chiave server-side ──────────
+    if (new URL(request.url).pathname === "/groq") {
+      const groqKey = env && env.GROQ_API_KEY;   // SECRET del Worker, NON nel repo
+      if (request.method === "GET") {
+        return new Response(JSON.stringify({ success: true, groq: !!groqKey }), { headers });
+      }
+      if (!groqKey) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Groq non configurato sul proxy (secret GROQ_API_KEY mancante)" }),
+          { status: 501, headers }
+        );
+      }
+      try {
+        const p = await request.json().catch(() => null);
+        if (!p || !Array.isArray(p.messages)) {
+          return new Response(JSON.stringify({ success: false, error: "payload non valido" }), { status: 400, headers });
+        }
+        // Solo i campi attesi, con tetto sui token: il Worker non è un proxy
+        // generico verso Groq, fa esattamente quello che serve al Coach.
+        const body = {
+          model:       typeof p.model === "string" ? p.model : "llama-3.3-70b-versatile",
+          messages:    p.messages,
+          max_tokens:  Math.min(Number(p.max_tokens) || 512, 1024),
+          temperature: typeof p.temperature === "number" ? p.temperature : 0.75,
+        };
+        const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + groqKey },
+          body: JSON.stringify(body),
+        });
+        const text = await r.text();
+        return new Response(text, { status: r.status, headers });
+      } catch (err) {
+        return new Response(JSON.stringify({ success: false, error: err.message }), { status: 500, headers });
+      }
     }
 
     const token = env && env.APP_TOKEN;   // segreto del Worker, NON nel repo

@@ -4,7 +4,7 @@
  * (le chiamate API richiedono sempre internet)
  */
 
-const CACHE_NAME = "fitness-hub-v3-20260720151828";
+const CACHE_NAME = "fitness-hub-v3-20260723184439";
 const BASE = "/fitness-hub";
 
 const STATIC_ASSETS = [
@@ -14,27 +14,9 @@ const STATIC_ASSETS = [
   BASE + "/manifest.json",
   BASE + "/icon-192.png",
   BASE + "/icon-512.png",
-  BASE + "/api.jsx",
-  BASE + "/app.jsx",
-  BASE + "/storage.jsx",
-  BASE + "/defaults.jsx",
-  BASE + "/parser.jsx",
-  BASE + "/i18n.jsx",
-  BASE + "/icons.jsx",
-  BASE + "/anatomy.jsx",
-  BASE + "/ui.jsx",
-  BASE + "/motion.jsx",
-  BASE + "/nav.jsx",
-  BASE + "/schedaState.jsx",
-  BASE + "/screens/dashboard.jsx",
-  BASE + "/screens/scheda.jsx",
-  BASE + "/screens/dieta.jsx",
-  BASE + "/screens/spesa.jsx",
-  BASE + "/screens/coach.jsx",
-  BASE + "/screens/storico.jsx",
-  BASE + "/screens/impostazioni.jsx",
-  BASE + "/screens/promemoria.jsx",
-  BASE + "/screens/onboarding.jsx",
+  // Bundle unico precompilato (dev/build.mjs) al posto dei singoli .jsx:
+  // i sorgenti non vengono più caricati dal browser.
+  BASE + "/app.compiled.js",
 ];
 
 // ── Install: pre-cacha tutti i file statici ──────────────────────────────────

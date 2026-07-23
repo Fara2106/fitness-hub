@@ -319,6 +319,176 @@ const SyncStatusRow = () => {
   );
 };
 
+// ── Backup: esporta/ripristina TUTTO lo storage locale in un .json ─────────
+// Protezione contro l'eviction di IndexedDB su iOS: i dati per-giorno
+// (schedaProg_/gym_/coachChat_…) vivono SOLO sul device finché la sessione non
+// è chiusa su Sheets. Il file include anche la chiave Groq (device-local).
+const BackupRows = () => {
+  const t = useT();
+  const [status, setStatus] = React.useState(null); // {type:'ok'|'err', msg}
+  const inputRef = React.useRef(null);
+
+  const doExport = async () => {
+    try {
+      const st = window.storage;
+      if (!st || !st.keys) throw new Error("storage non pronto");
+      const data = {};
+      st.keys().sort().forEach(k => { data[k] = st.get(k, null); });
+      const json = JSON.stringify({ _lfhBackup: 1, exportedAt: new Date().toISOString(), data });
+      const name = "fitness-hub-backup-" + (window.todayKey ? window.todayKey() : "export") + ".json";
+      const file = new File([json], name, { type: "application/json" });
+      // iOS standalone: share sheet ("Salva su File"); altrove: download diretto
+      if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+        await navigator.share({ files: [file], title: name });
+      } else {
+        const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+        const a = document.createElement("a");
+        a.href = url; a.download = name;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+      }
+      setStatus({ type: "ok", msg: `${t("Backup esportato")} · ${Object.keys(data).length} ${t("chiavi")}` });
+    } catch (e) {
+      if (e && e.name === "AbortError") return; // share annullata dall'utente
+      setStatus({ type: "err", msg: `${t("Export fallito")}: ${e.message || e}` });
+    }
+  };
+
+  const handleFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onerror = () => setStatus({ type: "err", msg: t("Errore di lettura del file") });
+    reader.onload = (ev) => {
+      let p = null;
+      try { p = JSON.parse(ev.target.result); } catch (_) {}
+      // Validazione: file sbagliato → i dati esistenti restano intatti
+      if (!p || p._lfhBackup !== 1 || !p.data || typeof p.data !== "object") {
+        setStatus({ type: "err", msg: t("File non valido — dati attuali conservati") });
+        return;
+      }
+      const keys = Object.keys(p.data);
+      if (!window.confirm(t("Ripristinare il backup? I dati locali attuali verranno sovrascritti."))) return;
+      keys.forEach(k => window.storage.set(k, p.data[k]));
+      setStatus({ type: "ok", msg: `${t("Backup ripristinato")} · ${keys.length} ${t("chiavi")}` });
+      setTimeout(() => window.location.reload(), 900);
+    };
+    reader.readAsText(f, "UTF-8");
+  };
+
+  return (
+    <React.Fragment>
+      <IRow
+        icon="cloud"
+        iconBg="#30D158"
+        title={t("Esporta backup (.json)")}
+        sub={status && status.type === "ok" ? status.msg : t("Tutto lo storage locale, chiave Groq inclusa")}
+        onClick={doExport}
+        trailing={<Icon name="chevron" size={13} color="var(--accent)" />}
+      />
+      <div className="row">
+        <div className="icon-wrap" style={{ background: "#FF9F0A", color: "#fff" }}>
+          <Icon name="upload" size={15} strokeWidth={2} />
+        </div>
+        <div className="row-main">
+          <div className="row-title">{t("Ripristina backup")}</div>
+          <div className="row-sub" style={status && status.type === "err" ? { color: "var(--danger)" } : undefined}>
+            {status && status.type === "err" ? status.msg : t("Sovrascrive i dati locali col file")}
+          </div>
+        </div>
+        <div className="row-trailing">
+          <button className="btn" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => inputRef.current?.click()}>
+            {t("Importa")}
+          </button>
+          <input
+            ref={inputRef}
+            type="file"
+            style={{ display: "none" }}
+            onChange={handleFile}
+            onClick={(e) => { e.target.value = ""; }}
+          />
+        </div>
+      </div>
+    </React.Fragment>
+  );
+};
+
+// ── Diagnostica: log errori JS del device (raccolto in index.html) ─────────
+// Gli errori solo-iOS (SW, safe-area, …) erano invisibili: ora restano leggibili
+// e copiabili dal device. Sorgente: storage "errorLog" (ring degli ultimi 50).
+const DiagnosticaRow = () => {
+  const t = useT();
+  const read = () => (window.storage && window.storage.get("errorLog", [])) || [];
+  const [errors, setErrors] = React.useState(read);
+  const [expanded, setExpanded] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+
+  React.useEffect(() => {
+    const on = () => setErrors(read());
+    window.addEventListener("lfh-err", on);
+    return () => window.removeEventListener("lfh-err", on);
+  }, []);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(errors, null, 2));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (_) {}
+  };
+  const clear = () => {
+    if (window.storage) window.storage.set("errorLog", []);
+    setErrors([]);
+  };
+
+  const fmtT = (iso) => {
+    try { return new Date(iso).toLocaleString(undefined, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }); }
+    catch (_) { return ""; }
+  };
+
+  return (
+    <div>
+      <IRow
+        icon="info"
+        iconBg={errors.length ? "#FF453A" : "#8E8E93"}
+        title={t("Log errori")}
+        sub={errors.length
+          ? `${errors.length} ${errors.length === 1 ? t("errore registrato") : t("errori registrati")}`
+          : t("Nessun errore registrato 🎉")}
+        onClick={() => setExpanded(x => !x)}
+        trailing={
+          <span style={{ transform: expanded ? "rotate(90deg)" : "none", transition: "transform 0.2s", display: "flex" }}>
+            <Icon name="chevron" size={13} color="var(--text-3)" />
+          </span>
+        }
+      />
+      {expanded && (
+        <div className="fade-up" style={{ padding: "10px 16px 14px", borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 10 }}>
+          {errors.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 240, overflowY: "auto" }}>
+              {errors.slice(-10).reverse().map((e, i) => (
+                <div key={i} style={{ fontSize: 11.5, lineHeight: 1.45 }}>
+                  <span className="num" style={{ color: "var(--text-3)" }}>{fmtT(e.t)}</span>
+                  <span style={{ color: "var(--danger)", marginLeft: 6 }}>{e.type}</span>
+                  <div style={{ color: "var(--text-2)", wordBreak: "break-word" }}>{e.msg}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn ghost" style={{ padding: "7px 12px", fontSize: 12 }} onClick={copy} disabled={!errors.length}>
+              {copied ? "✓ " + t("Copiato") : t("Copia tutto")}
+            </button>
+            <button className="btn ghost" style={{ padding: "7px 12px", fontSize: 12 }} onClick={clear} disabled={!errors.length}>
+              {t("Svuota")}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── Reset confirmation — bottom sheet ──────────────────────────────────────
 const ResetModal = ({ onConfirm, onCancel }) => {
   const t = useT();
@@ -592,6 +762,16 @@ const Impostazioni = ({ device, onNav, theme, setTheme, bodyWeight, setBodyWeigh
         <SyncNowRow />
       </ISection>
 
+      {/* — Backup locale (protezione da eviction IndexedDB su iOS) — */}
+      <ISection title={t("Backup")} subtitle={t("I dati per-giorno vivono solo su questo device")}>
+        <BackupRows />
+      </ISection>
+
+      {/* — Diagnostica — */}
+      <ISection title={t("Diagnostica")}>
+        <DiagnosticaRow />
+      </ISection>
+
       {/* — Reset: azione distruttiva, isolata e in evidenza — */}
       <button
         onClick={() => setShowReset(true)}
@@ -602,7 +782,7 @@ const Impostazioni = ({ device, onNav, theme, setTheme, bodyWeight, setBodyWeigh
       >{t("Reset completo")}</button>
 
       <div style={{ textAlign: "center", color: "var(--text-3)", fontSize: 11.5, padding: "8px 0 24px" }}>
-        Lorenzo Fitness Hub · v2.7.0 · build 2026.07
+        Lorenzo Fitness Hub · v2.8.0 · build 2026.07
       </div>
 
       {showReset && (

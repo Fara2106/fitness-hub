@@ -257,6 +257,21 @@ console.log("\nSuite WorkoutProgress — progressione carichi, PR, volume, nudge
   }
 }
 
+// ---- Suite bundle: app.compiled.js allineato ai sorgenti (no drift) ----
+// Il browser carica SOLO app.compiled.js: se un .jsx viene modificato senza
+// rigenerare il bundle (`npm run build`), l'app servirebbe codice vecchio.
+console.log("\nSuite bundle — app.compiled.js rigenerato e identico al committato");
+try {
+  const { buildBundle, BUNDLE_PATH, BUNDLE_FILES } = await import("../dev/build.mjs");
+  const committed = readFileSync(BUNDLE_PATH, "utf8");
+  const fresh = buildBundle();
+  ok("app.compiled.js === buildBundle() — altrimenti: npm run build", committed === fresh);
+  ok("bundle non vuoto e con tutti i file", BUNDLE_FILES.every(f => fresh.includes("══ " + f + " ══")));
+  ok("bundle senza import/export ESM (script classico)", !/^\s*(import|export)\s/m.test(fresh));
+} catch (e) {
+  ok("Suite bundle eseguibile — " + e.message.split("\n")[0], false);
+}
+
 // ---- Esito ----
 console.log("\n" + pass + " pass, " + fail + " fail");
 process.exit(fail === 0 ? 0 : 1);
