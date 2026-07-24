@@ -2595,6 +2595,21 @@ const I18N_DICT = {
   "Importa dieta (.txt)": {
     en: "Import diet (.txt)"
   },
+  "Esporta scheda (.txt)": {
+    en: "Export workout plan (.txt)"
+  },
+  "Esporta dieta (.txt)": {
+    en: "Export diet (.txt)"
+  },
+  "Il testo attuale — modificalo e reimportalo qui sopra": {
+    en: "The current text — edit it and re-import it above"
+  },
+  "Esportato": {
+    en: "Exported"
+  },
+  "Nessun testo da esportare": {
+    en: "No text to export"
+  },
   "Importato": {
     en: "Imported"
   },
@@ -13615,6 +13630,73 @@ const FileImporter = ({
     }
   })));
 };
+const PlanExportRow = ({
+  label,
+  icon,
+  storageKey,
+  fallbackKey,
+  fileName
+}) => {
+  const t = useT();
+  const [status, setStatus] = React.useState(null);
+  const doExport = async () => {
+    try {
+      const text = window.storage && window.storage.get(storageKey, null) || window[fallbackKey] || "";
+      if (!text) {
+        setStatus({
+          type: "err",
+          msg: t("Nessun testo da esportare")
+        });
+        return;
+      }
+      const file = new File([text], fileName, {
+        type: "text/plain"
+      });
+      if (navigator.canShare && navigator.canShare({
+        files: [file]
+      }) && navigator.share) {
+        await navigator.share({
+          files: [file],
+          title: fileName
+        });
+      } else {
+        const url = URL.createObjectURL(new Blob([text], {
+          type: "text/plain"
+        }));
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+      }
+      setStatus({
+        type: "ok",
+        msg: "✓ " + t("Esportato")
+      });
+      setTimeout(() => setStatus(null), 2500);
+    } catch (e) {
+      if (e && e.name === "AbortError") return;
+      setStatus({
+        type: "err",
+        msg: `${t("Export fallito")}: ${e.message || e}`
+      });
+    }
+  };
+  return React.createElement(IRow, {
+    icon: icon,
+    iconBg: "#5AC8FA",
+    title: label,
+    sub: status ? status.msg : t("Il testo attuale — modificalo e reimportalo qui sopra"),
+    onClick: doExport,
+    trailing: React.createElement(Icon, {
+      name: "chevron",
+      size: 13,
+      color: "var(--accent)"
+    })
+  });
+};
 const SyncNowRow = () => {
   const t = useT();
   const [syncing, setSyncing] = React.useState(false);
@@ -14432,6 +14514,18 @@ const Impostazioni = ({
     icon: "fork",
     storageKey: "dietaData",
     validate: _validateDietaText
+  }), React.createElement(PlanExportRow, {
+    label: t("Esporta scheda (.txt)"),
+    icon: "send",
+    storageKey: "schedaData",
+    fallbackKey: "SCHEDA_TXT_FALLBACK",
+    fileName: "scheda.txt"
+  }), React.createElement(PlanExportRow, {
+    label: t("Esporta dieta (.txt)"),
+    icon: "send",
+    storageKey: "dietaData",
+    fallbackKey: "DIETA_TXT_FALLBACK",
+    fileName: "dieta.txt"
   }), React.createElement(IRow, {
     icon: "info",
     iconBg: "#8E8E93",

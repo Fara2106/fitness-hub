@@ -247,6 +247,50 @@ const FileImporter = ({ label, icon, storageKey, accept = "", validate }) => {
   );
 };
 
+// ── Esporta piani (.txt) ────────────────────────────────────────────────────
+// Il pezzo mancante del ciclo "esporta → modifichi (app File) → reimporti":
+// tira fuori il TESTO CORRENTE di scheda/dieta (storage, con fallback al testo
+// embedded) come file .txt via share sheet (iOS: "Salva su File") o download.
+const PlanExportRow = ({ label, icon, storageKey, fallbackKey, fileName }) => {
+  const t = useT();
+  const [status, setStatus] = React.useState(null); // {type:'ok'|'err', msg}
+
+  const doExport = async () => {
+    try {
+      const text = (window.storage && window.storage.get(storageKey, null)) || window[fallbackKey] || "";
+      if (!text) { setStatus({ type: "err", msg: t("Nessun testo da esportare") }); return; }
+      const file = new File([text], fileName, { type: "text/plain" });
+      if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+        await navigator.share({ files: [file], title: fileName });
+      } else {
+        const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+        const a = document.createElement("a");
+        a.href = url; a.download = fileName;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+      }
+      setStatus({ type: "ok", msg: "✓ " + t("Esportato") });
+      setTimeout(() => setStatus(null), 2500);
+    } catch (e) {
+      if (e && e.name === "AbortError") return; // share annullata dall'utente
+      setStatus({ type: "err", msg: `${t("Export fallito")}: ${e.message || e}` });
+    }
+  };
+
+  return (
+    <IRow
+      icon={icon}
+      iconBg="#5AC8FA"
+      title={label}
+      sub={status
+        ? status.msg
+        : t("Il testo attuale — modificalo e reimportalo qui sopra")}
+      onClick={doExport}
+      trailing={<Icon name="chevron" size={13} color="var(--accent)" />}
+    />
+  );
+};
+
 // ── Sync now row (componente dedicato: gli hook NON possono stare in una
 //    IIFE dentro al render — ordine fragile e contrario alle Rules of Hooks) ─
 const SyncNowRow = () => {
@@ -750,6 +794,20 @@ const Impostazioni = ({ device, onNav, theme, setTheme, bodyWeight, setBodyWeigh
           icon="fork"
           storageKey="dietaData"
           validate={_validateDietaText}
+        />
+        <PlanExportRow
+          label={t("Esporta scheda (.txt)")}
+          icon="send"
+          storageKey="schedaData"
+          fallbackKey="SCHEDA_TXT_FALLBACK"
+          fileName="scheda.txt"
+        />
+        <PlanExportRow
+          label={t("Esporta dieta (.txt)")}
+          icon="send"
+          storageKey="dietaData"
+          fallbackKey="DIETA_TXT_FALLBACK"
+          fileName="dieta.txt"
         />
         <IRow icon="info" iconBg="#8E8E93" title={t("Cibi esclusi")} sub="Pasta di ceci · lenticchie · piselli · bevanda di mandorla">
           <span className="pill" style={{ fontSize: 10, background: "rgba(255,69,58,0.14)", color: "var(--danger)" }}>🚫 {t("Sempre")}</span>
