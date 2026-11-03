@@ -5,5 +5,5 @@ compatibility_date = "2026-11-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "fitness-hub-db"
-# Segnaposto: viene compilato nel Task 6 con l'id reale del database D1.
-database_id = "TODO-task6"
+# Database D1 creato il 2026-11-03 (fase 1).
+database_id = "d97193e4-47e9-48ab-916d-9c0203d2b11a"
