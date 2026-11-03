@@ -12,7 +12,7 @@ e tombstone per le eliminazioni. Zero dipendenze runtime.
   sbagliato, scaduto o revocato). Con `LEGACY_TOKEN_ENABLED = "true"` anche il token `SYNC_TOKEN` vale, per il
   proprietario `PRIMARY_OWNER` (variabile in `wrangler.toml`, un UUID: è un identificatore, non un segreto). Se in quel
   caso `PRIMARY_OWNER` manca, `/v1/me` e `/v1/sync` rispondono 500 "configurazione mancante" senza scrivere nulla.
-- `POST /v1/auth/login | logout | password | register | apple | apple/link`: vedi "Account e sessioni" e `CONTRACT.md` (Accesso).
+- `POST /v1/auth/login | logout | password | register | claim | apple | apple/link`: vedi "Account e sessioni" e `CONTRACT.md` (Accesso).
 - `POST /v1/sync` con `Authorization: Bearer <sessione>`
   - richiesta: `{ deviceId, cursor, changes: Change[] }` (al massimo 500 change, `data` al massimo 64 KB)
   - risposta: `{ cursor, more, changes: Record[], applied, stale, conflicts: Record[], epoch, reset }`
@@ -78,6 +78,14 @@ Tabelle (`migrations/0003_accounts.sql`, incluse anche in `schema.sql`):
   `ip:<CF-Connecting-IP>`, conta): oltre **20 per email** o **5 per IP** in 15 minuti → `429` senza verificare nulla
   (e la riga appena inserita si toglie, così martellare non allunga il blocco). Le richieste concorrenti sono
   serializzate dal lotto: non aggirano il limite. Il successo cancella le righe di quell'email e di quell'IP.
+- **Claim dalla PWA (Task 9C)**: `POST /v1/auth/claim {email, password, deviceName}` con `Authorization: Bearer
+  <SYNC_TOKEN>` crea l'account di `PRIMARY_OWNER` una volta sola, così Lorenzo sceglie la password sul suo iPhone
+  (niente Terminale, nessuno la vede). Vale solo con `LEGACY_TOKEN_ENABLED = "true"` e il token legacy esatto (confronto a
+  tempo costante; una sessione non basta) → altrimenti `401`. Account già esistente (creato col claim o con la CLI) →
+  `409`, anche per un secondo claim concorrente (la PRIMARY KEY lo rifiuta: mai due account). Stesse regole della CLI
+  (`createAccount`: email valida, password 10–1024 caratteri → `400`), stesso hash col pepper (senza → `500`), stesso
+  addebito del login prima dell'hash (`429`). Risposta come il login: `{ session, ownerId, email, expiresAt }`.
+  Spegnendo il token legacy (`LEGACY_TOKEN_ENABLED = "false"`) il claim non esiste più.
 - Un `5xx` (o l'errore Cloudflare 1102 "CPU superata") su `/v1/auth/*` vuol dire **"riprova"**, non "password
   sbagliata": la password sbagliata è sempre e solo `401 credenziali non valide`.
 

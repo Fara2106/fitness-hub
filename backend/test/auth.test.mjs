@@ -406,6 +406,141 @@ test("Apple: /apple/link collega l'Apple ID all'account della sessione; già col
   assert.equal(badTok.status, 401);
 });
 
+// --- claim: creazione dell'account dalla PWA collegata col token legacy (Task 9C, Ruling 26) -----------
+
+// Backend senza account (come la produzione prima del claim): solo il token legacy.
+async function newEnvNoAccount(extra = {}) {
+  const DB = createD1();
+  await DB.exec(schema);
+  return { DB, PASSWORD_PEPPER: PEPPER, SYNC_TOKEN: LEGACY, PRIMARY_OWNER: OWNER, LEGACY_TOKEN_ENABLED: "true", REGISTRATION_OPEN: "false", APPLE_SIGNIN_ENABLED: "false", APPLE_BUNDLE_ID: BUNDLE, ...extra };
+}
+const claim = (env, { token = LEGACY, email = EMAIL, password = PASSWORD, ip, deviceName = "PWA iPhone" } = {}) =>
+  call(env, "/v1/auth/claim", { token, body: { email, password, deviceName }, ip });
+const countOf = (env, table) => env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first("n");
+
+test("claim: col token legacy crea UNA volta l'account di PRIMARY_OWNER (stesso hash/pepper) e rilascia una sessione", async () => {
+  const env = await newEnvNoAccount();
+  // un record scritto col token legacy prima del claim: dopo, la sessione lo vede (stesso owner)
+  assert.equal((await sync(env, LEGACY, [{ collection: "settings", id: "theme", data: { value: "dark" }, updatedAt: 5, deleted: false }])).status, 200);
+  const r = await claim(env, { email: "  Lorenzo@Example.TEST " });
+  assert.equal(r.status, 200);
+  assert.deepEqual(Object.keys(r.body).sort(), ["email", "expiresAt", "ownerId", "session"]);
+  assert.equal(r.body.ownerId, OWNER);
+  assert.equal(r.body.email, "lorenzo@example.test");
+  assert.match(r.body.session, /^[A-Za-z0-9_-]{43}$/);
+  assert.ok(r.body.expiresAt > Date.now() + SESSION_TTL_MS - 60000);
+  const row = await env.DB.prepare("SELECT * FROM accounts").first();
+  assert.deepEqual([row.id, row.email, row.pw_iter, row.pw_ver, row.disabled], [OWNER, "lorenzo@example.test", PBKDF2_ITERATIONS, PW_VER, 0]);
+  assert.equal(await verifyPassword(PASSWORD, row, PEPPER), true, "stesso schema della CLI (pepper incluso)");
+  assert.ok(!JSON.stringify(row).includes(PASSWORD));
+  // la sessione funziona su /v1/me e /v1/sync per lo stesso owner
+  const m = await me(env, r.body.session);
+  assert.deepEqual([m.status, m.body.ownerId, m.body.email], [200, OWNER, "lorenzo@example.test"]);
+  const s = await sync(env, r.body.session);
+  assert.equal(s.status, 200);
+  assert.ok(s.body.changes.some((c) => c.collection === "settings" && c.id === "theme"));
+  // il login con la password scelta funziona; il token legacy ora vede l'email su /v1/me
+  assert.equal((await login(env, "lorenzo@example.test")).status, 200);
+  assert.equal((await me(env, LEGACY)).body.email, "lorenzo@example.test");
+  // sessione salvata col deviceName, solo come hash
+  const sess = await env.DB.prepare("SELECT * FROM sessions WHERE id = ?").bind(sha256Hex(r.body.session)).first();
+  assert.equal(sess.device_name, "PWA iPhone");
+});
+
+test("claim: secondo claim → 409 (account già esistente), nessun account o sessione in più", async () => {
+  const env = await newEnvNoAccount();
+  assert.equal((await claim(env)).status, 200);
+  const again = await claim(env, { email: "altra@example.test", password: "un'altra-password" });
+  assert.equal(again.status, 409);
+  assert.equal(typeof again.body.error, "string");
+  assert.equal(await countOf(env, "accounts"), 1);
+  assert.equal(await countOf(env, "sessions"), 1);
+  // la password non è cambiata
+  assert.equal((await login(env, EMAIL, "un'altra-password")).status, 401);
+  // anche un account creato dalla CLI (newEnv) blocca il claim
+  const cli = await newEnv({ LEGACY_TOKEN_ENABLED: "true" });
+  assert.equal((await claim(cli)).status, 409);
+  assert.equal(await countOf(cli, "accounts"), 1);
+});
+
+test("claim: senza token, con token sbagliato, con una sessione o col flag legacy spento → 401; niente account", async () => {
+  const env = await newEnvNoAccount();
+  assert.equal((await call(env, "/v1/auth/claim", { body: { email: EMAIL, password: PASSWORD } })).status, 401, "senza Bearer");
+  assert.equal((await claim(env, { token: "M".repeat(64) })).status, 401, "token sbagliato");
+  assert.equal((await claim(env, { token: LEGACY.slice(1) })).status, 401, "token troncato");
+  for (const flag of [undefined, "false", "1", "TRUE", ""]) {
+    const off = await newEnvNoAccount({ LEGACY_TOKEN_ENABLED: flag });
+    assert.equal((await claim(off)).status, 401, `flag ${flag}`);
+    assert.equal(await countOf(off, "accounts"), 0);
+  }
+  // una sessione (anche valida) non autorizza il claim: serve proprio il token legacy
+  const other = await newEnv({ LEGACY_TOKEN_ENABLED: "true" });
+  const tok = (await login(other)).body.session;
+  assert.equal((await claim(other, { token: tok })).status, 401);
+  assert.equal(await countOf(env, "accounts"), 0);
+  assert.equal(await countOf(env, "sessions"), 0);
+  // solo POST
+  assert.equal((await call(env, "/v1/auth/claim", { method: "GET", token: LEGACY })).status, 405);
+});
+
+test("claim: stesse regole della CLI su email/password (400), pepper obbligatorio (500), limite tentativi (429)", async () => {
+  const env = await newEnvNoAccount();
+  assert.equal((await claim(env, { password: "corta" })).status, 400);
+  assert.match((await claim(env, { password: "corta" })).body.error, /10 caratteri/);
+  assert.equal((await claim(env, { password: "x".repeat(1025) })).status, 400);
+  assert.equal((await claim(env, { email: "non-una-email" })).status, 400);
+  assert.equal((await call(env, "/v1/auth/claim", { token: LEGACY, body: { email: EMAIL } })).status, 400);
+  assert.equal(await countOf(env, "accounts"), 0);
+  for (const PASSWORD_PEPPER of [undefined, "", "corto"]) {
+    const np = await newEnvNoAccount({ PASSWORD_PEPPER });
+    const r = await claim(np);
+    assert.equal(r.status, 500);
+    assert.deepEqual(r.body, { error: "configurazione mancante" });
+    assert.equal(await countOf(np, "accounts"), 0);
+  }
+  // PRIMARY_OWNER mancante: configurazione rotta → 500, mai un account senza owner
+  const noOwner = await newEnvNoAccount({ PRIMARY_OWNER: undefined });
+  assert.equal((await claim(noOwner)).status, 500);
+  assert.equal(await countOf(noOwner, "accounts"), 0);
+  // limite: lo stesso addebito del login (5 per IP in 15 minuti) prima di calcolare l'hash
+  const lim = await newEnvNoAccount();
+  for (let i = 0; i < 5; i++) await lim.DB.prepare("INSERT INTO login_attempts (key, at) VALUES (?, ?)").bind("ip:198.51.100.9", Date.now()).run();
+  const r = await claim(lim, { ip: "198.51.100.9" });
+  assert.equal(r.status, 429);
+  assert.equal(r.headers.get("Retry-After"), "900");
+  assert.equal(await countOf(lim, "accounts"), 0);
+  assert.equal((await claim(lim, { ip: "198.51.100.10" })).status, 200, "da un altro IP passa");
+  assert.equal(await lim.DB.prepare("SELECT COUNT(*) AS n FROM login_attempts WHERE key = ?").bind("ip:198.51.100.10").first("n"), 0, "il successo azzera l'IP");
+});
+
+test("claim: due claim concorrenti → esattamente un account (l'altro 409, mai 500)", async () => {
+  for (let round = 0; round < 3; round++) {
+    const env = await newEnvNoAccount();
+    const rs = await Promise.all([
+      claim(env, { email: "uno@example.test", ip: "203.0.113.11" }),
+      claim(env, { email: "due@example.test", ip: "203.0.113.12" }),
+      claim(env, { email: "uno@example.test", ip: "203.0.113.13" }),
+    ]);
+    const statuses = rs.map((r) => r.status).sort();
+    assert.deepEqual(statuses, [200, 409, 409], JSON.stringify(rs.map((r) => [r.status, r.body])));
+    assert.equal(await countOf(env, "accounts"), 1);
+    assert.equal(await countOf(env, "sessions"), 1);
+    const winner = rs.find((r) => r.status === 200).body;
+    assert.equal((await env.DB.prepare("SELECT id, email FROM accounts").first()).email, winner.email);
+    assert.equal((await me(env, winner.session)).body.ownerId, OWNER);
+  }
+});
+
+test("claim: CORS per la PWA (preflight e risposta)", async () => {
+  const env = await newEnvNoAccount();
+  const pre = await worker.fetch(req("/v1/auth/claim", { method: "OPTIONS", origin: PWA }), env);
+  assert.equal(pre.status, 204);
+  assert.match(pre.headers.get("Access-Control-Allow-Headers"), /Authorization/);
+  const r = await call(env, "/v1/auth/claim", { token: LEGACY, origin: PWA, body: { email: EMAIL, password: PASSWORD } });
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get("Access-Control-Allow-Origin"), PWA);
+});
+
 // --- migrazione 0003 ------------------------------------------------------------------------------
 
 test("migrazione 0003_accounts.sql: idempotente, non tocca records né meta", async () => {

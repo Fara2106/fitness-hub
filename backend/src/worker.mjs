@@ -5,7 +5,7 @@ import { validateSyncBody, PULL_LIMIT } from "./validate.mjs";
 import {
   lookupSession, createSession, revokeSession, findAccountByEmail, verifyPassword, hashPassword, passwordProblem,
   normalizeEmail, isValidEmail, emailKey, ipKey, chargeAttempt, clearAttempts, verifyAppleToken, pepperBytes,
-  rehashIfNeeded, ConfigError, LOGIN_WINDOW_MS,
+  rehashIfNeeded, createAccount, ConfigError, LOGIN_WINDOW_MS,
 } from "./auth.mjs";
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -180,6 +180,39 @@ async function handleRegister(request, env, cors) {
   return issueSession(env, cors, account, deviceNameOf(body.deviceName), now);
 }
 
+// POST /v1/auth/claim {email, password, deviceName} (Task 9C, Ruling 26): la PWA ancora collegata col token
+// legacy crea l'account del proprietario, una volta sola, senza Terminale. Solo con LEGACY_TOKEN_ENABLED === "true"
+// e Bearer = SYNC_TOKEN (confronto a tempo costante); solo se l'account di PRIMARY_OWNER non esiste ancora.
+// Stesse regole e stesso hash della CLI (createAccount in auth.mjs), stesso addebito del login prima dell'hash.
+// Due claim concorrenti: il secondo INSERT viola la PRIMARY KEY (o l'email UNIQUE) → 409, mai due account.
+const isUniqueViolation = (e) => /UNIQUE constraint failed|PRIMARY KEY|SQLITE_CONSTRAINT/i.test(String(e && e.message));
+async function handleClaim(request, env, cors) {
+  if (env.LEGACY_TOKEN_ENABLED !== "true" || !(await checkToken(request, env))) return json({ error: "non autorizzato" }, 401, cors);
+  const owner = env.PRIMARY_OWNER;
+  if (typeof owner !== "string" || !owner) throw new ConfigError("configurazione mancante");
+  const body = await readAuthBody(request, cors);
+  if (body instanceof Response) return body;
+  const email = normalizeEmail(body.email);
+  if (!isValidEmail(email)) return json({ error: "email non valida" }, 400, cors);
+  const problem = passwordProblem(body.password);
+  if (problem) return json({ error: problem }, 400, cors);
+  const pepper = requirePepper(env);
+  const exists = await env.DB.prepare("SELECT id FROM accounts WHERE id = ?").bind(owner).first();
+  if (exists) return json({ error: "account già esistente" }, 409, cors);
+  const now = Date.now();
+  const keys = [emailKey(email), ipKey(clientIp(request))];
+  if ((await chargeAttempt(env.DB, keys, now)).limited) return tooMany(cors);
+  let account;
+  try {
+    account = await createAccount(env.DB, { id: owner, email, password: body.password, pepper, now });
+  } catch (e) {
+    if (isUniqueViolation(e)) return json({ error: "account già esistente" }, 409, cors);
+    throw e;
+  }
+  await clearAttempts(env.DB, keys);
+  return issueSession(env, cors, account, deviceNameOf(body.deviceName), now);
+}
+
 // Rotte che richiedono una SESSIONE (il token legacy non è una sessione: 401).
 async function requireSession(request, env, cors) {
   const a = await authenticate(request, env);
@@ -273,6 +306,7 @@ async function handleAppleLink(request, env, cors) {
 const AUTH_ROUTES = {
   "/v1/auth/login": handleLogin,
   "/v1/auth/register": handleRegister,
+  "/v1/auth/claim": handleClaim,
   "/v1/auth/logout": handleLogout,
   "/v1/auth/password": handlePassword,
   "/v1/auth/apple": handleApple,

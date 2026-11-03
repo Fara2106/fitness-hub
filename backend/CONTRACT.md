@@ -96,6 +96,10 @@ e appartiene a un **account**: l'id dell'account È l'`ownerId` dei record (l'ac
 - `POST /v1/auth/logout` (Bearer) → `{ ok: true }`, revoca la sessione.
 - `POST /v1/auth/password` (Bearer) `{ current, next }` → `{ ok: true }`; revoca tutte le ALTRE sessioni dell'account.
   `401` password attuale sbagliata, `400` nuova password sotto i 10 caratteri.
+- `POST /v1/auth/claim` (Bearer = il vecchio `SYNC_TOKEN`) `{ email, password, deviceName }` → `200 { session, ownerId,
+  email, expiresAt }`: crea l'account di `PRIMARY_OWNER` dalla PWA ancora collegata col token, **una volta sola**.
+  `409` se l'account esiste già (anche un claim concorrente), `401` senza il token legacy giusto o con
+  `LEGACY_TOKEN_ENABLED` spento, `400` email/password non valide (minimo 10 caratteri), `429` come il login.
 - `POST /v1/auth/register` → `403` finché `REGISTRATION_OPEN` non è `"true"` (registrazione chiusa).
 - `POST /v1/auth/apple` `{ identityToken, nonce, deviceName }` e `POST /v1/auth/apple/link` (Bearer) `{ identityToken, nonce }`:
   `404` finché `APPLE_SIGNIN_ENABLED` non è `"true"`. `nonce` = nonce grezzo del client; nella richiesta ad Apple il client
@@ -104,7 +108,7 @@ e appartiene a un **account**: l'id dell'account È l'`ownerId` dei record (l'ac
   già di un altro account.
 - `GET /v1/me` → `{ ownerId, email, epoch }`.
 - Durante il passaggio (`LEGACY_TOKEN_ENABLED = "true"`) il vecchio `SYNC_TOKEN` vale ancora per `PRIMARY_OWNER` su
-  `/v1/sync` e `/v1/me` (non su `/v1/auth/*`). Poi si spegne (Task 9C).
+  `/v1/sync`, `/v1/me` e `/v1/auth/claim` (non sulle altre `/v1/auth/*`). Poi si spegne (Task 9C).
 - CORS come `/v1/sync`: la PWA (`https://fara2106.github.io`) può chiamare tutte le rotte `/v1/auth/*`.
 
 ## Decisioni
