@@ -504,9 +504,9 @@ console.log("\nSuite PlanConv — piani strutturati ⇄ parseScheda/parseDieta, 
     ok("toLegacyDieta: riga con >4 scelte → prime 4 + 'Altre opzioni: …'", lm.riposo.meals[0].primary[1].food === "Verdure: 1 | 2 | 3 | 4" && lm.riposo.meals[0].others[2].food === "Altre opzioni: 5 | 6");
     ok("toLegacyDieta: riga senza label → testo nudo in primary", lm.riposo.meals[0].primary[2].food === "Nessun pasto");
     ok("toLegacyDieta: integratore nuovo con colore neutro, type = key", lm.riposo.integratori.length === 1 && lm.riposo.integratori[0].color === "#8E8E93" && lm.riposo.integratori[0].type === "custom-zinco");
-    ok("toLegacyDieta: sezioni assenti → vuote con lista fissa come parseDieta", lm.ore17.meals.length === 0 && JSON.stringify(lm.ore17.integratori) === JSON.stringify(J(pc.window._INTEGRATORI_DEFAULT.ore17)));
+    ok("toLegacyDieta: sezioni assenti → vuote, nessuna lista fissa di integratori", lm.ore17.meals.length === 0 && lm.ore17.integratori.length === 0);
     const noSupp = J(PC.toLegacyDieta({ variants: [{ key: "riposo", meals: [], supplements: [] }] }));
-    ok("toLegacyDieta: piano senza integratori → lista fissa (come testo senza blocco)", JSON.stringify(noSupp.riposo.integratori) === JSON.stringify(J(pc.window._INTEGRATORI_DEFAULT.riposo)));
+    ok("toLegacyDieta: piano senza integratori → [] (niente lista fissa)", noSupp.riposo.integratori.length === 0);
     ok("toLegacyDieta: piano non valido → null", PC.toLegacyDieta(null) === null);
 
     // activePlan

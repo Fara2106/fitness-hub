@@ -52,7 +52,7 @@
     "ALLENAMENTO ORE 21": { key: "ore21", name: "Allenamento ore 21", training: { time: "21:00" } },
     "ALLENAMENTO ORE 22": { key: "ore22", name: "Allenamento ore 22", training: { time: "22:00" } },
   };
-  const LEGACY_KEYS = ["riposo", "mattina", "ore17", "ore21", "ore22"];
+  const LEGACY_KEYS = Object.keys(SECTIONS).map((h) => SECTIONS[h].key); // le cinque sezioni di parseDieta
   const NO_FILE_SUPPS = [];
 
   const mealHeadings = () => Object.keys(window._MEAL_META).sort((a, b) => b.length - a.length);
@@ -205,22 +205,21 @@
     const META = window._MEAL_META, DEF = window._INTEGRATORI_DEFAULT, COLORS = window._SUPP_COLORS;
     const emojiByTitle = {};
     Object.keys(META).forEach((k) => { emojiByTitle[META[k].title] = META[k].emoji; });
-    const clone = (x) => JSON.parse(JSON.stringify(x));
     const out = {};
     planData.variants.forEach((v) => {
       const base = DEF[v.key] || [];
-      // Senza integratori nel piano (testo senza blocco INTEGRATORI) vale la lista
-      // fissa, come in parseDieta; colore/orario curati se il prodotto è noto.
+      // Gli integratori sono solo quelli del piano (nessuna lista fissa); la lista
+      // curata serve solo da lookup del colore per i prodotti noti.
       const integratori = (v.supplements && v.supplements.length)
         ? v.supplements.map((s) => {
             const known = base.find((b) => b.type === s.key);
             return { name: s.name, time: s.moment, sortTime: s.time, color: known ? known.color : (COLORS[s.key] || "#8E8E93"), type: s.key };
           })
-        : clone(base);
+        : [];
       out[v.key] = { meals: (v.meals || []).map((m) => legacyMeal(m, emojiByTitle)), integratori };
     });
     // Come parseDieta: le cinque sezioni esistono sempre.
-    LEGACY_KEYS.forEach((k) => { if (!out[k]) out[k] = { meals: [], integratori: clone(DEF[k] || []) }; });
+    LEGACY_KEYS.forEach((k) => { if (!out[k]) out[k] = { meals: [], integratori: [] }; });
     return out;
   }
 

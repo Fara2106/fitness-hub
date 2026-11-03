@@ -1545,7 +1545,7 @@ window.buildDefaultNotifConfig = function () {
       }
     }
   };
-  const LEGACY_KEYS = ["riposo", "mattina", "ore17", "ore21", "ore22"];
+  const LEGACY_KEYS = Object.keys(SECTIONS).map(h => SECTIONS[h].key);
   const NO_FILE_SUPPS = [];
   const mealHeadings = () => Object.keys(window._MEAL_META).sort((a, b) => b.length - a.length);
   const isExcluded = t => window._EXCLUDED_FOODS.some(e => t.toLowerCase().includes(e));
@@ -1776,7 +1776,6 @@ window.buildDefaultNotifConfig = function () {
     Object.keys(META).forEach(k => {
       emojiByTitle[META[k].title] = META[k].emoji;
     });
-    const clone = x => JSON.parse(JSON.stringify(x));
     const out = {};
     planData.variants.forEach(v => {
       const base = DEF[v.key] || [];
@@ -1789,7 +1788,7 @@ window.buildDefaultNotifConfig = function () {
           color: known ? known.color : COLORS[s.key] || "#8E8E93",
           type: s.key
         };
-      }) : clone(base);
+      }) : [];
       out[v.key] = {
         meals: (v.meals || []).map(m => legacyMeal(m, emojiByTitle)),
         integratori
@@ -1798,7 +1797,7 @@ window.buildDefaultNotifConfig = function () {
     LEGACY_KEYS.forEach(k => {
       if (!out[k]) out[k] = {
         meals: [],
-        integratori: clone(DEF[k] || [])
+        integratori: []
       };
     });
     return out;
