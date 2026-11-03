@@ -1,5 +1,5 @@
 // Worker HTTP: auth a token, CORS, validazione, /v1/sync e /v1/health.
-import { applyChanges, pullSince } from "./store.mjs";
+import { applyChanges, pullSince, currentRecords, readMeta } from "./store.mjs";
 import { validateSyncBody, PULL_LIMIT } from "./validate.mjs";
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -22,6 +22,8 @@ export async function checkToken(request, env) {
   return diff === 0;
 }
 
+const tooLarge = (cors) => json({ error: "richiesta troppo grande (massimo 2 MB)" }, 413, cors);
+
 function json(body, status, cors) {
   return new Response(JSON.stringify(body), {
     status,
@@ -30,11 +32,11 @@ function json(body, status, cors) {
 }
 
 async function handleSync(request, env, cors) {
+  // Content-Length dichiarato oltre il limite → 413 senza leggere il corpo.
   const declared = Number(request.headers.get("Content-Length"));
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return tooLarge(cors);
   const text = await request.text();
-  if ((Number.isFinite(declared) && declared > MAX_BODY_BYTES) || encoder.encode(text).length > MAX_BODY_BYTES) {
-    return json({ error: "richiesta troppo grande (massimo 2 MB)" }, 413, cors);
-  }
+  if (encoder.encode(text).length > MAX_BODY_BYTES) return tooLarge(cors);
   let body;
   try {
     body = JSON.parse(text);
@@ -43,10 +45,20 @@ async function handleSync(request, env, cors) {
   }
   const v = validateSyncBody(body);
   if (!v.ok) return json({ error: v.error }, 400, cors);
-  const { deviceId, cursor, changes } = v.value;
-  const { applied, stale } = await applyChanges(env.DB, deviceId, changes, Date.now());
+  const { deviceId, changes } = v.value;
+  // seq letto PRIMA del push: un cursore oltre il seq del server vuol dire database
+  // azzerato o ripristinato → reset:true e pull da 0 (il client sostituisce il cursore).
+  const meta = await readMeta(env.DB);
+  const reset = v.value.cursor > meta.seq;
+  const cursor = reset ? 0 : v.value.cursor;
+  const { applied, stale, staleKeys } = await applyChanges(env.DB, deviceId, changes, Date.now());
+  // conflicts = versione corrente del server per ogni change stale (il client la adotta).
+  const conflicts = await currentRecords(env.DB, staleKeys);
   const pulled = await pullSince(env.DB, cursor, PULL_LIMIT);
-  return json({ cursor: pulled.cursor, more: pulled.more, changes: pulled.changes, applied, stale }, 200, cors);
+  return json({
+    cursor: pulled.cursor, more: pulled.more, changes: pulled.changes, applied, stale,
+    conflicts, epoch: meta.epoch, reset,
+  }, 200, cors);
 }
 
 export default {
@@ -77,7 +89,9 @@ export default {
         return await handleSync(request, env, cors);
       }
       return json({ error: "non trovato" }, 404, cors);
-    } catch {
+    } catch (e) {
+      // Solo il messaggio dell'errore: mai corpo, header o token della richiesta.
+      console.error(`errore interno: ${e && e.message ? e.message : String(e)}`);
       return json({ error: "errore interno" }, 500, cors);
     }
   },

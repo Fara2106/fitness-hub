@@ -13,7 +13,12 @@ export function createD1() {
         return col ? row[col] : { ...row };
       },
       run: async () => ({ success: true, meta: { changes: sqlite.prepare(sql).run(...args).changes } }),
-      _run: () => ({ success: true, meta: { changes: sqlite.prepare(sql).run(...args).changes } }),
+      // Come D1 nel batch: le letture riportano `results`, le scritture `meta.changes`.
+      _run: () => {
+        const st = sqlite.prepare(sql);
+        if (st.columns().length) return { success: true, results: st.all(...args).map((r) => ({ ...r })), meta: { changes: 0 } };
+        return { success: true, meta: { changes: st.run(...args).changes } };
+      },
     });
     return make([]);
   };

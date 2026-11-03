@@ -10,8 +10,9 @@ export const MAX_FUTURE_MS = 300000;
 // senza race tra richieste concorrenti: per ogni change si incrementa meta.seq e poi si fa
 // un upsert condizionale che vince solo se updated_at è maggiore (spareggio: device_id).
 // I change persi lasciano un buco in seq: innocuo, il pull usa `seq > cursor`.
+// staleKeys = { collection, id } dei change persi, senza doppioni (per i `conflicts`).
 export async function applyChanges(db, deviceId, changes, now) {
-  if (!changes.length) return { applied: 0, stale: 0 };
+  if (!changes.length) return { applied: 0, stale: 0, staleKeys: [] };
   const bump = db.prepare("UPDATE meta SET value = value + 1 WHERE key = 'seq'");
   const upsert = db.prepare(
     `INSERT INTO records (collection, id, data, updated_at, deleted, device_id, seq)
@@ -33,28 +34,48 @@ export async function applyChanges(db, deviceId, changes, now) {
   }
   const results = await db.batch(stmts);
   let applied = 0;
-  for (let i = 1; i < results.length; i += 2) applied += results[i].meta.changes > 0 ? 1 : 0;
-  return { applied, stale: changes.length - applied };
+  const staleKeys = new Map();
+  for (let i = 1; i < results.length; i += 2) {
+    if (results[i].meta.changes > 0) { applied++; continue; }
+    const c = changes[(i - 1) / 2];
+    staleKeys.set(`${c.collection}\u0000${c.id}`, { collection: c.collection, id: c.id });
+  }
+  return { applied, stale: changes.length - applied, staleKeys: [...staleKeys.values()] };
+}
+
+const COLUMNS = "collection, id, data, updated_at, deleted, device_id, seq";
+const toRecord = (r) => ({
+  collection: r.collection,
+  id: r.id,
+  data: r.data == null ? null : JSON.parse(r.data),
+  updatedAt: r.updated_at,
+  deleted: !!r.deleted,
+  deviceId: r.device_id,
+  seq: r.seq,
+});
+
+// Righe correnti del server per le chiavi date (un solo db.batch di SELECT), nello stesso ordine.
+export async function currentRecords(db, keys) {
+  if (!keys.length) return [];
+  const sel = db.prepare(`SELECT ${COLUMNS} FROM records WHERE collection = ? AND id = ?`);
+  const results = await db.batch(keys.map((k) => sel.bind(k.collection, k.id)));
+  return results.flatMap((r) => (r.results || []).map(toRecord));
+}
+
+// seq corrente ed epoch del database (epoch = null se lo schema non l'ha ancora creato).
+export async function readMeta(db) {
+  const { results } = await db.prepare("SELECT key, value FROM meta WHERE key IN ('seq', 'epoch')").all();
+  const m = Object.fromEntries(results.map((r) => [r.key, r.value]));
+  return { seq: m.seq ?? 0, epoch: m.epoch ?? null };
 }
 
 export async function pullSince(db, cursor, limit) {
   const { results } = await db
-    .prepare(
-      `SELECT collection, id, data, updated_at, deleted, device_id, seq
-       FROM records WHERE seq > ? ORDER BY seq LIMIT ?`
-    )
+    .prepare(`SELECT ${COLUMNS} FROM records WHERE seq > ? ORDER BY seq LIMIT ?`)
     .bind(cursor, limit + 1)
     .all();
   const more = results.length > limit;
   const page = more ? results.slice(0, limit) : results;
-  const changes = page.map((r) => ({
-    collection: r.collection,
-    id: r.id,
-    data: r.data == null ? null : JSON.parse(r.data),
-    updatedAt: r.updated_at,
-    deleted: !!r.deleted,
-    deviceId: r.device_id,
-    seq: r.seq,
-  }));
+  const changes = page.map(toRecord);
   return { changes, cursor: changes.length ? changes[changes.length - 1].seq : cursor, more };
 }

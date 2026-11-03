@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createD1 } from "./d1-sqlite.mjs";
-import { applyChanges, pullSince, MAX_FUTURE_MS } from "../src/store.mjs";
+import { applyChanges, pullSince, currentRecords, readMeta, MAX_FUTURE_MS } from "../src/store.mjs";
 
 const schema = readFileSync(new URL("../schema.sql", import.meta.url), "utf8");
 async function newDb() {
@@ -13,11 +13,12 @@ async function newDb() {
 const NOW = 1_000_000;
 const ch = (id, updatedAt, data = { v: id }, extra = {}) => ({ collection: "settings", id, data, updatedAt, ...extra });
 const one = async (db, id) => (await pullSince(db, 0, 100)).changes.find((r) => r.id === id);
+const counts = ({ applied, stale }) => ({ applied, stale });
 
 test("applica e rilegge", async () => {
   const db = await newDb();
   const r = await applyChanges(db, "dev1", [ch("a", 100), ch("b", 100)], NOW);
-  assert.deepEqual(r, { applied: 2, stale: 0 });
+  assert.deepEqual(r, { applied: 2, stale: 0, staleKeys: [] });
   const p = await pullSince(db, 0, 100);
   assert.equal(p.changes.length, 2);
   assert.equal(p.cursor, Math.max(...p.changes.map((c) => c.seq)));
@@ -51,7 +52,7 @@ test("retry idempotente", async () => {
   const c = ch("a", 500, { v: 1 });
   await applyChanges(db, "dev1", [c], NOW);
   const r = await applyChanges(db, "dev1", [c], NOW);
-  assert.deepEqual(r, { applied: 0, stale: 1 });
+  assert.deepEqual(counts(r), { applied: 0, stale: 1 });
   const p = await pullSince(db, 0, 100);
   assert.equal(p.changes.length, 1);
   assert.deepEqual(p.changes[0].data, { v: 1 });
@@ -82,7 +83,7 @@ test("tombstone vince su update più vecchio", async () => {
 test("stesso id due volte nello stesso batch", async () => {
   const db = await newDb();
   const r = await applyChanges(db, "dev1", [ch("a", 100, { v: 1 }), ch("a", 200, { v: 2 }), ch("a", 150, { v: 3 })], NOW);
-  assert.deepEqual(r, { applied: 2, stale: 1 });
+  assert.deepEqual(counts(r), { applied: 2, stale: 1 });
   assert.deepEqual((await one(db, "a")).data, { v: 2 });
 });
 
@@ -115,4 +116,31 @@ test("pull incrementale", async () => {
   assert.equal(p2.changes.length, 1);
   assert.equal(p2.changes[0].id, "a");
   assert.ok(p2.cursor > p1.cursor);
+});
+
+test("staleKeys: chiavi dei change persi senza doppioni; currentRecords legge la riga corrente", async () => {
+  const db = await newDb();
+  await applyChanges(db, "dev1", [ch("a", 1000, { v: "server" }), ch("b", 1000), { collection: "dayState", id: "a", data: { d: 1 }, updatedAt: 1000 }], NOW);
+  const r = await applyChanges(db, "dev2", [ch("a", 900), ch("a", 800), ch("b", 2000), ch("c", 5)], NOW);
+  assert.deepEqual(counts(r), { applied: 2, stale: 2 });
+  assert.deepEqual(r.staleKeys, [{ collection: "settings", id: "a" }]);
+  const cur = await currentRecords(db, [...r.staleKeys, { collection: "dayState", id: "a" }, { collection: "settings", id: "manca" }]);
+  assert.equal(cur.length, 2); // la chiave inesistente non produce righe
+  assert.deepEqual({ ...cur[0], seq: 0 }, { collection: "settings", id: "a", data: { v: "server" }, updatedAt: 1000, deleted: false, deviceId: "dev1", seq: 0 });
+  assert.deepEqual(cur[1].data, { d: 1 });
+  assert.deepEqual(await currentRecords(db, []), []);
+});
+
+test("readMeta: seq ed epoch dallo schema; epoch null su un DB senza la riga", async () => {
+  const db = await newDb();
+  const m0 = await readMeta(db);
+  assert.equal(m0.seq, 0);
+  assert.ok(Number.isSafeInteger(m0.epoch) && m0.epoch >= 0);
+  await applyChanges(db, "dev1", [ch("a", 100), ch("b", 100)], NOW);
+  assert.equal((await readMeta(db)).seq, 2);
+  // riapplicare lo schema non cambia l'epoch (INSERT OR IGNORE)
+  await db.exec(schema);
+  assert.equal((await readMeta(db)).epoch, m0.epoch);
+  await db.prepare("DELETE FROM meta WHERE key = 'epoch'").run();
+  assert.equal((await readMeta(db)).epoch, null);
 });

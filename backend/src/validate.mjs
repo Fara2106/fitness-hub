@@ -20,8 +20,8 @@ export function validateChange(c, at = "change") {
   if (typeof c.id !== "string" || !c.id || c.id.length > MAX_ID_LEN) {
     return `${at}: id deve essere una stringa non vuota di al massimo ${MAX_ID_LEN} caratteri`;
   }
-  if (typeof c.updatedAt !== "number" || !Number.isFinite(c.updatedAt) || c.updatedAt <= 0) {
-    return `${at}: updatedAt deve essere un numero maggiore di 0`;
+  if (!Number.isSafeInteger(c.updatedAt) || c.updatedAt <= 0) {
+    return `${at}: updatedAt deve essere un intero (ms epoch) maggiore di 0`;
   }
   if (c.deleted !== undefined && typeof c.deleted !== "boolean") return `${at}: deleted deve essere vero o falso`;
   const deleted = c.deleted === true;

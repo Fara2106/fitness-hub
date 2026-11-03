@@ -94,6 +94,9 @@ test("input non valido: 400 e nessun record scritto (tutto o niente)", async () 
   await bad(ch("n", { updatedAt: NaN }), /updatedAt/)();
   await bad(ch("n", { updatedAt: "5" }), /updatedAt/)();
   await bad(ch("n", { updatedAt: 0 }), /updatedAt/)();
+  await bad(ch("n", { updatedAt: 1.5 }), /updatedAt deve essere un intero/)();
+  await bad(ch("n", { updatedAt: 2 ** 53 }), /updatedAt deve essere un intero/)();
+  await bad(ch("n", { updatedAt: -5 }), /updatedAt/)();
   await bad(ch("n", { data: [1] }), /data/)();
   await bad(ch("n", { data: null }), /data/)();
   const many = Array.from({ length: MAX_CHANGES + 1 }, (_, i) => ch(`c${i}`));
@@ -161,7 +164,9 @@ test("CORS", async () => {
   assert.equal(unauth.headers.get("Access-Control-Allow-Origin"), "https://fara2106.github.io");
 });
 
-test("rotte: 404, 405, errore interno senza dettagli", async () => {
+test("rotte: 404, 405, errore interno senza dettagli (console.error col solo messaggio)", async (t) => {
+  const logged = [];
+  t.mock.method(console, "error", (...a) => { logged.push(a.join(" ")); });
   const env = await newEnv();
   assert.equal((await worker.fetch(req("/v1/nope"), env)).status, 404);
   assert.equal((await worker.fetch(req("/"), env)).status, 404);
@@ -173,4 +178,76 @@ test("rotte: 404, 405, errore interno senza dettagli", async () => {
   const text = await res.text();
   assert.deepEqual(JSON.parse(text), { error: "errore interno" });
   assert.ok(!text.includes("segreto"));
+  assert.deepEqual(logged, ["errore interno: segreto interno"]);
+  assert.ok(!logged.join().includes(TOKEN) && !logged.join().includes("deviceId"));
+});
+
+test("Content-Length oltre il limite: 413 prima di leggere il corpo", async () => {
+  const env = await newEnv();
+  let read = false;
+  const fake = {
+    method: "POST", url: "https://api.test/v1/sync",
+    headers: new Headers({ Authorization: `Bearer ${TOKEN}`, "Content-Length": String(2 * 1024 * 1024 + 1) }),
+    text: async () => { read = true; return "{}"; },
+  };
+  const res = await worker.fetch(fake, env);
+  assert.equal(res.status, 413);
+  assert.equal(read, false);
+  // Content-Length nel limite: il corpo viene letto normalmente
+  const ok = { ...fake, headers: new Headers({ Authorization: `Bearer ${TOKEN}`, "Content-Length": "60" }),
+    text: async () => { read = true; return JSON.stringify({ deviceId: "a", cursor: 0, changes: [] }); } };
+  assert.equal((await worker.fetch(ok, env)).status, 200);
+  assert.equal(read, true);
+});
+
+test("epoch e reset: epoch del DB in ogni risposta; cursore oltre seq → reset e pull da 0", async () => {
+  const env = await newEnv();
+  const epoch = (await env.DB.prepare("SELECT value FROM meta WHERE key = 'epoch'").first("value"));
+  const j1 = await (await sync(env, { deviceId: "a", cursor: 0, changes: [ch("x"), ch("y")] })).json();
+  assert.equal(j1.epoch, epoch);
+  assert.equal(j1.reset, false);
+  assert.equal(j1.cursor, 2);
+  // cursore uguale a seq: nessun reset, niente da scaricare
+  const j2 = await (await sync(env, { deviceId: "a", cursor: 2, changes: [] })).json();
+  assert.equal(j2.reset, false);
+  assert.deepEqual(j2.changes, []);
+  // DB azzerato (come dopo il cutover): il client col vecchio cursore 50 riceve reset e tutto da 0,
+  // anche se il suo push fa salire seq oltre il cursore vecchio
+  await env.DB.exec("DELETE FROM records; UPDATE meta SET value = 0 WHERE key = 'seq'; UPDATE meta SET value = 777 WHERE key = 'epoch'");
+  await sync(env, { deviceId: "b", cursor: 0, changes: [ch("z")] });
+  const many = Array.from({ length: 60 }, (_, i) => ch(`n${i}`));
+  const j3 = await (await sync(env, { deviceId: "a", cursor: 50, changes: many })).json();
+  assert.equal(j3.reset, true);
+  assert.equal(j3.epoch, 777);
+  assert.equal(j3.applied, 60);
+  assert.equal(j3.changes.length, 61); // z + i 60 appena scritti, dal cursore 0
+  assert.ok(j3.changes.some((c) => c.id === "z"));
+  // DB senza la riga epoch (schema vecchio): epoch null
+  await env.DB.exec("DELETE FROM meta WHERE key = 'epoch'");
+  assert.equal((await (await sync(env, { deviceId: "a", cursor: 0, changes: [] })).json()).epoch, null);
+});
+
+test("conflicts: la versione del server per ogni change stale, senza doppioni", async () => {
+  const env = await newEnv();
+  await sync(env, { deviceId: "B", cursor: 0, changes: [ch("k", { data: { v: "server" }, updatedAt: NOW })] });
+  const res = await sync(env, { deviceId: "A", cursor: 0, changes: [
+    ch("k", { data: { v: "vecchio" }, updatedAt: NOW - 1000 }),
+    ch("k", { data: { v: "ancora più vecchio" }, updatedAt: NOW - 2000 }),
+    ch("nuovo"),
+  ] });
+  const j = await res.json();
+  assert.equal(j.applied, 1);
+  assert.equal(j.stale, 2);
+  assert.equal(j.conflicts.length, 1);
+  const c = j.conflicts[0];
+  assert.deepEqual({ collection: c.collection, id: c.id, data: c.data, updatedAt: c.updatedAt, deviceId: c.deviceId, deleted: c.deleted },
+    { collection: "settings", id: "k", data: { v: "server" }, updatedAt: NOW, deviceId: "B", deleted: false });
+  assert.ok(Number.isSafeInteger(c.seq));
+  // tombstone del server: il conflict lo riporta come deleted con data null
+  await sync(env, { deviceId: "B", cursor: 0, changes: [ch("t", { deleted: true, data: null, updatedAt: NOW })] });
+  const j2 = await (await sync(env, { deviceId: "A", cursor: 0, changes: [ch("t", { updatedAt: NOW - 5 })] })).json();
+  assert.equal(j2.conflicts[0].deleted, true);
+  assert.equal(j2.conflicts[0].data, null);
+  // nessuno stale → conflicts vuoto
+  assert.deepEqual((await (await sync(env, { deviceId: "A", cursor: 0, changes: [ch("altro")] })).json()).conflicts, []);
 });
