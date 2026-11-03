@@ -28,7 +28,7 @@ function sheetData(settingsOver = {}) {
 async function setup(sheet = sheetData()) {
   const DB = createD1();
   await DB.exec(schema);
-  const env = { DB, SYNC_TOKEN: TOKEN, PRIMARY_OWNER: "owner-test" };
+  const env = { DB, SYNC_TOKEN: TOKEN, PRIMARY_OWNER: "owner-test", LEGACY_TOKEN_ENABLED: "true" };
   const sheetCalls = [];
   const apiCalls = [];
   const fetch = async (url, init = {}) => {

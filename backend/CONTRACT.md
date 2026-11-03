@@ -78,6 +78,33 @@ Le fixture di parità (`node dev/gen-swift-fixtures.mjs <outDir>`: record prodot
 - `mealCheck` / `supplementCheck` / `shoppingCheck`: spunta tolta = `done: false` / `checked: false` (mai tombstone).
 - `workoutSession`: scritto solo a sessione chiusa (`done: true`), `startedAt` ms o `null`.
 
+## Accesso (dal Task 9A, fase 3)
+
+Ogni richiesta a `/v1/sync` e `/v1/me` porta `Authorization: Bearer <sessione>`. La sessione si ottiene con email + password
+e appartiene a un **account**: l'id dell'account È l'`ownerId` dei record (l'account di Lorenzo ha l'ownerId di oggi).
+
+- `POST /v1/auth/login` `{ email, password, deviceName }` → `200 { session, ownerId, email, expiresAt }`.
+  `401 { error: "credenziali non valide" }` per email inesistente, password sbagliata o account disattivato (stesso
+  messaggio). `429` (con `Retry-After`) dopo 5 errori in 15 minuti per la stessa email o lo stesso IP. `400` input mancante.
+- `session`: token opaco (32 byte casuali, base64url, 43 caratteri). Il server ne salva solo lo SHA-256. Scadenza
+  **scorrevole di 180 giorni** dall'ultimo uso (`expiresAt` della risposta è solo indicativo). Il client lo tiene nel
+  Keychain (app) o nello storage device-local (PWA), mai nei log, nei backup o nella diagnostica.
+- `401` su `/v1/sync` o `/v1/me` = sessione scaduta, revocata o account disattivato → il client resta usabile in locale,
+  tiene la coda e chiede di accedere di nuovo.
+- `POST /v1/auth/logout` (Bearer) → `{ ok: true }`, revoca la sessione.
+- `POST /v1/auth/password` (Bearer) `{ current, next }` → `{ ok: true }`; revoca tutte le ALTRE sessioni dell'account.
+  `401` password attuale sbagliata, `400` nuova password sotto i 10 caratteri.
+- `POST /v1/auth/register` → `403` finché `REGISTRATION_OPEN` non è `"true"` (registrazione chiusa).
+- `POST /v1/auth/apple` `{ identityToken, nonce, deviceName }` e `POST /v1/auth/apple/link` (Bearer) `{ identityToken, nonce }`:
+  `404` finché `APPLE_SIGNIN_ENABLED` non è `"true"`. `nonce` = nonce grezzo del client; nella richiesta ad Apple il client
+  mette il suo SHA-256 esadecimale minuscolo (il server confronta il claim `nonce` con SHA-256(nonce inviato)).
+  Con la registrazione chiusa un Apple ID non collegato dà `401` (nessun account creato); `link` → `409` se l'Apple ID è
+  già di un altro account.
+- `GET /v1/me` → `{ ownerId, email, epoch }`.
+- Durante il passaggio (`LEGACY_TOKEN_ENABLED = "true"`) il vecchio `SYNC_TOKEN` vale ancora per `PRIMARY_OWNER` su
+  `/v1/sync` e `/v1/me` (non su `/v1/auth/*`). Poi si spegne (Task 9C).
+- CORS come `/v1/sync`: la PWA (`https://fara2106.github.io`) può chiamare tutte le rotte `/v1/auth/*`.
+
 ## Decisioni
 
 - Alimenti come testo libero: **decisione chiusa** (vedi `dietPlan`). Il piano resta sotto il limite di 64 KB per record (l'editor rifiuta un piano che codificato lo supera).

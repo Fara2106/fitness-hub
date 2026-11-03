@@ -33,7 +33,7 @@ const H = {
 export async function newBackend() {
   const DB = createD1();
   await DB.exec(await readFile(join(ROOT, "backend", "schema.sql"), "utf8"));
-  return { env: { DB, SYNC_TOKEN: TOKEN, PRIMARY_OWNER: "owner-test" }, delay: 0, down: false, log: [] };
+  return { env: { DB, SYNC_TOKEN: TOKEN, PRIMARY_OWNER: "owner-test", LEGACY_TOKEN_ENABLED: "true" }, delay: 0, down: false, log: [] };
 }
 
 const parseRow = (r) => ({

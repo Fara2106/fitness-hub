@@ -49,7 +49,7 @@ test("due owner nello stesso DB non si vedono: pull, conflicts e LWW separati", 
 
 test("worker: i token degli owner non mischiano i dati (resolveOwner è l'unico punto)", async () => {
   const db = await newDb();
-  const env = { DB: db, SYNC_TOKEN: TOKEN, PRIMARY_OWNER: A };
+  const env = { DB: db, SYNC_TOKEN: TOKEN, PRIMARY_OWNER: A, LEGACY_TOKEN_ENABLED: "true" };
   const post = (e, changes) => worker.fetch(req("/v1/sync", { method: "POST", body: { deviceId: "d", cursor: 0, changes } }), e);
   await post(env, [ch("a1", NOW)]);
   await post({ ...env, PRIMARY_OWNER: B }, [ch("b1", NOW)]);
@@ -61,10 +61,10 @@ test("worker: i token degli owner non mischiano i dati (resolveOwner è l'unico 
 
 test("GET /v1/me: ownerId ed epoch; 401 senza token o con token sbagliato; 405 se non GET", async () => {
   const db = await newDb();
-  const env = { DB: db, SYNC_TOKEN: TOKEN, PRIMARY_OWNER: A };
+  const env = { DB: db, SYNC_TOKEN: TOKEN, PRIMARY_OWNER: A, LEGACY_TOKEN_ENABLED: "true" };
   const res = await worker.fetch(req("/v1/me"), env);
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { ownerId: A, epoch: (await readMeta(db)).epoch });
+  assert.deepEqual(await res.json(), { ownerId: A, email: null, epoch: (await readMeta(db)).epoch });
   assert.equal((await worker.fetch(req("/v1/me", { token: null }), env)).status, 401);
   assert.equal((await worker.fetch(req("/v1/me", { token: "x".repeat(64) }), env)).status, 401);
   assert.equal((await worker.fetch(req("/v1/me", { method: "POST", body: {} }), env)).status, 405);
@@ -73,7 +73,7 @@ test("GET /v1/me: ownerId ed epoch; 401 senza token o con token sbagliato; 405 s
 test("senza PRIMARY_OWNER gli endpoint autenticati falliscono chiusi (500) e non scrivono", async () => {
   const db = await newDb();
   for (const PRIMARY_OWNER of [undefined, ""]) {
-    const env = { DB: db, SYNC_TOKEN: TOKEN, PRIMARY_OWNER };
+    const env = { DB: db, SYNC_TOKEN: TOKEN, PRIMARY_OWNER, LEGACY_TOKEN_ENABLED: "true" };
     const me = await worker.fetch(req("/v1/me"), env);
     assert.equal(me.status, 500);
     assert.deepEqual(await me.json(), { error: "configurazione mancante" });
@@ -83,8 +83,8 @@ test("senza PRIMARY_OWNER gli endpoint autenticati falliscono chiusi (500) e non
     assert.equal((await worker.fetch(req("/v1/me", { token: "x".repeat(64) }), env)).status, 401);
   }
   assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM records").first("n")), 0);
-  assert.equal(await resolveOwner(req("/v1/me", { token: null }), { SYNC_TOKEN: TOKEN, PRIMARY_OWNER: A }), null);
-  assert.equal(await resolveOwner(req("/v1/me"), { SYNC_TOKEN: TOKEN, PRIMARY_OWNER: A }), A);
+  assert.equal(await resolveOwner(req("/v1/me", { token: null }), { SYNC_TOKEN: TOKEN, PRIMARY_OWNER: A, LEGACY_TOKEN_ENABLED: "true" }), null);
+  assert.equal(await resolveOwner(req("/v1/me"), { SYNC_TOKEN: TOKEN, PRIMARY_OWNER: A, LEGACY_TOKEN_ENABLED: "true" }), A);
 });
 
 test("migrazione 0002_owner.sql: 13 record dello schema vecchio → stessi record, owner, seq ed epoch", async () => {

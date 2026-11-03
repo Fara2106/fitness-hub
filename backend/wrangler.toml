@@ -12,3 +12,11 @@ database_id = "d97193e4-47e9-48ab-916d-9c0203d2b11a"
 # Proprietario dei record oggi esistenti (identificatore, non un segreto). Il token SYNC_TOKEN
 # corrisponde a questo proprietario (resolveOwner in src/worker.mjs).
 PRIMARY_OWNER = "7e8c37a9-62dd-4f25-8be3-1c209840db09"
+# Token legacy SYNC_TOKEN → PRIMARY_OWNER: acceso solo durante il passaggio agli account (la PWA col token
+# incollato continua a sincronizzare). Si spegne ("false") quando app e PWA usano le sessioni (Task 9C).
+LEGACY_TOKEN_ENABLED = "true"
+# Registrazione chiusa: l'unico account è quello di Lorenzo (creato con admin/account.mjs).
+REGISTRATION_OPEN = "false"
+# Accedi con Apple: costruito ma spento finché non c'è il programma sviluppatori a pagamento.
+APPLE_SIGNIN_ENABLED = "false"
+APPLE_BUNDLE_ID = "it.faraoni.fitnesshub"

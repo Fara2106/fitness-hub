@@ -821,7 +821,7 @@ await (async () => {
     method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body),
   }), env);
   async function backend({ plans = true } = {}) {
-    const env = { DB: createD1(), SYNC_TOKEN: TOKEN, PRIMARY_OWNER: "owner-test" };
+    const env = { DB: createD1(), SYNC_TOKEN: TOKEN, PRIMARY_OWNER: "owner-test", LEGACY_TOKEN_ENABLED: "true" };
     await env.DB.exec(SCHEMA);
     if (plans) await call(env, { deviceId: "migrate", cursor: 0, changes: [wp, dp].map(p => ({ ...p, updatedAt: T0 - 86400000 })) });
     return env;

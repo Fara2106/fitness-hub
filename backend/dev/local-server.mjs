@@ -1,13 +1,18 @@
 // Server locale: il Worker vero (src/worker.mjs) con D1 simulato su node:sqlite, su http://127.0.0.1.
 // Per i test d'integrazione e gli UI test dell'app Swift (mai il backend di produzione).
-//   node backend/dev/local-server.mjs --port 8787 --token <t> [--db <file>] [--seed <records.json>] [--owner <id>]
+//   node backend/dev/local-server.mjs --port 8787 [--token <t>] [--account <email>:<password>] [--db <file>]
+//                                     [--seed <records.json>] [--owner <id>]
 // --port 0 = porta libera. --db = persistenza su file (default: in memoria). --seed = array JSON di Change
-// applicati all'avvio come device "seed". Stampa su stdout `ready http://127.0.0.1:<porta>` e mai il token.
+// applicati all'avvio come device "seed". --token = token legacy (LEGACY_TOKEN_ENABLED acceso) verso --owner.
+// --account = crea all'avvio un account DI TEST con id = --owner (password in chiaro sulla riga di comando:
+// SOLO per test locali, mai con credenziali vere né contro la produzione). Serve almeno uno fra --token e --account.
+// Stampa su stdout `ready http://127.0.0.1:<porta>` e mai il token né la password.
 import http from "node:http";
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import worker from "../src/worker.mjs";
 import { createD1 } from "../test/d1-sqlite.mjs";
+import { createAccount, createSession, revokeSession, sha256Hex } from "../src/auth.mjs";
 
 const { values } = parseArgs({
   options: {
@@ -16,10 +21,11 @@ const { values } = parseArgs({
     db: { type: "string" },
     seed: { type: "string" },
     owner: { type: "string", default: "local-owner" },
+    account: { type: "string" },
   },
 });
-if (!values.token) {
-  console.error("manca --token");
+if (!values.token && !values.account) {
+  console.error("serve --token e/o --account <email>:<password>");
   process.exit(2);
 }
 const port = Number(values.port);
@@ -30,7 +36,27 @@ if (!Number.isInteger(port) || port < 0 || port > 65535) {
 
 const DB = createD1(values.db || ":memory:");
 await DB.exec(readFileSync(new URL("../schema.sql", import.meta.url), "utf8"));
-const env = { DB, SYNC_TOKEN: values.token, PRIMARY_OWNER: values.owner };
+const env = {
+  DB, SYNC_TOKEN: values.token, PRIMARY_OWNER: values.owner, LEGACY_TOKEN_ENABLED: values.token ? "true" : "false",
+  REGISTRATION_OPEN: "false", APPLE_SIGNIN_ENABLED: "false", APPLE_BUNDLE_ID: "it.faraoni.fitnesshub",
+};
+if (values.account) {
+  const sep = values.account.indexOf(":");
+  if (sep < 1) {
+    console.error("--account deve essere <email>:<password>");
+    process.exit(2);
+  }
+  const email = values.account.slice(0, sep);
+  const exists = await DB.prepare("SELECT 1 FROM accounts WHERE email = ? COLLATE NOCASE OR id = ?").bind(email.trim().toLowerCase(), values.owner).first();
+  if (!exists) {
+    try {
+      await createAccount(DB, { id: values.owner, email, password: values.account.slice(sep + 1), now: Date.now() });
+    } catch (e) {
+      console.error(`--account non valido: ${e.message}`);
+      process.exit(2);
+    }
+  }
+}
 
 // Seed: passa dal Worker stesso (stessa validazione e stesso LWW di un client vero), a lotti da 500.
 if (values.seed) {
@@ -39,10 +65,17 @@ if (values.seed) {
     console.error("--seed deve essere un array di Change");
     process.exit(2);
   }
+  // Con il solo --account il seed passa da una sessione temporanea dell'account (revocata subito dopo).
+  let seedToken = values.token;
+  let seedSession = null;
+  if (!seedToken) {
+    seedToken = (await createSession(DB, values.owner, "seed", Date.now())).token;
+    seedSession = await sha256Hex(seedToken);
+  }
   for (let i = 0; i < changes.length; i += 500) {
     const res = await worker.fetch(new Request("http://127.0.0.1/v1/sync", {
       method: "POST",
-      headers: { Authorization: `Bearer ${values.token}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${seedToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({ deviceId: "seed", cursor: 0, changes: changes.slice(i, i + 500) }),
     }), env);
     if (res.status !== 200) {
@@ -50,6 +83,7 @@ if (values.seed) {
       process.exit(2);
     }
   }
+  if (seedSession) await revokeSession(DB, seedSession);
 }
 
 const server = http.createServer(async (req, res) => {
