@@ -1565,6 +1565,22 @@ await (async () => {
     ok("il token non finisce mai nei log", !logs.some(l => l.includes(TOKEN)));
     SV.setToken("");
     ok("setToken('') scollega", !SV.hasToken() && S.get("syncToken", null) === null);
+    // Token già salvato: stesso token → nessuna domanda; diverso → domanda, e se rifiutata resta il vecchio (hash ripulito comunque)
+    const OTHER = "ef56".repeat(16), asks = [];
+    const loc = { hash: "#sync=" + TOKEN, pathname: "/fitness-hub/", search: "" };
+    S.set("syncToken", TOKEN, { silent: true });
+    calls.length = 0;
+    await SV.consumeLinkHash(loc, hist, () => { asks.push(1); return false; });
+    ok("consumeLinkHash: stesso token già salvato → nessuna conferma, hash ripulito", asks.length === 0 && calls.length === 1 && S.get("syncToken") === TOKEN);
+    S.set("syncToken", OTHER, { silent: true });
+    calls.length = 0;
+    const rd = await SV.consumeLinkHash(loc, hist, () => { asks.push(1); return false; });
+    ok("consumeLinkHash: token diverso → chiede conferma; rifiutata → token invariato, hash comunque ripulito",
+      asks.length === 1 && calls.length === 1 && S.get("syncToken") === OTHER && rd && rd.error === "declined");
+    const ry = await SV.consumeLinkHash(loc, hist, () => { asks.push(1); return true; });
+    ok("consumeLinkHash: token diverso, confermata → sostituito", asks.length === 2 && S.get("syncToken") === TOKEN && ry && ry.error !== "declined");
+    ok("il token non finisce mai nei log (anche nei percorsi con conferma)", !logs.some(l => l.includes(TOKEN) || l.includes(OTHER)));
+    SV.setToken("");
   }
 
   // ── Import .txt → piano strutturato ──
@@ -1603,6 +1619,15 @@ await (async () => {
     SV.putRecords(d1.changes);
     const d2 = L.importPlanChanges("dieta", dieta.replace("- Opzione 1: 40g gallette grano saraceno (4)", "- Opzione 1: 99g fiocchi d'avena"), "Dieta 2.txt", NOW);
     ok("import dieta nello stesso minuto: -2 e il precedente archiviato", d2.changes[0].id === `diet-${IDDAY}-${IDMIN}-2` && d2.changes[1].data.status === "archived" && d2.changes[1].data.validTo === "2026-11-03");
+    // Cache plan_workout vuota (device mai collegato / cache persa): il piano attivo noto dai record viene archiviato lo stesso
+    S.remove("plan_workout", { silent: true });
+    const r4 = L.importPlanChanges("scheda", scheda.replace("Push-up (bodyweight)", "Floor press"), "Quarta.txt", new Date(2026, 10, 3, 11, 30, 0));
+    ok("import con cache piani vuota: il piano attivo dei record viene archiviato (nessun doppio attivo)",
+      r4.changes.length === 2 && r4.changes[0].id === `workout-${IDDAY}-1130` && r4.changes[1].id === `workout-${IDDAY}-${IDMIN}-3` && r4.changes[1].data.status === "archived" && r4.changes[1].data.validTo === "2026-11-03");
+    // refreshPlans (dopo un ripristino backup): la cache dei piani si ricalcola dai record
+    S.set("plan_workout", { id: "vecchio-backup", data: { name: "x", status: "active", days: [] } }, { silent: true });
+    const ch = SV.refreshPlans();
+    ok("SyncV2.refreshPlans: ricalcola plan_workout dai record (mai un piano stantio)", ch.includes("plan_workout") && S.get("plan_workout").id === `workout-${IDDAY}-${IDMIN}-3`);
     // Validazione (stessa dell'UI): file non valido → nessun cambiamento
     ok("file scheda non valido → validate ko (l'UI non produce change)", L.validateSchedaText("ciao\nnon sono una scheda", (x) => x).ok === false && L.validateSchedaText(scheda, (x) => x).ok === true);
     ok("file dieta non valido → validate ko", L.validateDietaText("ciao\nnon sono una dieta", (x) => x).ok === false && L.validateDietaText(dieta, (x) => x).ok === true);
@@ -1610,23 +1635,25 @@ await (async () => {
 
   // ── Backup: niente dati del device ──
   {
-    const LOCAL = ["syncToken", "v2deviceId", "v2cursor", "v2epoch", "v2outbox", "v2grp:day:2026-11-03", "v2grp:weights", "r:setLog:abc", "r:workoutPlan:workout-1", "groqApiKey", "errorLog"];
-    const KEEP = ["bodyWeight", "weightLog", "spesaChecked", "theme", "lang", "checkIn_2026-11-03", "plan_workout", "exNotes"];
+    const LOCAL = ["syncToken", "v2deviceId", "v2cursor", "v2epoch", "v2outbox", "v2grp:day:2026-11-03", "v2grp:weights", "r:setLog:abc", "r:workoutPlan:workout-1", "groqApiKey", "errorLog", "plan_workout", "plan_diet"];
+    const KEEP = ["bodyWeight", "weightLog", "spesaChecked", "theme", "lang", "checkIn_2026-11-03", "exNotes"];
     S.clear && S.clear();
     LOCAL.forEach(k => S.set(k, "x-" + k, { silent: true }));
     KEEP.forEach(k => S.set(k, { v: k }, { silent: true }));
     const data = L.backupData(S);
-    ok("export backup: nessuna chiave del device (token, deviceId, cursore, epoch, coda, v2grp:*, r:*, Groq, errorLog)", LOCAL.every(k => !(k in data)) && !JSON.stringify(data).includes("x-"));
+    ok("export backup: nessuna chiave del device (token, deviceId, cursore, epoch, coda, v2grp:*, r:*, Groq, errorLog, cache plan_*)", LOCAL.every(k => !(k in data)) && !JSON.stringify(data).includes("x-"));
     ok("export backup: tutte le altre chiavi presenti", KEEP.every(k => k in data));
-    ok("isDeviceLocalKey: solo le chiavi elencate (non v2foo, non plan_*)", LOCAL.every(k => L.isDeviceLocalKey(k)) && !L.isDeviceLocalKey("v2foo") && !L.isDeviceLocalKey("plan_workout") && !L.isDeviceLocalKey("bodyWeight") && !L.isDeviceLocalKey("rest"));
+    ok("isDeviceLocalKey: solo le chiavi elencate (plan_workout/plan_diet incluse, non v2foo)", LOCAL.every(k => L.isDeviceLocalKey(k)) && !L.isDeviceLocalKey("v2foo") && !L.isDeviceLocalKey("plan_other") && !L.isDeviceLocalKey("bodyWeight") && !L.isDeviceLocalKey("rest"));
     // Ripristino di un file vecchio che contiene ancora chiavi del device
     S.set("syncToken", "TOKEN-DI-QUESTO-DEVICE", { silent: true });
     S.set("groqApiKey", "gsk_questa", { silent: true });
-    const old = { bodyWeight: 81.5, syncToken: "TOKEN-VECCHIO", v2cursor: 999, "v2grp:weights": ["x"], "r:setLog:zz": {}, groqApiKey: "gsk_vecchia", errorLog: [1], v2outbox: { a: 1 }, spesaChecked: { "a-0": true } };
+    S.set("plan_workout", { id: "piano-attuale" }, { silent: true });
+    const old = { plan_workout: { id: "piano-vecchio" }, plan_diet: { id: "x" }, bodyWeight: 81.5, syncToken: "TOKEN-VECCHIO", v2cursor: 999, "v2grp:weights": ["x"], "r:setLog:zz": {}, groqApiKey: "gsk_vecchia", errorLog: [1], v2outbox: { a: 1 }, spesaChecked: { "a-0": true } };
     const n = L.restoreBackupData(S, old);
     ok("ripristino: scrive solo le chiavi non del device (n corretto)", n === 2 && S.get("bodyWeight") === 81.5 && S.get("spesaChecked")["a-0"] === true);
     ok("ripristino: token, Groq, cursore, coda, v2grp, r:* del file vecchio ignorati",
       S.get("syncToken") === "TOKEN-DI-QUESTO-DEVICE" && S.get("groqApiKey") === "gsk_questa" && S.get("v2cursor", null) !== 999 && S.get("v2grp:weights", null) === "x-v2grp:weights" && S.get("r:setLog:zz", null) === null && S.get("v2outbox") === "x-v2outbox");
+    ok("ripristino: la cache plan_* del file vecchio non viene scritta", S.get("plan_workout").id === "piano-attuale" && S.get("plan_diet") === "x-plan_diet");
   }
 
   // ── Export: piano attivo completo, senza troncamenti ──
@@ -1655,12 +1682,14 @@ await (async () => {
     const used = [...src.matchAll(/\bt\("((?:[^"\\]|\\.)*)"\)/g)].map(m => m[1].replace(/\\"/g, '"'));
     const newKeys = ["Collega questo device", "Scollega", "Collega", "Incolla il token o il link", "Token non valido: servono 64 caratteri esadecimali", "Token rifiutato dal server",
       "Collegato e sincronizzato", "Token salvato, ma il server non è raggiungibile: riprova più tardi", "modifiche in coda", "Sola lettura · l'import .txt è temporaneo", "Scheda attiva", "Dieta attiva",
-      "Piani archiviati", "Importa scheda .txt (temporaneo)", "Importa dieta .txt (temporaneo)", "Crea un nuovo piano attivo e archivia quello precedente", "Il piano attivo in testo leggibile",
+      "Il link con #sync=<token> funziona nel browser. Nell'app installata sulla Home incolla qui il token (il browser ha uno storage separato).", "Questo device è già collegato con un altro token. Sostituirlo?", "Piani archiviati", "Importa scheda .txt (temporaneo)", "Importa dieta .txt (temporaneo)", "Crea un nuovo piano attivo e archivia quello precedente", "Il piano attivo in testo leggibile",
       "Tutto lo storage locale, tranne token e chiave Groq", "Nessun piano: si usa il testo predefinito dell'app", "Collegato", "Token di sincronizzazione"];
     ok("i18n: ogni nuova stringa dell'UI Impostazioni è usata e ha la traduzione EN", newKeys.every(k => used.includes(k) && i18n.includes(JSON.stringify(k) + ": { en:")));
     ok("i18n: le stringhe tolte (import/export vecchi) non sono più usate", !used.some(k => /^Importa (scheda|dieta) \(\.txt\)$|^Il testo attuale|^Importa scheda\.txt e dieta\.txt$/.test(k)));
     const mount = readFileSync(join(ROOT, "app.jsx"), "utf8");
-    ok("app.jsx: consumeLinkHash chiamato dopo SyncV2.init dentro storage.onReady", /SyncV2\.init\([\s\S]{0,300}consumeLinkHash\(/.test(mount));
+    ok("app.jsx: consumeLinkHash chiamato dopo SyncV2.init dentro storage.onReady, con conferma di sostituzione", /SyncV2\.init\([\s\S]{0,900}consumeLinkHash\(undefined, undefined,\s*\(\) => window\.confirm\(/.test(mount));
+    ok("impostazioni.jsx: dopo il ripristino si ricalcola la cache piani; il collegamento chiede conferma se il token cambia",
+      /_restoreBackupData\(window\.storage[\s\S]{0,300}SyncV2\.refreshPlans\(\)/.test(src) && /cur !== token && !window\.confirm\(/.test(src));
   }
 })();
 

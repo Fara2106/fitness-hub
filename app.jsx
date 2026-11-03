@@ -106,7 +106,12 @@ if (window.storage) {
     catch (e) { if (window._logError) window._logError(e); else console.warn("[sync] init:", e); }
     // Link "#sync=<token>": collega il device e ripulisce l'hash dall'URL (il token non si logga).
     try {
-      const p = window.SyncV2 && window.SyncV2.consumeLinkHash();
+      const tr = (k) => { // testo nella lingua dell'app (window.I18N_DICT), IT come chiave
+        const l = window.storage.get("lang", "it"), e = window.I18N_DICT && window.I18N_DICT[k];
+        return l === "it" ? k : (e && e[l]) || k;
+      };
+      const p = window.SyncV2 && window.SyncV2.consumeLinkHash(undefined, undefined,
+        () => window.confirm(tr("Questo device è già collegato con un altro token. Sostituirlo?")));
       if (p && p.catch) p.catch(() => {});
     } catch (_) {}
   });

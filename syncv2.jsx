@@ -5,7 +5,7 @@
 //     init({ storage, fetch, now?, setTimeout?, clearTimeout?, today? })   da chiamare dopo storage.onReady
 //     setToken(token) → Promise<{ ok, error? }>   salva il token e prova un sync (401 → token non salvato)
 //     hasToken() → boolean
-//     linkTokenFromHash(hash) → token|null · consumeLinkHash(loc?, hist?) → Promise|null   (#sync=<64 hex> all'avvio)
+//     linkTokenFromHash(hash) → token|null · consumeLinkHash(loc?, hist?, confirmReplace?) → Promise|null · refreshPlans() → chiavi   (#sync=<64 hex> all'avvio)
 //     syncNow()  → Promise<{ ok, pushed, pulled, error? }>   error: "unlinked"|"offline"|"unauthorized"|…
 //     putRecords(changes)                    scrittura diretta di record ({collection,id,data,deleted?}), per i piani
 //     getRecord(collection, id) → Record|null      cache + modifiche in coda (tombstone inclusi)
@@ -619,13 +619,29 @@
   }
   // All'avvio (dopo init): se l'hash è un link valido, ripulisce l'URL (replaceState) e collega il
   // device. Ritorna la Promise di setToken, o null se non c'era niente da fare. Il token non si logga.
-  function consumeLinkHash(loc, hist) {
+  // confirmReplace (opzionale): chiamata se è già salvato un token DIVERSO; false → resta il vecchio
+  // (l'hash viene comunque ripulito) e la Promise risolve { ok:false, error:"declined" }.
+  function consumeLinkHash(loc, hist, confirmReplace) {
     const l = loc || (typeof location !== "undefined" ? location : null);
     const h = hist || (typeof history !== "undefined" ? history : null);
     const token = linkTokenFromHash(l && l.hash);
     if (!token) return null;
     try { if (h && typeof h.replaceState === "function") h.replaceState(null, "", (l.pathname || "") + (l.search || "")); } catch (_) {}
+    const cur = S ? S.get(K.token, null) : null;
+    if (cur && cur !== token && typeof confirmReplace === "function") {
+      let yes = false;
+      try { yes = !!confirmReplace(); } catch (_) {}
+      if (!yes) return Promise.resolve({ ok: false, error: "declined" });
+    }
     return setToken(token);
+  }
+
+  // Ricalcola plan_workout / plan_diet dai record in cache (dopo un ripristino del backup). Ritorna le chiavi cambiate.
+  function refreshPlansNow() {
+    if (!S) return [];
+    const changed = refreshPlans();
+    if (changed.length) emit("lfh-data", { keys: changed });
+    return changed;
   }
 
   function getRecord(collection, id) { return S ? effective(collection, String(id)) : null; }
@@ -661,6 +677,6 @@
     return SyncV2;
   }
 
-  const SyncV2 = { API, init, setToken, hasToken, linkTokenFromHash, consumeLinkHash, syncNow, putRecords, getRecord, listRecords, activePlans, status };
+  const SyncV2 = { API, init, setToken, hasToken, linkTokenFromHash, consumeLinkHash, refreshPlans: refreshPlansNow, syncNow, putRecords, getRecord, listRecords, activePlans, status };
   window.SyncV2 = SyncV2;
 })();

@@ -3422,7 +3422,7 @@ window.buildDefaultNotifConfig = function () {
     const m = /^#sync=([0-9a-fA-F]{64})$/.exec(String(hash == null ? "" : hash));
     return m ? m[1] : null;
   }
-  function consumeLinkHash(loc, hist) {
+  function consumeLinkHash(loc, hist, confirmReplace) {
     const l = loc || (typeof location !== "undefined" ? location : null);
     const h = hist || (typeof history !== "undefined" ? history : null);
     const token = linkTokenFromHash(l && l.hash);
@@ -3430,7 +3430,26 @@ window.buildDefaultNotifConfig = function () {
     try {
       if (h && typeof h.replaceState === "function") h.replaceState(null, "", (l.pathname || "") + (l.search || ""));
     } catch (_) {}
+    const cur = S ? S.get(K.token, null) : null;
+    if (cur && cur !== token && typeof confirmReplace === "function") {
+      let yes = false;
+      try {
+        yes = !!confirmReplace();
+      } catch (_) {}
+      if (!yes) return Promise.resolve({
+        ok: false,
+        error: "declined"
+      });
+    }
     return setToken(token);
+  }
+  function refreshPlansNow() {
+    if (!S) return [];
+    const changed = refreshPlans();
+    if (changed.length) emit("lfh-data", {
+      keys: changed
+    });
+    return changed;
   }
   function getRecord(collection, id) {
     return S ? effective(collection, String(id)) : null;
@@ -3491,6 +3510,7 @@ window.buildDefaultNotifConfig = function () {
     hasToken,
     linkTokenFromHash,
     consumeLinkHash,
+    refreshPlans: refreshPlansNow,
     syncNow,
     putRecords,
     getRecord,
@@ -4125,9 +4145,6 @@ const I18N_DICT = {
   },
   "Nuova versione disponibile": {
     en: "New version available"
-  },
-  "Aggiorna": {
-    en: "Update"
   },
   "Aggiornamento…": {
     en: "Refreshing…"
@@ -4945,15 +4962,6 @@ const I18N_DICT = {
   "Importa": {
     en: "Import"
   },
-  "Aggiorna": {
-    en: "Update"
-  },
-  "Caricato": {
-    en: "Loaded"
-  },
-  "Nessun file importato": {
-    en: "No file imported"
-  },
   "Collega questo device": {
     en: "Link this device"
   },
@@ -4984,8 +4992,11 @@ const I18N_DICT = {
   "Token salvato, ma il server non è raggiungibile: riprova più tardi": {
     en: "Token saved, but the server is unreachable: try again later"
   },
-  "In alternativa apri una volta il link con #sync=<token>: il token viene salvato e tolto dall'indirizzo.": {
-    en: "Or open the link with #sync=<token> once: the token is saved and removed from the address."
+  "Il link con #sync=<token> funziona nel browser. Nell'app installata sulla Home incolla qui il token (il browser ha uno storage separato).": {
+    en: "The #sync=<token> link works in the browser. In the app installed on the Home screen, paste the token here (the browser has separate storage)."
+  },
+  "Questo device è già collegato con un altro token. Sostituirlo?": {
+    en: "This device is already linked with a different token. Replace it?"
   },
   "modifiche in coda": {
     en: "changes queued"
@@ -16238,7 +16249,14 @@ function _importPlanChanges(kind, text, fileName, now) {
   const p2 = n => String(n).padStart(2, "0");
   const today = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
   const baseId = `${cfg.prefix}-${today.replace(/-/g, "")}-${p2(d.getHours())}${p2(d.getMinutes())}`;
-  const prev = window.storage ? window.storage.get(cfg.local, null) : null;
+  let prev = window.storage ? window.storage.get(cfg.local, null) : null;
+  if (!(prev && prev.id && prev.data)) {
+    try {
+      prev = PC.activePlan(window.SyncV2 ? window.SyncV2.listRecords(cfg.collection) : [], cfg.collection);
+    } catch (_) {
+      prev = null;
+    }
+  }
   const taken = new Set();
   if (prev && prev.id) taken.add(prev.id);
   try {
@@ -16278,7 +16296,7 @@ function _importPlanChanges(kind, text, fileName, now) {
     changes
   };
 }
-const _DEVICE_LOCAL_KEYS = ["syncToken", "v2deviceId", "v2cursor", "v2epoch", "v2outbox", "groqApiKey", "errorLog"];
+const _DEVICE_LOCAL_KEYS = ["syncToken", "v2deviceId", "v2cursor", "v2epoch", "v2outbox", "groqApiKey", "errorLog", "plan_workout", "plan_diet"];
 function _isDeviceLocalKey(k) {
   return _DEVICE_LOCAL_KEYS.indexOf(k) !== -1 || k.startsWith("v2grp:") || k.startsWith("r:");
 }
@@ -16660,6 +16678,8 @@ const SyncLinkRow = () => {
       });
       return;
     }
+    const cur = window.storage ? window.storage.get("syncToken", null) : null;
+    if (cur && cur !== token && !window.confirm(t("Questo device è già collegato con un altro token. Sostituirlo?"))) return;
     setBusy(true);
     setRes(null);
     try {
@@ -16764,7 +16784,7 @@ const SyncLinkRow = () => {
       color,
       lineHeight: 1.4
     }
-  }, res ? res.msg : t("In alternativa apri una volta il link con #sync=<token>: il token viene salvato e tolto dall'indirizzo."))));
+  }, res ? res.msg : t("Il link con #sync=<token> funziona nel browser. Nell'app installata sulla Home incolla qui il token (il browser ha uno storage separato)."))));
 };
 const SyncStatusRow = () => {
   const t = useT();
@@ -16867,6 +16887,9 @@ const BackupRows = () => {
       }
       if (!window.confirm(t("Ripristinare il backup? I dati locali attuali verranno sovrascritti."))) return;
       const n = _restoreBackupData(window.storage, p.data);
+      try {
+        if (window.SyncV2 && window.SyncV2.refreshPlans) window.SyncV2.refreshPlans();
+      } catch (_) {}
       setStatus({
         type: "ok",
         msg: `${t("Backup ripristinato")} · ${n} ${t("chiavi")}`
@@ -18217,7 +18240,12 @@ if (window.storage) {
       if (window._logError) window._logError(e);else console.warn("[sync] init:", e);
     }
     try {
-      const p = window.SyncV2 && window.SyncV2.consumeLinkHash();
+      const tr = k => {
+        const l = window.storage.get("lang", "it"),
+          e = window.I18N_DICT && window.I18N_DICT[k];
+        return l === "it" ? k : e && e[l] || k;
+      };
+      const p = window.SyncV2 && window.SyncV2.consumeLinkHash(undefined, undefined, () => window.confirm(tr("Questo device è già collegato con un altro token. Sostituirlo?")));
       if (p && p.catch) p.catch(() => {});
     } catch (_) {}
   });

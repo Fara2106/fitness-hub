@@ -161,7 +161,6 @@ const I18N_DICT = {
 
   // Update
   "Nuova versione disponibile": { en: "New version available" },
-  "Aggiorna": { en: "Update" },
   "Aggiornamento…": { en: "Refreshing…" },
 
   // Exercise names (scheda di default / fallback)
@@ -451,9 +450,6 @@ const I18N_DICT = {
   "Mostra": { en: "Show" },
   "Importa file": { en: "Import file" },
   "Importa": { en: "Import" },
-  "Aggiorna": { en: "Update" },
-  "Caricato": { en: "Loaded" },
-  "Nessun file importato": { en: "No file imported" },
   // Impostazioni v2: collegamento, piani, backup
   "Collega questo device": { en: "Link this device" },
   "Collegato": { en: "Linked" },
@@ -465,7 +461,8 @@ const I18N_DICT = {
   "Token rifiutato dal server": { en: "Token rejected by the server" },
   "Collegato e sincronizzato": { en: "Linked and synced" },
   "Token salvato, ma il server non è raggiungibile: riprova più tardi": { en: "Token saved, but the server is unreachable: try again later" },
-  "In alternativa apri una volta il link con #sync=<token>: il token viene salvato e tolto dall'indirizzo.": { en: "Or open the link with #sync=<token> once: the token is saved and removed from the address." },
+  "Il link con #sync=<token> funziona nel browser. Nell'app installata sulla Home incolla qui il token (il browser ha uno storage separato).": { en: "The #sync=<token> link works in the browser. In the app installed on the Home screen, paste the token here (the browser has separate storage)." },
+  "Questo device è già collegato con un altro token. Sostituirlo?": { en: "This device is already linked with a different token. Replace it?" },
   "modifiche in coda": { en: "changes queued" },
   "Sola lettura · l'import .txt è temporaneo": { en: "Read-only · .txt import is temporary" },
   "Scheda attiva": { en: "Active workout plan" },

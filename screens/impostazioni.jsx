@@ -188,7 +188,12 @@ function _importPlanChanges(kind, text, fileName, now) {
   const p2 = (n) => String(n).padStart(2, "0");
   const today = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
   const baseId = `${cfg.prefix}-${today.replace(/-/g, "")}-${p2(d.getHours())}${p2(d.getMinutes())}`;
-  const prev = window.storage ? window.storage.get(cfg.local, null) : null;
+  // Piano attivo da archiviare: la copia locale; se manca (device mai collegato o cache vuota)
+  // quello attivo tra i record noti, così non resta un secondo piano "active" sul server.
+  let prev = window.storage ? window.storage.get(cfg.local, null) : null;
+  if (!(prev && prev.id && prev.data)) {
+    try { prev = PC.activePlan(window.SyncV2 ? window.SyncV2.listRecords(cfg.collection) : [], cfg.collection); } catch (_) { prev = null; }
+  }
   const taken = new Set();
   if (prev && prev.id) taken.add(prev.id);
   try { (window.SyncV2 ? window.SyncV2.listRecords(cfg.collection) : []).forEach((r) => taken.add(r.id)); } catch (_) {}
@@ -208,8 +213,9 @@ function _importPlanChanges(kind, text, fileName, now) {
 }
 
 // Chiavi SOLO del device: mai nel backup (né in export né in ripristino). Token e
-// chiave Groq sono segreti; il resto è stato del motore di sync (cursore, coda, cache record).
-const _DEVICE_LOCAL_KEYS = ["syncToken", "v2deviceId", "v2cursor", "v2epoch", "v2outbox", "groqApiKey", "errorLog"];
+// chiave Groq sono segreti; il resto è stato del motore di sync (cursore, coda, cache record e piani).
+// plan_workout/plan_diet sono una cache dei record dei piani (si ricalcola dai record): mai nel backup.
+const _DEVICE_LOCAL_KEYS = ["syncToken", "v2deviceId", "v2cursor", "v2epoch", "v2outbox", "groqApiKey", "errorLog", "plan_workout", "plan_diet"];
 function _isDeviceLocalKey(k) {
   return _DEVICE_LOCAL_KEYS.indexOf(k) !== -1 || k.startsWith("v2grp:") || k.startsWith("r:");
 }
@@ -501,6 +507,8 @@ const SyncLinkRow = () => {
     const token = _tokenFromInput(val);
     if (!token) { setRes({ type: "err", msg: t("Token non valido: servono 64 caratteri esadecimali") }); return; }
     if (!window.SyncV2) { setRes({ type: "err", msg: t("Errore") }); return; }
+    const cur = window.storage ? window.storage.get("syncToken", null) : null;
+    if (cur && cur !== token && !window.confirm(t("Questo device è già collegato con un altro token. Sostituirlo?"))) return;
     setBusy(true); setRes(null);
     try {
       const r = await window.SyncV2.setToken(token);
@@ -547,7 +555,7 @@ const SyncLinkRow = () => {
           </button>
         </div>
         <div style={{ fontSize: 11.5, color, lineHeight: 1.4 }}>
-          {res ? res.msg : t("In alternativa apri una volta il link con #sync=<token>: il token viene salvato e tolto dall'indirizzo.")}
+          {res ? res.msg : t("Il link con #sync=<token> funziona nel browser. Nell'app installata sulla Home incolla qui il token (il browser ha uno storage separato).")}
         </div>
       </div>
     </div>
@@ -634,6 +642,8 @@ const BackupRows = () => {
       }
       if (!window.confirm(t("Ripristinare il backup? I dati locali attuali verranno sovrascritti."))) return;
       const n = _restoreBackupData(window.storage, p.data);
+      // La cache dei piani non è nel backup: ricalcolata dai record, così la Scheda non resta su un piano vecchio.
+      try { if (window.SyncV2 && window.SyncV2.refreshPlans) window.SyncV2.refreshPlans(); } catch (_) {}
       setStatus({ type: "ok", msg: `${t("Backup ripristinato")} · ${n} ${t("chiavi")}` });
       setTimeout(() => window.location.reload(), 900);
     };
