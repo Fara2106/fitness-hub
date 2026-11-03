@@ -4,7 +4,7 @@
  * (le chiamate API richiedono sempre internet)
  */
 
-const CACHE_NAME = "fitness-hub-v3-20261103104725";
+const CACHE_NAME = "fitness-hub-v3-20261103105158";
 const BASE = "/fitness-hub";
 
 const STATIC_ASSETS = [
@@ -29,13 +29,15 @@ const STATIC_ASSETS = [
   BASE + "/vendor/Recharts.js",
 ];
 
-// ── Install: pre-cacha tutti i file statici ──────────────────────────────────
-// NB: NIENTE self.skipWaiting() → il nuovo SW resta "waiting" finché l'utente
-// non tocca "Aggiorna" nel banner (vedi index.html + app.jsx). Così l'update
-// non si applica in modo silenzioso/imprevedibile.
+// ── Install: pre-cacha tutti i file statici e si attiva subito ────────────────
+// Aggiornamenti silenziosi (dal 2026-11-03, il banner "Aggiorna" è stato tolto):
+// skipWaiting appena il precache è pronto. La pagina aperta continua col codice
+// che ha già; la versione nuova parte alla prossima apertura (vedi boot.js).
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(STATIC_ASSETS))
+      .then(() => self.skipWaiting())
   );
 });
 
@@ -53,7 +55,7 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// ── Message: il banner "Aggiorna" chiede di attivare subito questo SW ─────────
+// ── Message: attivazione esplicita (boot.js la chiede per i worker in attesa) ─
 self.addEventListener("message", (event) => {
   if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
 });

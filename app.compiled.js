@@ -15883,42 +15883,6 @@ function _cleanupOldDailyKeys() {
     });
   } catch (_) {}
 }
-const UpdateBanner = ({
-  onApply
-}) => {
-  const t = useT();
-  return React.createElement("div", {
-    style: {
-      position: "fixed",
-      top: 0,
-      left: 0,
-      right: 0,
-      zIndex: 9995,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 12,
-      padding: "calc(env(safe-area-inset-top) + 9px) 16px 9px",
-      background: "var(--accent)",
-      color: "#fff",
-      fontSize: 13.5,
-      fontWeight: 600,
-      boxShadow: "0 2px 12px rgba(0,0,0,0.28)"
-    }
-  }, React.createElement("span", null, "🔄 ", t("Nuova versione disponibile")), React.createElement("button", {
-    onClick: onApply,
-    style: {
-      background: "rgba(255,255,255,0.22)",
-      color: "#fff",
-      border: 0,
-      borderRadius: 8,
-      padding: "6px 14px",
-      fontSize: 13,
-      fontWeight: 700,
-      cursor: "pointer"
-    }
-  }, t("Aggiorna")));
-};
 const PullToRefresh = ({
   scrollEl,
   onRefresh
@@ -16075,12 +16039,6 @@ const AppFrame = ({
   });
   const [lang, setLang] = React.useState(window.storage ? window.storage.get("lang", "it") : "it");
   const [initialized, setInitialized] = React.useState(false);
-  const [updateReady, setUpdateReady] = React.useState(() => !!window._swUpdateReady);
-  React.useEffect(() => {
-    const onUpd = () => setUpdateReady(true);
-    window.addEventListener("lfh-sw-update", onUpd);
-    return () => window.removeEventListener("lfh-sw-update", onUpd);
-  }, []);
   const syncNowRef = React.useRef(null);
   React.useEffect(() => {
     const onMerged = () => {
@@ -16208,9 +16166,7 @@ const AppFrame = ({
       lang,
       setLang: globalCtx.setLang
     }
-  }, updateReady && React.createElement(UpdateBanner, {
-    onApply: () => window._swApplyUpdate && window._swApplyUpdate()
-  }), content);
+  }, content);
   if (!storageReady || !initialized) {
     return wrap(React.createElement("div", {
       className: `lfh ${isDesktop ? "desktop" : "mobile"}`,

@@ -69,38 +69,27 @@
 })();
 
 /* ── Service Worker (PWA offline support) ──────────────────────────────── */
+// Aggiornamenti SILENZIOSI (dal 2026-11-03, al posto del banner "Aggiorna",
+// che su iOS risultava inaffidabile): il nuovo SW si attiva appena installato
+// e la versione nuova parte alla prossima apertura. Nessun reload a sorpresa:
+// si ricarica da soli solo tornando all'app dopo ≥10 min in background
+// (mai a metà di un'azione, es. allenamento in corso).
 if ('serviceWorker' in navigator) {
-  // Ricarica quando un nuovo SW prende il controllo (scatta DOPO che l'utente
-  // tocca "Aggiorna" → SKIP_WAITING → il nuovo SW si attiva). Guard anti-loop.
-  let _refreshing = false;
   // Alla PRIMA installazione il SW fa clients.claim() → controllerchange anche
-  // senza alcun update: senza questo guard la pagina si ricaricava da sola al
-  // primo avvio (es. a metà onboarding). Si ricarica solo se un SW c'era già.
+  // senza alcun update: lì non c'è nulla da ricaricare.
   const _hadController = !!navigator.serviceWorker.controller;
+  let _updated = false, _refreshing = false, _hiddenAt = 0;
+  const RELOAD_AFTER_MS = 10 * 60 * 1000;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (_refreshing || !_hadController) return;
-    _refreshing = true;
-    console.log('[SW] Nuovo SW attivo, ricarico...');
-    window.location.reload();
+    if (_hadController) { _updated = true; console.log('[SW] Nuova versione attiva (al prossimo avvio).'); }
   });
-
-  // Ponte verso React: segnala che c'è un update pronto e come applicarlo.
-  // Stesso schema del ponte sync ("lfh-sync"). _swUpdateReady copre il caso in
-  // cui React monti DOPO l'evento (lo stato iniziale lo rilegge).
-  let _reg = null;
-  function _promptUpdate(worker) {
-    if (!worker) return;
-    // Al tap usa il worker in attesa PIÙ RECENTE: con due deploy ravvicinati
-    // quello catturato qui diventa "redundant" e il messaggio andava perso
-    // (banner che ricompare dopo il reload).
-    window._swApplyUpdate = () => {
-      const w = (_reg && _reg.waiting) || worker;
-      w.postMessage({ type: 'SKIP_WAITING' });
-    };
-    window._swUpdateReady = true;
-    try { window.dispatchEvent(new Event('lfh-sw-update')); } catch (_) {}
-    console.log('[SW] Update disponibile, banner mostrato.');
-  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') { _hiddenAt = Date.now(); return; }
+    if (_updated && !_refreshing && _hiddenAt && Date.now() - _hiddenAt >= RELOAD_AFTER_MS) {
+      _refreshing = true;
+      window.location.reload();
+    }
+  });
 
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js')
@@ -109,20 +98,15 @@ if ('serviceWorker' in navigator) {
         // senza guard, reg.scope lancerebbe un TypeError confuso dentro il catch
         if (!reg) { console.warn('[SW] Registrazione bloccata dall\'ambiente (nessun registration object) — ok in test/automazione'); return; }
         console.log('[SW] Registrato:', reg.scope);
-        _reg = reg;
-        // Un worker in installazione: quando è "installed" E c'è già un
-        // controller (= aggiornamento, non prima installazione) → banner.
+        // Worker in attesa (es. installato da una versione di sw.js che non
+        // faceva ancora skipWaiting da sola) → attivalo subito.
+        const activate = (w) => { try { w && w.postMessage({ type: 'SKIP_WAITING' }); } catch (_) {} };
         const track = (nw) => {
           if (!nw) return;
-          if (nw.state === 'installed' && navigator.serviceWorker.controller) { _promptUpdate(nw); return; }
-          nw.addEventListener('statechange', () => {
-            if (nw.state === 'installed' && navigator.serviceWorker.controller) _promptUpdate(nw);
-          });
+          if (nw.state === 'installed') { activate(nw); return; }
+          nw.addEventListener('statechange', () => { if (nw.state === 'installed') activate(nw); });
         };
-        // Se un worker è già in attesa al load → update pronto.
-        if (reg.waiting && navigator.serviceWorker.controller) _promptUpdate(reg.waiting);
-        // …o già in installazione: l'updatefound è scattato PRIMA che il
-        // listener sotto esistesse (update trovato durante register()).
+        if (reg.waiting) activate(reg.waiting);
         track(reg.installing);
         reg.addEventListener('updatefound', () => track(reg.installing));
 
