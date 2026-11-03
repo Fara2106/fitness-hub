@@ -559,7 +559,7 @@ const I18N_DICT = {
   "Export fallito": { en: "Export failed" },
   "chiavi": { en: "keys" },
   "File non valido — dati attuali conservati": { en: "Invalid file — current data kept" },
-  "Ripristinare il backup? I dati locali attuali verranno sovrascritti.": { en: "Restore this backup? Current local data will be overwritten." },
+  "Ripristinare il backup? I dati locali verranno sovrascritti, ma i dati già sincronizzati non vengono riportati indietro.": { en: "Restore this backup? Local data will be overwritten, but data already synced won't be rolled back." },
   "Backup ripristinato": { en: "Backup restored" },
   "Diagnostica": { en: "Diagnostics" },
   "Log errori": { en: "Error log" },

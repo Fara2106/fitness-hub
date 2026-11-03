@@ -2654,6 +2654,7 @@ window.buildDefaultNotifConfig = function () {
   };
   let chain = Promise.resolve(),
     queued = null;
+  let gen = 0;
   const isObj = v => v !== null && typeof v === "object" && !Array.isArray(v);
   const keyOf = (c, id) => `${c}/${id}`;
   const splitKey = k => {
@@ -3029,6 +3030,7 @@ window.buildDefaultNotifConfig = function () {
     persist,
     rebuild
   }) {
+    const g = gen;
     let pushed = 0,
       pulled = 0;
     const adopted = [];
@@ -3116,6 +3118,13 @@ window.buildDefaultNotifConfig = function () {
         if (outbox[k] === s) delete outbox[k];
       });
       if (batch.length) persistOutbox();
+      if (g !== gen) return {
+        ok: false,
+        error: "rebaseline",
+        pushed,
+        pulled,
+        adopted
+      };
       const epochChanged = j.epoch != null && cur.epoch != null && j.epoch !== cur.epoch;
       if (j.epoch != null) cur.epoch = j.epoch;
       if (epochChanged && persist) return {
@@ -3336,7 +3345,7 @@ window.buildDefaultNotifConfig = function () {
     if (r.ok) {
       pruneGroupIndex();
       setStatus("ok");
-    } else setStatus(r.error === "offline" ? "offline" : "error", r.error);
+    } else if (r.error === "rebaseline") {} else setStatus(r.error === "offline" ? "offline" : "error", r.error);
     const out = {
       ok: r.ok,
       pushed: r.pushed,
@@ -3354,6 +3363,29 @@ window.buildDefaultNotifConfig = function () {
     queued = p;
     chain = p.catch(() => {});
     return p;
+  }
+  function rebaseline() {
+    if (!S) return Promise.resolve({
+      ok: false,
+      pushed: 0,
+      pulled: 0,
+      error: "non inizializzato"
+    });
+    gen++;
+    S.keys().forEach(k => {
+      if (k.startsWith(GRP)) S.remove(k, SILENT);
+    });
+    S.set(K.cursor, 0, SILENT);
+    firstDone = false;
+    dirty.clear();
+    touched.clear();
+    if (!hasToken()) return Promise.resolve({
+      ok: true,
+      pushed: 0,
+      pulled: 0,
+      local: true
+    });
+    return syncNow();
   }
   async function setToken(token) {
     if (!S) return {
@@ -3420,7 +3452,7 @@ window.buildDefaultNotifConfig = function () {
   }
   function linkTokenFromHash(hash) {
     const m = /^#sync=([0-9a-fA-F]{64})$/.exec(String(hash == null ? "" : hash));
-    return m ? m[1] : null;
+    return m ? m[1].toLowerCase() : null;
   }
   function consumeLinkHash(loc, hist, confirmReplace) {
     const l = loc || (typeof location !== "undefined" ? location : null);
@@ -3431,7 +3463,7 @@ window.buildDefaultNotifConfig = function () {
       if (h && typeof h.replaceState === "function") h.replaceState(null, "", (l.pathname || "") + (l.search || ""));
     } catch (_) {}
     const cur = S ? S.get(K.token, null) : null;
-    if (cur && cur !== token && typeof confirmReplace === "function") {
+    if (cur && String(cur).toLowerCase() !== token && typeof confirmReplace === "function") {
       let yes = false;
       try {
         yes = !!confirmReplace();
@@ -3512,6 +3544,7 @@ window.buildDefaultNotifConfig = function () {
     consumeLinkHash,
     refreshPlans: refreshPlansNow,
     syncNow,
+    rebaseline,
     putRecords,
     getRecord,
     listRecords,
@@ -5268,8 +5301,8 @@ const I18N_DICT = {
   "File non valido — dati attuali conservati": {
     en: "Invalid file — current data kept"
   },
-  "Ripristinare il backup? I dati locali attuali verranno sovrascritti.": {
-    en: "Restore this backup? Current local data will be overwritten."
+  "Ripristinare il backup? I dati locali verranno sovrascritti, ma i dati già sincronizzati non vengono riportati indietro.": {
+    en: "Restore this backup? Local data will be overwritten, but data already synced won't be rolled back."
   },
   "Backup ripristinato": {
     en: "Backup restored"
@@ -16309,12 +16342,15 @@ function _backupData(st) {
 }
 function _restoreBackupData(st, data) {
   const keys = Object.keys(data || {}).filter(k => !_isDeviceLocalKey(k));
-  keys.forEach(k => st.set(k, data[k]));
+  keys.forEach(k => st.set(k, data[k], {
+    silent: true
+  }));
   return keys.length;
 }
 window.ImpostazioniLogic = {
   importPlanChanges: _importPlanChanges,
   isDeviceLocalKey: _isDeviceLocalKey,
+  tokenFromInput: _tokenFromInput,
   backupData: _backupData,
   restoreBackupData: _restoreBackupData,
   validateSchedaText: _validateSchedaText,
@@ -16644,7 +16680,7 @@ function _tokenFromInput(raw) {
   const v = String(raw || "").trim();
   const i = v.indexOf("#sync=");
   const cand = i >= 0 ? v.slice(i + 6) : v;
-  return _TOKEN_RE.test(cand) ? cand : null;
+  return _TOKEN_RE.test(cand) ? cand.toLowerCase() : null;
 }
 const SyncLinkRow = () => {
   const t = useT();
@@ -16679,7 +16715,7 @@ const SyncLinkRow = () => {
       return;
     }
     const cur = window.storage ? window.storage.get("syncToken", null) : null;
-    if (cur && cur !== token && !window.confirm(t("Questo device è già collegato con un altro token. Sostituirlo?"))) return;
+    if (cur && String(cur).toLowerCase() !== token && !window.confirm(t("Questo device è già collegato con un altro token. Sostituirlo?"))) return;
     setBusy(true);
     setRes(null);
     try {
@@ -16885,16 +16921,21 @@ const BackupRows = () => {
         });
         return;
       }
-      if (!window.confirm(t("Ripristinare il backup? I dati locali attuali verranno sovrascritti."))) return;
+      if (!window.confirm(t("Ripristinare il backup? I dati locali verranno sovrascritti, ma i dati già sincronizzati non vengono riportati indietro."))) return;
       const n = _restoreBackupData(window.storage, p.data);
       try {
         if (window.SyncV2 && window.SyncV2.refreshPlans) window.SyncV2.refreshPlans();
+      } catch (_) {}
+      let sync = null;
+      try {
+        if (window.SyncV2 && window.SyncV2.rebaseline) sync = window.SyncV2.rebaseline();
       } catch (_) {}
       setStatus({
         type: "ok",
         msg: `${t("Backup ripristinato")} · ${n} ${t("chiavi")}`
       });
-      setTimeout(() => window.location.reload(), 900);
+      const wait = new Promise(res => setTimeout(res, 5000));
+      Promise.race([Promise.resolve(sync).catch(() => {}), wait]).then(() => setTimeout(() => window.location.reload(), 600));
     };
     reader.readAsText(f, "UTF-8");
   };

@@ -225,14 +225,16 @@ function _backupData(st) {
   return data;
 }
 // Scrive le chiavi del file ignorando quelle del device (anche se presenti in un backup vecchio).
+// In SILENZIO (Ruling 14): il motore di sync non deve leggerle come modifiche (tombstonerebbe tutto ciò
+// che è nato dopo il backup, su ogni device). Dopo il ripristino l'UI chiama SyncV2.rebaseline().
 function _restoreBackupData(st, data) {
   const keys = Object.keys(data || {}).filter((k) => !_isDeviceLocalKey(k));
-  keys.forEach((k) => st.set(k, data[k]));
+  keys.forEach((k) => st.set(k, data[k], { silent: true }));
   return keys.length;
 }
 
 window.ImpostazioniLogic = {
-  importPlanChanges: _importPlanChanges, isDeviceLocalKey: _isDeviceLocalKey,
+  importPlanChanges: _importPlanChanges, isDeviceLocalKey: _isDeviceLocalKey, tokenFromInput: _tokenFromInput,
   backupData: _backupData, restoreBackupData: _restoreBackupData,
   validateSchedaText: _validateSchedaText, validateDietaText: _validateDietaText,
 };
@@ -480,11 +482,12 @@ const SyncNowRow = () => {
 // Il token sta solo in window.storage (syncToken), mai nel backup né sincronizzato.
 // Accetta il token da solo o l'intero link ".../#sync=<token>" incollato.
 const _TOKEN_RE = /^[0-9a-fA-F]{64}$/;
+// Token in minuscolo (com'è generato, openssl rand -hex): un link o un incolla in maiuscolo è lo stesso token.
 function _tokenFromInput(raw) {
   const v = String(raw || "").trim();
   const i = v.indexOf("#sync=");
   const cand = i >= 0 ? v.slice(i + 6) : v;
-  return _TOKEN_RE.test(cand) ? cand : null;
+  return _TOKEN_RE.test(cand) ? cand.toLowerCase() : null;
 }
 const SyncLinkRow = () => {
   const t = useT();
@@ -508,7 +511,7 @@ const SyncLinkRow = () => {
     if (!token) { setRes({ type: "err", msg: t("Token non valido: servono 64 caratteri esadecimali") }); return; }
     if (!window.SyncV2) { setRes({ type: "err", msg: t("Errore") }); return; }
     const cur = window.storage ? window.storage.get("syncToken", null) : null;
-    if (cur && cur !== token && !window.confirm(t("Questo device è già collegato con un altro token. Sostituirlo?"))) return;
+    if (cur && String(cur).toLowerCase() !== token && !window.confirm(t("Questo device è già collegato con un altro token. Sostituirlo?"))) return;
     setBusy(true); setRes(null);
     try {
       const r = await window.SyncV2.setToken(token);
@@ -640,12 +643,18 @@ const BackupRows = () => {
         setStatus({ type: "err", msg: t("File non valido — dati attuali conservati") });
         return;
       }
-      if (!window.confirm(t("Ripristinare il backup? I dati locali attuali verranno sovrascritti."))) return;
+      if (!window.confirm(t("Ripristinare il backup? I dati locali verranno sovrascritti, ma i dati già sincronizzati non vengono riportati indietro."))) return;
       const n = _restoreBackupData(window.storage, p.data);
       // La cache dei piani non è nel backup: ricalcolata dai record, così la Scheda non resta su un piano vecchio.
       try { if (window.SyncV2 && window.SyncV2.refreshPlans) window.SyncV2.refreshPlans(); } catch (_) {}
+      // Rebaseline (Ruling 14): primo sync → il server tiene i dati più nuovi, parte solo ciò che non ha.
+      let sync = null;
+      try { if (window.SyncV2 && window.SyncV2.rebaseline) sync = window.SyncV2.rebaseline(); } catch (_) {}
       setStatus({ type: "ok", msg: `${t("Backup ripristinato")} · ${n} ${t("chiavi")}` });
-      setTimeout(() => window.location.reload(), 900);
+      // Ricarica dopo il sync (al massimo 5 s): anche se si ricarica prima, il primo sync riparte all'avvio.
+      const wait = new Promise((res) => setTimeout(res, 5000));
+      Promise.race([Promise.resolve(sync).catch(() => {}), wait])
+        .then(() => setTimeout(() => window.location.reload(), 600));
     };
     reader.readAsText(f, "UTF-8");
   };

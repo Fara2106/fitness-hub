@@ -1289,6 +1289,82 @@ await (async () => {
       ok("setToken giusto: la coda parte", good.ok && A.outbox().length === 0 && find(await serverRecords(env), "dayState", `${TODAY}:notes`).data.value === "x");
     }
 
+    // ── ripristino di un backup vecchio su device collegato (Ruling 14: rebaseline) ──
+    {
+      const env = await backend();
+      const A = device(env), B = device(env, { t: T0 + 5 });
+      await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN);
+      ok("SyncV2 espone rebaseline()", typeof A.SV.rebaseline === "function");
+      A.S.set("weightLog", [{ date: daysAgo(3), weight: 80 }]);
+      A.S.set("exNotes", { panca: "vecchia" });
+      A.S.set("spesaExtra", [{ id: 1, name: "Caffè" }]);
+      await tick(); await A.sync();
+      // backup preso adesso (+ una pesata solo nel file, mai arrivata al server)
+      const backup = { weightLog: [{ date: daysAgo(10), weight: 81 }, { date: daysAgo(3), weight: 80 }], exNotes: { panca: "vecchia" }, spesaExtra: [{ id: 1, name: "Caffè" }] };
+      // dati più nuovi del backup, sul server (anche da un altro device)
+      A.clock.t += 1000;
+      A.S.set("weightLog", [{ date: daysAgo(3), weight: 80 }, { date: daysAgo(1), weight: 79 }]);
+      A.S.set("exNotes", { panca: "nuova", squat: "piedi larghi" });
+      A.S.set("spesaExtra", [{ id: 1, name: "Caffè" }, { id: 2, name: "Tè" }]);
+      await tick(); await A.sync();
+      B.S.set("prMap", { "Panca": { peso: 30, date: TODAY } });
+      await tick(); await B.sync(); await A.sync();
+      ok("rebaseline: premessa — dati più nuovi sul server", count(await serverRecords(env), "bodyWeight") === 2 && A.outbox().length === 0);
+      // ripristino come Impostazioni: chiavi scritte in silenzio, poi rebaseline
+      const n0 = A.net.requests.length;
+      Object.keys(backup).forEach(k => A.S.set(k, backup[k], { silent: true }));
+      A.S.remove("prMap", { silent: true }); // come un backup più vecchio dei PR (chiave assente)
+      const r = await A.SV.rebaseline();
+      ok("rebaseline: sync riuscito", !!r && r.ok === true);
+      ok("rebaseline: nessun tombstone inviato", !A.sent(n0).some(c => c.deleted));
+      const srv = await serverRecords(env);
+      const live = (c, id) => { const x = find(srv, c, id); return !!x && !x.deleted; };
+      ok("rebaseline: i dati più nuovi restano sul server (pesata, note, extra, PR)",
+        live("bodyWeight", daysAgo(1)) && live("exerciseNote", "squat") && live("shoppingExtra", "2") && live("personalRecord", "panca") &&
+        find(srv, "exerciseNote", "panca").data.text === "nuova");
+      ok("rebaseline: il record solo nel backup viene pushato (una volta sola)", live("bodyWeight", daysAgo(10)) &&
+        A.sent(n0).filter(c => c.collection === "bodyWeight").map(c => c.id).join() === daysAgo(10));
+      ok("rebaseline: i dati più nuovi tornano in locale (server vince sugli id che ha)",
+        A.S.get("weightLog").map(e => e.date).join() === [daysAgo(10), daysAgo(3), daysAgo(1)].join() &&
+        A.S.get("exNotes").panca === "nuova" && A.S.get("exNotes").squat === "piedi larghi" &&
+        A.S.get("spesaExtra").map(e => e.id).sort().join() === "1,2" && A.S.get("prMap").Panca.peso === 30);
+      ok("rebaseline: cursore e indice gruppi ricostruiti, coda vuota", A.S.get("v2cursor") > 0 && Array.isArray(A.S.get("v2grp:weights")) && A.outbox().length === 0);
+      await B.sync();
+      ok("rebaseline: l'altro device non perde niente e riceve la pesata del backup", B.S.get("weightLog").map(e => e.date).join() === [daysAgo(10), daysAgo(3), daysAgo(1)].join() && B.S.get("exNotes").squat === "piedi larghi");
+      // dopo il rebaseline il motore torna normale: una cancellazione vera è un tombstone
+      A.S.set("weightLog", A.S.get("weightLog").filter(e => e.date !== daysAgo(1)));
+      await tick();
+      ok("dopo il rebaseline: cancellazione vera → tombstone", A.outbox().join() === `bodyWeight/${daysAgo(1)}` && A.S.get("v2outbox")[`bodyWeight/${daysAgo(1)}`].deleted === true);
+      await A.sync();
+
+      // rebaseline mentre un sync è in volo: il giro in volo non salva cursore né chiavi, poi primo sync
+      B.S.set("exNotes", { ...B.S.get("exNotes"), stacco: "presa mista" });
+      await tick(); await B.sync();
+      const n1 = A.net.requests.length;
+      let inFlight = null;
+      A.net.hook = async () => {
+        A.S.set("exNotes", { panca: "vecchia" }, { silent: true });
+        inFlight = A.SV.rebaseline();
+      };
+      const r1 = await A.sync();
+      await inFlight;
+      ok("rebaseline durante un sync: il giro in volo si ferma senza errore visibile", r1.ok === false && r1.error === "rebaseline" && A.SV.status().status === "ok");
+      ok("rebaseline durante un sync: nessun tombstone, note dal server (anche quella nuova di B)",
+        !A.sent(n1).some(c => c.deleted) && A.S.get("exNotes").panca === "nuova" && A.S.get("exNotes").stacco === "presa mista");
+
+      // senza token: solo ripristino locale, niente rete, niente errori
+      const C = device(env);
+      C.S.set("weightLog", [{ date: daysAgo(2), weight: 82 }]);
+      await tick();
+      C.S.set("weightLog", [{ date: daysAgo(4), weight: 83 }], { silent: true });
+      const rc = await C.SV.rebaseline();
+      ok("rebaseline senza token: ok locale, nessuna richiesta, dati ripristinati intatti",
+        rc && rc.ok === true && C.net.requests.length === 0 && C.S.get("weightLog")[0].date === daysAgo(4) && C.SV.status().linked === false);
+      await C.SV.setToken(TOKEN);
+      ok("rebaseline senza token: al collegamento primo sync (pesata del backup pushata, dati del server ricevuti)",
+        live("bodyWeight", daysAgo(10)) && !!find(await serverRecords(env), "bodyWeight", daysAgo(4)) && C.S.get("weightLog").some(e => e.date === daysAgo(3)));
+    }
+
     // ── lotti: ≤ 500 change e ≤ 1,5 MB per richiesta ───────────────────────────
     {
       const env = await backend();
@@ -1580,6 +1656,18 @@ await (async () => {
     const ry = await SV.consumeLinkHash(loc, hist, () => { asks.push(1); return true; });
     ok("consumeLinkHash: token diverso, confermata → sostituito", asks.length === 2 && S.get("syncToken") === TOKEN && ry && ry.error !== "declined");
     ok("il token non finisce mai nei log (anche nei percorsi con conferma)", !logs.some(l => l.includes(TOKEN) || l.includes(OTHER)));
+    // Maiuscole/minuscole: stesso token → nessuna conferma, salvato in minuscolo
+    ok("linkTokenFromHash: hex maiuscolo → token in minuscolo", SV.linkTokenFromHash("#sync=" + TOKEN.toUpperCase()) === TOKEN);
+    calls.length = 0;
+    const nAsk = asks.length;
+    await SV.consumeLinkHash({ hash: "#sync=" + TOKEN.toUpperCase(), pathname: "/fitness-hub/", search: "" }, hist, () => { asks.push(1); return false; });
+    ok("consumeLinkHash: stesso token in maiuscolo → nessuna conferma, token invariato", asks.length === nAsk && calls.length === 1 && S.get("syncToken") === TOKEN);
+    S.set("syncToken", TOKEN.toUpperCase(), { silent: true }); // salvato in maiuscolo da una versione vecchia
+    await SV.consumeLinkHash(loc, hist, () => { asks.push(1); return false; });
+    ok("consumeLinkHash: token salvato in maiuscolo, link in minuscolo → nessuna conferma", asks.length === nAsk);
+    ok("tokenFromInput: token o link incollato in maiuscolo → minuscolo; non valido → null",
+      L.tokenFromInput("  " + TOKEN.toUpperCase() + " ") === TOKEN && L.tokenFromInput("https://fara2106.github.io/fitness-hub/#sync=" + TOKEN.toUpperCase()) === TOKEN &&
+      L.tokenFromInput(TOKEN) === TOKEN && L.tokenFromInput("xyz") === null && L.tokenFromInput(TOKEN.slice(2)) === null);
     SV.setToken("");
   }
 
@@ -1649,7 +1737,11 @@ await (async () => {
     S.set("groqApiKey", "gsk_questa", { silent: true });
     S.set("plan_workout", { id: "piano-attuale" }, { silent: true });
     const old = { plan_workout: { id: "piano-vecchio" }, plan_diet: { id: "x" }, bodyWeight: 81.5, syncToken: "TOKEN-VECCHIO", v2cursor: 999, "v2grp:weights": ["x"], "r:setLog:zz": {}, groqApiKey: "gsk_vecchia", errorLog: [1], v2outbox: { a: 1 }, spesaChecked: { "a-0": true } };
+    const seen = [];
+    const unsub = S.onChange((k, v, info) => seen.push([k, info && info.silent]));
     const n = L.restoreBackupData(S, old);
+    unsub();
+    ok("ripristino: chiavi scritte in silenzio (il motore di sync non le legge come modifiche)", seen.length === 2 && seen.every(([, sil]) => sil === true));
     ok("ripristino: scrive solo le chiavi non del device (n corretto)", n === 2 && S.get("bodyWeight") === 81.5 && S.get("spesaChecked")["a-0"] === true);
     ok("ripristino: token, Groq, cursore, coda, v2grp, r:* del file vecchio ignorati",
       S.get("syncToken") === "TOKEN-DI-QUESTO-DEVICE" && S.get("groqApiKey") === "gsk_questa" && S.get("v2cursor", null) !== 999 && S.get("v2grp:weights", null) === "x-v2grp:weights" && S.get("r:setLog:zz", null) === null && S.get("v2outbox") === "x-v2outbox");
@@ -1688,8 +1780,12 @@ await (async () => {
     ok("i18n: le stringhe tolte (import/export vecchi) non sono più usate", !used.some(k => /^Importa (scheda|dieta) \(\.txt\)$|^Il testo attuale|^Importa scheda\.txt e dieta\.txt$/.test(k)));
     const mount = readFileSync(join(ROOT, "app.jsx"), "utf8");
     ok("app.jsx: consumeLinkHash chiamato dopo SyncV2.init dentro storage.onReady, con conferma di sostituzione", /SyncV2\.init\([\s\S]{0,900}consumeLinkHash\(undefined, undefined,\s*\(\) => window\.confirm\(/.test(mount));
-    ok("impostazioni.jsx: dopo il ripristino si ricalcola la cache piani; il collegamento chiede conferma se il token cambia",
-      /_restoreBackupData\(window\.storage[\s\S]{0,300}SyncV2\.refreshPlans\(\)/.test(src) && /cur !== token && !window\.confirm\(/.test(src));
+    ok("impostazioni.jsx: dopo il ripristino si ricalcola la cache piani e si fa il rebaseline; il collegamento chiede conferma se il token cambia",
+      /_restoreBackupData\(window\.storage[\s\S]{0,300}SyncV2\.refreshPlans\(\)[\s\S]{0,300}SyncV2\.rebaseline\(\)/.test(src) && /String\(cur\)\.toLowerCase\(\) !== token && !window\.confirm\(/.test(src));
+    ok("i18n: conferma del ripristino dice che i dati già sincronizzati non tornano indietro (IT+EN)",
+      used.includes("Ripristinare il backup? I dati locali verranno sovrascritti, ma i dati già sincronizzati non vengono riportati indietro.") &&
+      /"Ripristinare il backup\? I dati locali verranno sovrascritti, ma i dati già sincronizzati non vengono riportati indietro\.": \{ en: "[^"]*won't be rolled back/.test(i18n) &&
+      !i18n.includes("I dati locali attuali verranno sovrascritti"));
   }
 })();
 

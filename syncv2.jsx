@@ -7,6 +7,7 @@
 //     hasToken() → boolean
 //     linkTokenFromHash(hash) → token|null · consumeLinkHash(loc?, hist?, confirmReplace?) → Promise|null · refreshPlans() → chiavi   (#sync=<64 hex> all'avvio)
 //     syncNow()  → Promise<{ ok, pushed, pulled, error? }>   error: "unlinked"|"offline"|"unauthorized"|…
+//     rebaseline() → Promise   dopo un ripristino del backup (scritto in silenzio): il prossimo sync è un primo sync
 //     putRecords(changes)                    scrittura diretta di record ({collection,id,data,deleted?}), per i piani
 //     getRecord(collection, id) → Record|null      cache + modifiche in coda (tombstone inclusi)
 //     listRecords(collection)   → Record[]         idem, tutta la collezione
@@ -32,6 +33,9 @@
 // locali che il server non ha (+ i record cambiati dall'utente mentre il sync era in corso), poi
 // ricostruzione delle chiavi: un device con dati vecchi non sovrascrive mai dati più nuovi del server.
 // Epoch cambiato (DB ripristinato, Ruling 9) = primo sync: via cache r:*, v2grp e cursore, coda tenuta.
+// rebaseline() (ripristino di un backup, Ruling 14) = primo sync: via v2grp e cursore (cache r:* tenuta), poi
+// sync → il server vince sugli id che ha, si pusha solo ciò che non ha (mai tombstone per dati più nuovi).
+// Un giro di sync in volo durante il rebaseline non salva cursore né chiavi (generazione `gen`).
 (function () {
   const API = "https://fitness-hub-api.lorefara97.workers.dev";
   const DEBOUNCE_MS = 1500;
@@ -66,6 +70,7 @@
   let firstDone = false, firstRunning = false, flushScheduled = false, timer = null;
   let state = { status: "idle", last: null };
   let chain = Promise.resolve(), queued = null;
+  let gen = 0;                    // cresce a ogni rebaseline: un exchange in volo di prima si ferma
 
   // ── helper ────────────────────────────────────────────────────────────────
   const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -360,6 +365,7 @@
   // Push della coda + pull dal cursore, finché c'è coda o `more`. cur = { cursor, epoch } (aggiornato).
   // persist: salva cursore/epoch a ogni giro; rebuild: applica i record adottati a ogni giro.
   async function exchange(token, cur, { persist, rebuild }) {
+    const g = gen;
     let pushed = 0, pulled = 0;
     const adopted = [];
     for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -408,6 +414,8 @@
         if (outbox[k] === s) delete outbox[k]; // cambiata nel frattempo → resta in coda (updatedAt più alto)
       });
       if (batch.length) persistOutbox();
+      // rebaseline nel frattempo: niente cursore, cache o chiavi da questo giro (riparte da un primo sync).
+      if (g !== gen) return { ok: false, error: "rebaseline", pushed, pulled, adopted };
 
       // epoch cambiato (DB azzerato o ripristinato, Ruling 9) → come un primo sync: fuori dal primo sync
       // si esce e runSync riparte da zero; dentro il primo sync si svuota la cache e si ripulla da 0.
@@ -551,6 +559,7 @@
       r = { ok: false, pushed: 0, pulled: 0, error: String((e && e.message) || e) };
     }
     if (r.ok) { pruneGroupIndex(); setStatus("ok"); }
+    else if (r.error === "rebaseline") { /* segue il primo sync già in fila */ }
     else setStatus(r.error === "offline" ? "offline" : "error", r.error);
     const out = { ok: r.ok, pushed: r.pushed, pulled: r.pulled };
     if (!r.ok) out.error = r.error;
@@ -564,6 +573,21 @@
     queued = p;
     chain = p.catch(() => {});
     return p;
+  }
+
+  // Dopo un ripristino del backup (chiavi scritte in silenzio, Ruling 14): via indice gruppi e cursore,
+  // il prossimo sync è un primo sync. Subito e in modo persistente (anche se la pagina si ricarica prima
+  // del sync): le modifiche locali di qui in poi non si confrontano più con l'indice vecchio.
+  function rebaseline() {
+    if (!S) return Promise.resolve({ ok: false, pushed: 0, pulled: 0, error: "non inizializzato" });
+    gen++;
+    S.keys().forEach((k) => { if (k.startsWith(GRP)) S.remove(k, SILENT); });
+    S.set(K.cursor, 0, SILENT);
+    firstDone = false;
+    dirty.clear();
+    touched.clear();
+    if (!hasToken()) return Promise.resolve({ ok: true, pushed: 0, pulled: 0, local: true });
+    return syncNow();
   }
 
   // ── API pubblica ──────────────────────────────────────────────────────────
@@ -615,7 +639,7 @@
   // (qualsiasi altro hash, o lunghezza/caratteri sbagliati, è ignorato).
   function linkTokenFromHash(hash) {
     const m = /^#sync=([0-9a-fA-F]{64})$/.exec(String(hash == null ? "" : hash));
-    return m ? m[1] : null;
+    return m ? m[1].toLowerCase() : null; // minuscolo: lo stesso token scritto in maiuscolo non è "diverso"
   }
   // All'avvio (dopo init): se l'hash è un link valido, ripulisce l'URL (replaceState) e collega il
   // device. Ritorna la Promise di setToken, o null se non c'era niente da fare. Il token non si logga.
@@ -628,7 +652,7 @@
     if (!token) return null;
     try { if (h && typeof h.replaceState === "function") h.replaceState(null, "", (l.pathname || "") + (l.search || "")); } catch (_) {}
     const cur = S ? S.get(K.token, null) : null;
-    if (cur && cur !== token && typeof confirmReplace === "function") {
+    if (cur && String(cur).toLowerCase() !== token && typeof confirmReplace === "function") {
       let yes = false;
       try { yes = !!confirmReplace(); } catch (_) {}
       if (!yes) return Promise.resolve({ ok: false, error: "declined" });
@@ -677,6 +701,6 @@
     return SyncV2;
   }
 
-  const SyncV2 = { API, init, setToken, hasToken, linkTokenFromHash, consumeLinkHash, refreshPlans: refreshPlansNow, syncNow, putRecords, getRecord, listRecords, activePlans, status };
+  const SyncV2 = { API, init, setToken, hasToken, linkTokenFromHash, consumeLinkHash, refreshPlans: refreshPlansNow, syncNow, rebaseline, putRecords, getRecord, listRecords, activePlans, status };
   window.SyncV2 = SyncV2;
 })();
