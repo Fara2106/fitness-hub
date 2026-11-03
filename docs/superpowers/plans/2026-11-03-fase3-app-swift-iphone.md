@@ -368,13 +368,25 @@ Va subito dopo il Task 1: Lorenzo sceglie mentre si costruisce il resto.
 - [ ] **Step 2:** FAIL → implementa → PASS.
 - [ ] **Step 3:** commit `feat(app): impostazioni, backup, diagnostica`.
 
+### Task 18B: Crea il tuo account nell'app (codice di attivazione monouso)
+
+Richiesta di Lorenzo (2026-11-03): l'account lo crea nell'app completa, non nella PWA né dal Terminale.
+
+**Files:** (repo `Fitness App`) `backend/src/worker.mjs`, `backend/src/auth.mjs`, `backend/migrations/0004_activation.sql` (+ `schema.sql`), `backend/admin/account.mjs` (sottocomando `invite`), `backend/test/auth.test.mjs`, `backend/README.md`, `backend/CONTRACT.md`; (repo app) `Packages/FitnessCore/.../Identity/AccountIdentityProvider.swift` (`activate(code:email:password:deviceName:)`), `Features/Account/CreateAccountView.swift`, `Features/Account/LoginView.swift` (link "Crea il tuo account"), `UITests/LoginTests.swift`, `Localizable.xcstrings`.
+
+**Interfaces:** tabella `activation_codes(id TEXT PRIMARY KEY /* SHA-256 hex del codice */, owner TEXT, expires_at INTEGER, used_at INTEGER)`. `node backend/admin/account.mjs invite --owner <PRIMARY_OWNER> --remote` genera un codice di 10 caratteri leggibili (alfabeto senza 0/O/1/I), salva solo l'hash, scadenza 30 minuti, e lo stampa una volta. `POST /v1/auth/activate {code, email, password, deviceName}` → crea l'account per l'`owner` del codice se il codice è valido, non usato, non scaduto e non esiste già un account con quell'id; segna il codice come usato nello stesso batch; stesso hash/pepper, regole password e limite tentativi di `claim`; risponde `{ session, ownerId, email, expiresAt }`, altrimenti `401` (codice non valido o scaduto, stesso messaggio) o `409` (account già esistente). Nell'app, sotto "Accedi": "Prima volta? **Crea il tuo account**" → codice, email, password, conferma; al successo si entra subito.
+
+- [ ] **Step 1: Test:** backend (codice valido una volta sola; scaduto, riusato o sbagliato → 401; account esistente → 409; due attivazioni concorrenti → un solo account; il codice in chiaro non è mai in D1) e app (UI test con codice generato dal server locale: crea → tab; codice sbagliato → messaggio).
+- [ ] **Step 2:** FAIL → implementa → PASS (`cd backend && npm test`, `swift test`, `scripts/uitest.sh`).
+- [ ] **Step 3:** commit in entrambi i repo; deploy del Worker (migrazione 0004 prima, bookmark Time Travel) prima del Task 19.
+
 ### Task 19: QA finale, installazione sull'iPhone, documentazione (controller, con Lorenzo)
 
 **Files:** Modify (repo app) `README.md` (build, test, installazione, rinnovo ogni 7 giorni); (repo `Fitness App`) `CLAUDE.md` (sezione "App nativa (fase 3)": dove sta il repo, comandi, regole), memoria del progetto.
 
 - [ ] **Step 1:** `swift test` + `scripts/uitest.sh` + `cd backend && npm test` + `npm test` + `npm run test:e2e` → tutto PASS (output nel ledger).
 - [ ] **Step 2: QA su simulatore** iPhone 18 Pro, tema chiaro e scuro, con il server locale e il seed: un giro di tutte le schermate con screenshot. Scenario a due "device": l'app sul simulatore e la PWA in Playwright sullo stesso server locale; spunte e serie da una parte compaiono dall'altra. Vanno controllati anche vetro e leggibilità.
-- [ ] **Step 3: Installazione sull'iPhone di Lorenzo** (`scripts/install-iphone.sh`, backend di produzione) → collegamento: Lorenzo copia il token sul Mac con `pbcopy < ~/.config/fitness-hub/sync-token`, lo incolla nell'app con "Incolla" (appunti condivisi); subito dopo `pbcopy < /dev/null`. Verifica dal server (script di pull in sola lettura): arrivano record con `deviceId` `ios-…`. Prova incrociata: una spunta nell'app compare nella PWA e viceversa.
+- [ ] **Step 3: Installazione sull'iPhone di Lorenzo e passaggio agli account** (`scripts/install-iphone.sh`, backend di produzione): il controller genera il codice di attivazione (`account.mjs invite --owner <PRIMARY_OWNER> --remote`) e lo dà a Lorenzo; Lorenzo crea l'account nell'app ("Crea il tuo account") e poi fa **Accedi** nella PWA. Verifica dal server (sola lettura, con una sessione ottenuta da Lorenzo o col token legacy finché esiste): arrivano record con `deviceId` `ios-…` e dalla PWA con la sessione. Prova incrociata: una spunta nell'app compare nella PWA e viceversa. Poi `LEGACY_TOKEN_ENABLED = "false"`, `wrangler deploy`, `wrangler secret delete SYNC_TOKEN` (con l'ok di Lorenzo, comando lanciato da lui se il classificatore lo blocca), cancellazione di `~/.config/fitness-hub/sync-token`.
 - [ ] **Step 4:** spiega a Lorenzo il rinnovo dei 7 giorni (`scripts/install-iphone.sh` con l'iPhone sulla stessa rete o collegato al Mac) e proponigli un promemoria settimanale (non crearlo senza il suo sì).
 - [ ] **Step 5:** documentazione + memoria; commit e push docs nel repo `Fitness App` (niente bump della cache PWA); commit nel repo app.
 
