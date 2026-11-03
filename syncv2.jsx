@@ -26,10 +26,11 @@
 // minId "￿") = non toccare nulla. Invio debounced 1,5 s, a lotti ≤ 500 change e ≤ 1,5 MB.
 // Pull: record in cache; per i record di ALTRI device keysForRecord → rebuildKeys (vista cache + coda:
 // le modifiche in coda vincono) → storage.set/remove silenziosi, solo chiavi con data ≥ oggi−90; piani →
-// plan_workout / plan_diet. conflicts e echo adottati; reset:true o epoch cambiato → cursore 0, coda tenuta.
+// plan_workout / plan_diet. conflicts e echo adottati; reset:true → il pull riparte da 0, coda tenuta.
 // Primo sync (cursore 0 e nessun v2grp): pull completo SENZA toccare le chiavi, poi in coda solo i record
-// locali che il server non ha, poi ricostruzione delle chiavi: un device con dati vecchi non sovrascrive
-// mai dati più nuovi del server.
+// locali che il server non ha (+ i record cambiati dall'utente mentre il sync era in corso), poi
+// ricostruzione delle chiavi: un device con dati vecchi non sovrascrive mai dati più nuovi del server.
+// Epoch cambiato (DB ripristinato, Ruling 9) = primo sync: via cache r:*, v2grp e cursore, coda tenuta.
 (function () {
   const API = "https://fitness-hub-api.lorefara97.workers.dev";
   const DEBOUNCE_MS = 1500;
@@ -60,7 +61,7 @@
   let outbox = {};                // "<collection>/<id>" → Change (coalescente, ordine d'inserimento)
   let deviceId = null;
   const dirty = new Set();        // gruppi da ricalcolare (flush in microtask)
-  const touched = new Set();      // chiavi modificate durante il primo sync: non ricostruirle
+  const touched = new Set();      // chiavi modificate durante il primo sync (vedi enqueueTouchedEdits)
   let firstDone = false, firstRunning = false, flushScheduled = false, timer = null;
   let state = { status: "idle", last: null };
   let chain = Promise.resolve(), queued = null;
@@ -120,6 +121,15 @@
     cache.get(rec.collection).set(rec.id, rec);
     S.set(`${REC}${rec.collection}:${rec.id}`, rec, SILENT);
   }
+  // Epoch cambiato (DB ripristinato): la cache non vale più → via cache, indice gruppi e cursore;
+  // il prossimo giro è un primo sync (pull completo, poi push dei record che il server non ha).
+  function resetToFirstSync(epoch) {
+    cache = new Map();
+    S.keys().forEach((k) => { if (k.startsWith(REC) || k.startsWith(GRP)) S.remove(k, SILENT); });
+    S.set(K.cursor, 0, SILENT);
+    if (epoch != null) S.set(K.epoch, epoch, SILENT);
+    firstDone = false;
+  }
   function buildIndex() {
     cache = new Map();
     S.keys().forEach((k) => {
@@ -173,7 +183,14 @@
     outbox = {};
     const raw = S.get(K.outbox, null);
     if (!isObj(raw)) return;
-    Object.keys(raw).forEach((k) => { const ch = raw[k]; if (isObj(ch) && !validateChange(ch)) outbox[keyOf(ch.collection, ch.id)] = ch; });
+    let dropped = false;
+    Object.keys(raw).forEach((k) => {
+      const ch = raw[k];
+      const err = isObj(ch) ? validateChange(ch) : "voce non valida";
+      if (err) { logErr(`coda: voce ${k} scartata al caricamento: ${err}`); dropped = true; return; }
+      outbox[keyOf(ch.collection, ch.id)] = ch;
+    });
+    if (dropped) persistOutbox();
   }
   function takeBatch() {
     const out = [];
@@ -387,12 +404,14 @@
       });
       if (batch.length) persistOutbox();
 
-      // epoch / reset: con reset:true il server ha già ripreso da 0; epoch diverso senza reset → pagina
-      // scartata e si riparte da 0 al giro dopo.
+      // epoch cambiato (DB azzerato o ripristinato, Ruling 9) → come un primo sync: fuori dal primo sync
+      // si esce e runSync riparte da zero; dentro il primo sync si svuota la cache e si ripulla da 0.
+      // reset:true con lo stesso epoch → il server ha già ripreso il pull da 0: si prosegue.
       const epochChanged = j.epoch != null && cur.epoch != null && j.epoch !== cur.epoch;
       if (j.epoch != null) cur.epoch = j.epoch;
-      const restart = epochChanged && j.reset !== true;
-      if (restart) cur.cursor = 0;
+      if (epochChanged && persist) return { ok: false, epochChanged: true, epoch: j.epoch, pushed, pulled, adopted };
+      const restart = epochChanged;
+      if (restart) { resetToFirstSync(j.epoch); cur.cursor = 0; adopted.length = 0; roundAdopted.length = 0; }
       else {
         j.changes.forEach((r) => { if (!validRecord(r)) return; cachePut(r); roundAdopted.push(r); pulled++; });
         if (Number.isSafeInteger(j.cursor) && j.cursor >= 0) cur.cursor = j.cursor;
@@ -408,13 +427,55 @@
     return { ok: false, error: "troppi giri di sync", pushed, pulled, adopted };
   }
 
-  // Primo sync: pull completo senza toccare le chiavi → in coda i record locali che il server non ha →
-  // chiavi ricostruite dalla vista effettiva → indice gruppi → cursore salvato (solo alla fine: se cade
-  // a metà, il prossimo tentativo riparte da 0).
+  // Copia dei valori locali sincronizzabili (clonati: le schermate possono riusare gli oggetti).
+  function snapshotLocal() {
+    const snap = new Map();
+    S.keys().forEach((k) => {
+      if (LOCAL_ONLY.test(k)) return;
+      const v = S.get(k, null);
+      try { snap.set(k, v === undefined ? v : JSON.parse(JSON.stringify(v))); } catch (_) { snap.set(k, v); }
+    });
+    return snap;
+  }
+
+  // Modifiche fatte DURANTE il primo sync (chiavi in `touched`): per i loro gruppi si mettono in coda solo
+  // i record che differiscono fra la foto iniziale e lo stato attuale (le modifiche vere dell'utente),
+  // mai il resto della chiave, che può essere vecchio rispetto al server.
+  function enqueueTouchedEdits(snap, c) {
+    const groups = new Set();
+    touched.forEach((k) => groupsOfKey(k, c).forEach((g) => groups.add(g)));
+    const before = (k, def) => (snap.has(k) ? snap.get(k) : def);
+    groups.forEach((g) => {
+      const after = build(g, c);
+      if (noTouch(after)) return;
+      let prev = null;
+      try { prev = RM().buildGroup(g, before, c); } catch (_) {}
+      const old = new Map((prev && !noTouch(prev) ? prev.records : []).map((r) => [keyOf(r.collection, r.id), canon(r.data)]));
+      const now = new Set();
+      after.records.forEach((r) => {
+        const k = keyOf(r.collection, r.id);
+        now.add(k);
+        if (old.get(k) !== canon(r.data)) enqueue(r.collection, r.id, r.data, false);
+      });
+      const win = after.window || null;
+      old.forEach((_, k) => {
+        if (now.has(k)) return;
+        const [col, id] = splitKey(k);
+        if (win && col === win.collection && id < win.minId) return;
+        const eff = effective(col, id);
+        if (eff && !eff.deleted) enqueue(col, id, null, true);
+      });
+    });
+  }
+
+  // Primo sync: pull completo senza toccare le chiavi → in coda i record locali che il server non ha
+  // (+ le modifiche fatte durante il sync) → chiavi ricostruite dalla vista effettiva (cache + coda) →
+  // indice gruppi → cursore salvato (solo alla fine: se cade a metà, il prossimo tentativo riparte da 0).
   async function firstSync(token) {
     firstRunning = true;
     touched.clear();
     dirty.clear();
+    const snap = snapshotLocal();
     try {
       const cur = { cursor: 0, epoch: S.get(K.epoch, null) };
       const r1 = await exchange(token, cur, { persist: false, rebuild: false });
@@ -428,18 +489,19 @@
           if (!cacheGet(r.collection, r.id) && !outbox[keyOf(r.collection, r.id)]) enqueue(r.collection, r.id, r.data, false);
         });
       });
+      enqueueTouchedEdits(snap, c);
       persistOutbox();
-      const keys = [];
+      const keys = []; // le chiavi toccate con dati sul server sono già fra quelle dei record adottati
       r1.adopted.forEach((r) => { if (!RM().DIRECT.has(r.collection)) { try { keys.push(...RM().keysForRecord(r, null)); } catch (_) {} } });
-      changed.push(...applyKeys(keys, c, touched));
+      changed.push(...applyKeys(keys, c, null));
       c = ctx();
       localGroups(c).forEach((g) => { const res = build(g, c); if (!noTouch(res)) setGroupIndex(g, res.records.map((r) => keyOf(r.collection, r.id))); });
       S.set(K.cursor, cur.cursor, SILENT);
       if (cur.epoch != null) S.set(K.epoch, cur.epoch, SILENT);
       firstDone = true;
       firstRunning = false;
+      dirty.clear(); // le modifiche durante il sync sono già state valutate (enqueueTouchedEdits)
       if (changed.length) emit("lfh-data", { keys: changed });
-      flushDirty(); // chiavi toccate durante il primo sync: confronto normale con la cache ora completa
       if (!Object.keys(outbox).length) return r1;
       const r2 = await exchange(token, cur, { persist: true, rebuild: true });
       return { ok: r2.ok, error: r2.error, pushed: r1.pushed + r2.pushed, pulled: r1.pulled + r2.pulled };
@@ -471,6 +533,12 @@
         flushDirty();
         const cur = { cursor: Number(S.get(K.cursor, 0)) || 0, epoch: S.get(K.epoch, null) };
         r = await exchange(token, cur, { persist: true, rebuild: true });
+        if (r.epochChanged) {
+          const p = r;
+          resetToFirstSync(r.epoch);
+          r = await firstSync(token);
+          r = Object.assign({}, r, { pushed: (r.pushed || 0) + p.pushed, pulled: (r.pulled || 0) + p.pulled });
+        }
       }
     } catch (e) {
       logErr(`sync: ${e && e.message ? e.message : e}`);

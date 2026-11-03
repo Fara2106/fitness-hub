@@ -830,12 +830,20 @@ await (async () => {
     sb.CustomEvent = class { constructor(type, init) { this.type = type; this.detail = init ? init.detail : undefined; } };
     sb.Event = class { constructor(type) { this.type = type; } };
     sb.window.dispatchEvent = (ev) => { events.push(ev); return true; };
+    const logs = [];
+    sb.window._logError = (e) => { logs.push(String(e && e.message)); };
     vm.createContext(sb);
     for (const [f, code] of sources) vm.runInContext(code, sb, { filename: f });
-    const net = { offline: false, requests: [], responses: [], hook: null, transform: null };
+    const net = { offline: false, requests: [], responses: [], hook: null, transform: null, fake: null };
     const fetchFn = async (url, init) => {
       if (net.offline) throw new TypeError("Failed to fetch");
       net.requests.push({ url, body: JSON.parse(init.body), bytes: Buffer.byteLength(init.body) });
+      if (net.fake) { // risposta finta (es. 400 di validazione), il server non vede la richiesta
+        const f = net.fake; net.fake = null;
+        if (net.hook) { const h = net.hook; net.hook = null; await h(); }
+        net.responses.push(f.json);
+        return { ok: f.status < 300, status: f.status, json: async () => f.json };
+      }
       const res = await worker.fetch(new Request(url, { method: init.method, headers: init.headers, body: init.body }), env);
       const json = await res.json();
       if (net.hook) { const h = net.hook; net.hook = null; await h(); }
@@ -847,14 +855,15 @@ await (async () => {
     const clock = { t };
     const timers = [];
     const SV = sb.window.SyncV2;
-    if (SV) SV.init({
+    const opts = {
       storage: sb.window.storage, fetch: fetchFn, now: () => clock.t,
       setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
       clearTimeout: (id) => { if (timers[id - 1]) timers[id - 1].fn = null; },
-    });
+    };
+    if (SV) SV.init(opts);
     const S = sb.window.storage;
     return {
-      sb, S, SV, net, events, timers, clock,
+      sb, S, SV, net, events, timers, clock, logs, reinit: () => SV.init(opts),
       sync: () => SV.syncNow(),
       outbox: () => Object.keys(S.get("v2outbox", {}) || {}),
       sent: (from = 0) => net.requests.slice(from).flatMap(r => r.body.changes),
@@ -989,6 +998,26 @@ await (async () => {
       ok("dopo il primo sync: una modifica mette in coda solo il record cambiato", B.outbox().join() === `dayState/${D}:hydration`);
     }
 
+    // ── primo sync con una modifica fatta MENTRE il pull è in corso ─────────────
+    {
+      const env = await backend();
+      await call(env, { deviceId: "phone", cursor: 0, changes: [
+        { collection: "shoppingCheck", id: "x", data: { checked: false }, updatedAt: T0 - 1000 },
+        { collection: "shoppingCheck", id: "y", data: { checked: true }, updatedAt: T0 - 1000 },
+      ] });
+      const B = device(env, { t: T0 + 3600000 });
+      B.S.set("spesaChecked", { x: true, y: true }); // x vecchio di un mese
+      await tick();
+      // Durante il pull l'utente spunta z (nuovo) e toglie y (che il server ha già).
+      B.net.hook = async () => { B.S.set("spesaChecked", { ...B.S.get("spesaChecked"), y: false, z: true }); await tick(); };
+      const r = await B.SV.setToken(TOKEN);
+      const srv = await serverRecords(env);
+      ok("primo sync + modifica in corso: il server tiene x:false (il vecchio x non parte)", r.ok && find(srv, "shoppingCheck", "x").data.checked === false &&
+        find(srv, "shoppingCheck", "x").deviceId === "phone" && !B.sent().some(c => c.id === "x"));
+      ok("primo sync + modifica in corso: le modifiche vere arrivano (z nuova, y tolta)", find(srv, "shoppingCheck", "z").data.checked === true && find(srv, "shoppingCheck", "y").data.checked === false);
+      ok("primo sync + modifica in corso: in locale {x:false, y:false, z:true}", JSON.stringify(B.S.get("spesaChecked")) === JSON.stringify({ x: false, y: false, z: true }) && B.outbox().length === 0);
+    }
+
     // ── modifica locale in coda + record in arrivo più vecchio ──────────────────
     {
       const env = await backend();
@@ -1027,6 +1056,69 @@ await (async () => {
       ok("stale: il server rifiuta la modifica più vecchia e la manda in conflicts", resp.stale === 1 && resp.conflicts.length === 1);
       ok("stale + conflicts: la chiave locale si riallinea al server", A.S.get("spesaChecked").y === false && A.outbox().length === 0);
       ok("stale + conflicts: cache = versione del server", A.SV.getRecord("shoppingCheck", "y").data.checked === false && A.SV.getRecord("shoppingCheck", "y").updatedAt === T0 + 60000);
+    }
+
+    // ── modifica dello stesso record mentre il suo change è in volo ─────────────
+    {
+      const env = await backend();
+      const A = device(env);
+      await A.SV.setToken(TOKEN);
+      A.S.set("spesaChecked", { q: true });
+      await tick();
+      A.net.hook = async () => { A.clock.t += 10; A.S.set("spesaChecked", { q: false }); await tick(); };
+      const n0 = A.net.requests.length;
+      const r = await A.sync();
+      const q1 = A.net.requests[n0].body.changes.find(c => c.id === "q"), q2 = (A.net.requests[n0 + 1] || { body: { changes: [] } }).body.changes.find(c => c.id === "q");
+      ok("in volo: dopo l'ack la modifica più nuova resta in coda e parte al giro dopo", r.ok && q1 && q1.data.checked === true && q2 && q2.data.checked === false && q2.updatedAt > q1.updatedAt);
+      ok("in volo: server = modifica più nuova, coda vuota", find(await serverRecords(env), "shoppingCheck", "q").data.checked === false && A.outbox().length === 0);
+    }
+
+    // ── 400 di validazione su changes[i] ───────────────────────────────────────
+    {
+      const env = await backend();
+      const A = device(env);
+      await A.SV.setToken(TOKEN);
+      A.SV.putRecords(["a", "b", "c"].map(id => ({ collection: "shoppingCheck", id, data: { checked: true } })));
+      A.net.fake = { status: 400, json: { error: "changes[1]: data troppo grande (massimo 65536 byte)" } };
+      const r = await A.sync();
+      let srv = await serverRecords(env);
+      ok("400 changes[1]: solo quella modifica esce dalla coda, le altre arrivano", r.ok && A.outbox().length === 0 &&
+        !!find(srv, "shoppingCheck", "a") && !find(srv, "shoppingCheck", "b") && !!find(srv, "shoppingCheck", "c"));
+      ok("400 changes[1]: modifica scartata registrata nel log", A.logs.some(m => /rifiutata dal server/.test(m)));
+      A.SV.putRecords(["d", "e"].map(id => ({ collection: "shoppingCheck", id, data: { checked: true } })));
+      A.net.fake = { status: 400, json: { error: "changes[0]: data non valida" } };
+      A.net.hook = async () => { A.SV.putRecords([{ collection: "shoppingCheck", id: "d", data: { checked: false } }]); };
+      await A.sync();
+      srv = await serverRecords(env);
+      ok("400 su una modifica già superata: la versione più nuova sopravvive e arriva", find(srv, "shoppingCheck", "d").data.checked === false &&
+        !!find(srv, "shoppingCheck", "e") && A.outbox().length === 0);
+      A.S.set("v2outbox", { "boh/1": { collection: "boh", id: "1", data: {}, updatedAt: 1 }, "shoppingCheck/f": { collection: "shoppingCheck", id: "f", data: { checked: true }, updatedAt: T0, deleted: false } }, { silent: true });
+      A.reinit();
+      ok("loadOutbox: voce non valida scartata con log, le valide restano", A.outbox().join() === "shoppingCheck/f" && A.logs.some(m => /boh\/1 scartata/.test(m)));
+    }
+
+    // ── epoch cambiato = primo sync (Ruling 9): cache svuotata, record dopo il backup rimandati ──
+    {
+      const env = await backend();
+      const A = device(env);
+      await A.SV.setToken(TOKEN);
+      const OLD = daysAgo(100);
+      await call(env, { deviceId: "phone", cursor: 0, changes: [
+        { collection: "dayState", id: `${OLD}:checkIn`, data: { date: OLD, field: "checkIn", value: { sleep: 2, energy: 2, ailments: "" } }, updatedAt: T0 - 5000 },
+      ] });
+      A.S.set("weightLog", [{ date: daysAgo(1), weight: 81 }]);
+      await tick(); await A.sync();
+      ok("prima del ripristino: fantasma in cache, pesata sul server", !!A.SV.getRecord("dayState", `${OLD}:checkIn`) && !!find(await serverRecords(env), "bodyWeight", daysAgo(1)));
+      // Ripristino a prima della pesata e del record del telefono + nuovo epoch.
+      await env.DB.prepare("DELETE FROM records WHERE collection IN ('bodyWeight', 'dayState')").run();
+      await env.DB.prepare("UPDATE meta SET value = value + 1 WHERE key = 'epoch'").run();
+      const r = await A.sync();
+      const srv = await serverRecords(env);
+      ok("epoch cambiato: il record fantasma sparisce da cache e listRecords", r.ok && A.SV.getRecord("dayState", `${OLD}:checkIn`) === null &&
+        !A.SV.listRecords("dayState").some(x => x.id === `${OLD}:checkIn`) && A.S.get(`r:dayState:${OLD}:checkIn`, null) === null);
+      ok("epoch cambiato: la pesata fatta dopo il backup viene rimandata", find(srv, "bodyWeight", daysAgo(1)).data.kg === 81 && A.outbox().length === 0);
+      ok("epoch cambiato: nuovo epoch, cursore e indice gruppi ricostruiti", A.S.get("v2epoch") === A.net.responses[A.net.responses.length - 1].epoch &&
+        A.S.get("v2cursor") > 0 && Array.isArray(A.S.get("v2grp:weights")));
     }
 
     // ── reset:true ed epoch cambiato ────────────────────────────────────────────

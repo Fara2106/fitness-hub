@@ -2849,6 +2849,15 @@ window.buildDefaultNotifConfig = function () {
     cache.get(rec.collection).set(rec.id, rec);
     S.set(`${REC}${rec.collection}:${rec.id}`, rec, SILENT);
   }
+  function resetToFirstSync(epoch) {
+    cache = new Map();
+    S.keys().forEach(k => {
+      if (k.startsWith(REC) || k.startsWith(GRP)) S.remove(k, SILENT);
+    });
+    S.set(K.cursor, 0, SILENT);
+    if (epoch != null) S.set(K.epoch, epoch, SILENT);
+    firstDone = false;
+  }
   function buildIndex() {
     cache = new Map();
     S.keys().forEach(k => {
@@ -2920,10 +2929,18 @@ window.buildDefaultNotifConfig = function () {
     outbox = {};
     const raw = S.get(K.outbox, null);
     if (!isObj(raw)) return;
+    let dropped = false;
     Object.keys(raw).forEach(k => {
       const ch = raw[k];
-      if (isObj(ch) && !validateChange(ch)) outbox[keyOf(ch.collection, ch.id)] = ch;
+      const err = isObj(ch) ? validateChange(ch) : "voce non valida";
+      if (err) {
+        logErr(`coda: voce ${k} scartata al caricamento: ${err}`);
+        dropped = true;
+        return;
+      }
+      outbox[keyOf(ch.collection, ch.id)] = ch;
     });
+    if (dropped) persistOutbox();
   }
   function takeBatch() {
     const out = [];
@@ -3207,8 +3224,21 @@ window.buildDefaultNotifConfig = function () {
       if (batch.length) persistOutbox();
       const epochChanged = j.epoch != null && cur.epoch != null && j.epoch !== cur.epoch;
       if (j.epoch != null) cur.epoch = j.epoch;
-      const restart = epochChanged && j.reset !== true;
-      if (restart) cur.cursor = 0;else {
+      if (epochChanged && persist) return {
+        ok: false,
+        epochChanged: true,
+        epoch: j.epoch,
+        pushed,
+        pulled,
+        adopted
+      };
+      const restart = epochChanged;
+      if (restart) {
+        resetToFirstSync(j.epoch);
+        cur.cursor = 0;
+        adopted.length = 0;
+        roundAdopted.length = 0;
+      } else {
         j.changes.forEach(r => {
           if (!validRecord(r)) return;
           cachePut(r);
@@ -3237,10 +3267,52 @@ window.buildDefaultNotifConfig = function () {
       adopted
     };
   }
+  function snapshotLocal() {
+    const snap = new Map();
+    S.keys().forEach(k => {
+      if (LOCAL_ONLY.test(k)) return;
+      const v = S.get(k, null);
+      try {
+        snap.set(k, v === undefined ? v : JSON.parse(JSON.stringify(v)));
+      } catch (_) {
+        snap.set(k, v);
+      }
+    });
+    return snap;
+  }
+  function enqueueTouchedEdits(snap, c) {
+    const groups = new Set();
+    touched.forEach(k => groupsOfKey(k, c).forEach(g => groups.add(g)));
+    const before = (k, def) => snap.has(k) ? snap.get(k) : def;
+    groups.forEach(g => {
+      const after = build(g, c);
+      if (noTouch(after)) return;
+      let prev = null;
+      try {
+        prev = RM().buildGroup(g, before, c);
+      } catch (_) {}
+      const old = new Map((prev && !noTouch(prev) ? prev.records : []).map(r => [keyOf(r.collection, r.id), canon(r.data)]));
+      const now = new Set();
+      after.records.forEach(r => {
+        const k = keyOf(r.collection, r.id);
+        now.add(k);
+        if (old.get(k) !== canon(r.data)) enqueue(r.collection, r.id, r.data, false);
+      });
+      const win = after.window || null;
+      old.forEach((_, k) => {
+        if (now.has(k)) return;
+        const [col, id] = splitKey(k);
+        if (win && col === win.collection && id < win.minId) return;
+        const eff = effective(col, id);
+        if (eff && !eff.deleted) enqueue(col, id, null, true);
+      });
+    });
+  }
   async function firstSync(token) {
     firstRunning = true;
     touched.clear();
     dirty.clear();
+    const snap = snapshotLocal();
     try {
       const cur = {
         cursor: 0,
@@ -3260,6 +3332,7 @@ window.buildDefaultNotifConfig = function () {
           if (!cacheGet(r.collection, r.id) && !outbox[keyOf(r.collection, r.id)]) enqueue(r.collection, r.id, r.data, false);
         });
       });
+      enqueueTouchedEdits(snap, c);
       persistOutbox();
       const keys = [];
       r1.adopted.forEach(r => {
@@ -3269,7 +3342,7 @@ window.buildDefaultNotifConfig = function () {
           } catch (_) {}
         }
       });
-      changed.push(...applyKeys(keys, c, touched));
+      changed.push(...applyKeys(keys, c, null));
       c = ctx();
       localGroups(c).forEach(g => {
         const res = build(g, c);
@@ -3279,10 +3352,10 @@ window.buildDefaultNotifConfig = function () {
       if (cur.epoch != null) S.set(K.epoch, cur.epoch, SILENT);
       firstDone = true;
       firstRunning = false;
+      dirty.clear();
       if (changed.length) emit("lfh-data", {
         keys: changed
       });
-      flushDirty();
       if (!Object.keys(outbox).length) return r1;
       const r2 = await exchange(token, cur, {
         persist: true,
@@ -3346,6 +3419,15 @@ window.buildDefaultNotifConfig = function () {
           persist: true,
           rebuild: true
         });
+        if (r.epochChanged) {
+          const p = r;
+          resetToFirstSync(r.epoch);
+          r = await firstSync(token);
+          r = Object.assign({}, r, {
+            pushed: (r.pushed || 0) + p.pushed,
+            pulled: (r.pulled || 0) + p.pulled
+          });
+        }
       }
     } catch (e) {
       logErr(`sync: ${e && e.message ? e.message : e}`);
