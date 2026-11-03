@@ -1,7 +1,18 @@
-// onboarding.jsx — 2-step onboarding: Groq API key → Peso corporeo
+// onboarding.jsx — onboarding: Account (accedi, saltabile) → Groq API key → Peso corporeo
 // Salta automaticamente i passi già configurati in storage
 
 const STEPS = [
+  {
+    // Account (Task 9C): riquadro di Impostazioni (window.AccountPanel), saltabile con "Più tardi".
+    label:       "Account",
+    title:       "Accedi",
+    sub:         "Accedi per sincronizzare i dati fra i tuoi device",
+    icon:        "user",
+    iconColor:   "#5E5CE6",
+    field:       "account",
+    storageKey:  "accountEmail",
+    custom:      true,
+  },
   {
     label:       "Coach",
     title:       "API key Groq",
@@ -60,8 +71,9 @@ const Onboarding = ({ device, onDone }) => {
 
   // Pre-popola i valori da storage (mostra quello già salvato nel campo)
   const [values, setValues] = React.useState(() => {
-    const init = { api: "", weight: "" };
+    const init = { account: "", api: "", weight: "" };
     STEPS.forEach(s => {
+      if (s.custom) return;
       if (window.storage) {
         const val = window.storage.get(s.storageKey, "");
         if (val) init[s.field] = String(val);
@@ -85,11 +97,14 @@ const Onboarding = ({ device, onDone }) => {
 
   const current = activeSteps[step];
   const isLast  = step === activeSteps.length - 1;
-  const canNext = values[current.field].trim().length > 0;
+  // Il passo Account si può sempre superare ("Più tardi"): l'accesso è facoltativo.
+  const canNext = current.custom ? true : values[current.field].trim().length > 0;
+  const accountDone = current.custom && _stepAlreadyDone(current);
 
   const handleDone = () => {
     setSaving(true);
     STEPS.forEach(s => {
+      if (s.custom) return; // l'account lo salva SyncV2 (sessione), mai l'onboarding
       const val = values[s.field].trim();
       if (val && window.storage) {
         if (s.storageKey === "bodyWeight") {
@@ -183,6 +198,13 @@ const Onboarding = ({ device, onDone }) => {
             <p className="muted" style={{ fontSize: isDesktop ? 16 : 14, lineHeight: 1.5 }}>{t(current.sub)}</p>
           </div>
 
+          {current.custom ? (
+            <div className="fade-up" key={`f${step}`} style={{ textAlign: "left", maxWidth: 420, margin: "0 auto", width: "100%" }}>
+              <div className="ios-list">
+                {window.AccountPanel ? React.createElement(window.AccountPanel, { onSignedIn: () => setTimeout(handleNext, 600) }) : null}
+              </div>
+            </div>
+          ) : (
           <div className="fade-up" key={`f${step}`} style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 8 }}>
             <input
               // Su iPhone niente autofocus: apriva la tastiera/barra accessori
@@ -210,6 +232,7 @@ const Onboarding = ({ device, onDone }) => {
               <span className="muted" style={{ fontSize: 18, fontWeight: 500 }}>{current.suffix}</span>
             )}
           </div>
+          )}
         </div>
 
         <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 8 }}>
@@ -226,7 +249,7 @@ const Onboarding = ({ device, onDone }) => {
           >
             {saving ? <span className="spinner" style={{ width: 16, height: 16 }} /> : (
               <>
-                {isLast ? t("Iniziamo") : t("Continua")}
+                {current.custom && !accountDone ? t("Più tardi") : isLast ? t("Iniziamo") : t("Continua")}
                 <Icon name="chevron" size={15} strokeWidth={2.4} />
               </>
             )}

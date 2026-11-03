@@ -3,9 +3,16 @@
 //   window.SyncV2 = {
 //     API,                                   URL del Worker
 //     init({ storage, fetch, now?, setTimeout?, clearTimeout?, today? })   da chiamare dopo storage.onReady
-//     setToken(token) → Promise<{ ok, error? }>   salva il token e prova un sync (401 → token non salvato)
-//     hasToken() → boolean
-//     linkTokenFromHash(hash) → token|null · consumeLinkHash(loc?, hist?, confirmReplace?) → Promise|null · refreshPlans() → chiavi   (#sync=<64 hex> all'avvio)
+//     setToken(token) → Promise<{ ok, error? }>   salva un Bearer e prova un sync (401 → non salvato; test e passaggio)
+//     hasToken() → boolean · refreshPlans() → chiavi
+//     login(email, password, deviceName?)  → Promise<{ ok, email?, error? }>   sessione dell'account → syncToken
+//     claim(email, password, deviceName?)  → idem: crea l'account del proprietario col token legacy (una volta sola)
+//     logout() → Promise<{ ok, remote }>   revoca la sessione (se raggiungibile) e scollega; dati locali e coda restano
+//     changePassword(current, next) → Promise<{ ok, error? }>   (il server revoca le ALTRE sessioni)
+//     accountInfo() → Promise<{ ok, ownerId?, email?, error? }>   GET /v1/me (col token legacy email = null → claim possibile)
+//     account() → { email, linked, legacy, expired }   (legacy = collegato col vecchio token, senza account)
+//       error di login/claim/password: "credentials"(401) | "rate"(429) | "exists"(409) | "invalid"(400) |
+//       "claimUnavailable"(claim 401: token legacy spento) | "expired"(sessione 401) | "retry"(rete/5xx: mai "password sbagliata")
 //     syncNow()  → Promise<{ ok, pushed, pulled, error? }>   error: "unlinked"|"offline"|"unauthorized"|…
 //     rebaseline() → Promise   dopo un ripristino del backup (scritto in silenzio): il prossimo sync è un primo sync
 //     putRecords(changes)                    scrittura diretta di record ({collection,id,data,deleted?}), per i piani
@@ -14,11 +21,16 @@
 //     activePlans() → { workout, diet }            copie locali plan_workout / plan_diet ({id,data}|null)
 //     status() → { status, last, pending, linked }
 //   }
-//   Stato pubblicato in window._syncState ({ status: idle|syncing|ok|error|offline|unlinked, last }) + evento
+//   Stato pubblicato in window._syncState ({ status: idle|syncing|ok|error|offline|unlinked|expired, last }) + evento
 //   "lfh-sync"; dopo ogni applicazione di record in arrivo, evento "lfh-data" con detail { keys } (chiavi
 //   locali riscritte).
 //
-// Storage solo del device (mai sincronizzato, mai nel backup): syncToken, v2deviceId, v2cursor, v2epoch,
+// 401 dal server (sessione scaduta/revocata, o token legacy spento) → status "expired": l'app resta usabile in locale,
+// la coda resta, il token resta salvato (si riprova solo dopo un nuovo accesso o alla prossima apertura dell'app).
+// La password non si salva MAI (né in storage, né nei log, né negli URL): va solo nel corpo della POST.
+//
+// Storage solo del device (mai sincronizzato, mai nel backup): syncToken (Bearer: sessione o token legacy),
+// accountEmail (email dell'account con cui il device ha fatto l'accesso), v2deviceId, v2cursor, v2epoch,
 // v2outbox ({ "<collection>/<id>": Change }, coalescente), v2grp:<gruppo> (["<collection>/<id>"] prodotti
 // l'ultima volta dal gruppo), r:<collection>:<id> (cache dei record del server).
 //
@@ -53,9 +65,9 @@
     "coachMessage", "settings",
   ]);
   const PLAN_KEY = { workoutPlan: "plan_workout", dietPlan: "plan_diet" };
-  const K = { token: "syncToken", device: "v2deviceId", cursor: "v2cursor", epoch: "v2epoch", outbox: "v2outbox" };
+  const K = { token: "syncToken", email: "accountEmail", device: "v2deviceId", cursor: "v2cursor", epoch: "v2epoch", outbox: "v2outbox" };
   const GRP = "v2grp:", REC = "r:";
-  const LOCAL_ONLY = /^(r:|v2|syncToken$|plan_workout$|plan_diet$)/;
+  const LOCAL_ONLY = /^(r:|v2|syncToken$|accountEmail$|plan_workout$|plan_diet$)/;
   const DATED_KEY = /_(\d{4}-\d{2}-\d{2})$/;
   const DATED_GROUP = /:(\d{4}-\d{2}-\d{2})$/;
   const SILENT = { silent: true };
@@ -71,6 +83,7 @@
   let state = { status: "idle", last: null };
   let chain = Promise.resolve(), queued = null;
   let gen = 0;                    // cresce a ogni rebaseline: un exchange in volo di prima si ferma
+  let expiredToken = null;        // Bearer che ha preso 401: niente rete con quello finché non cambia (solo in memoria)
 
   // ── helper ────────────────────────────────────────────────────────────────
   const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -539,6 +552,7 @@
     const token = S.get(K.token, null);
     if (!token) { setStatus("unlinked"); return { ok: false, pushed: 0, pulled: 0, error: "unlinked" }; }
     if (!F) { setStatus("error", "fetch assente"); return { ok: false, pushed: 0, pulled: 0, error: "fetch assente" }; }
+    if (token === expiredToken) { setStatus("expired"); return { ok: false, pushed: 0, pulled: 0, error: "unauthorized" }; }
     setStatus("syncing");
     let r;
     try {
@@ -560,7 +574,11 @@
     }
     if (r.ok) { pruneGroupIndex(); setStatus("ok"); }
     else if (r.error === "rebaseline") { /* segue il primo sync già in fila */ }
-    else setStatus(r.error === "offline" ? "offline" : "error", r.error);
+    else if (r.error === "unauthorized") {
+      // Sessione scaduta o revocata (o token legacy spento): coda e dati locali restano, si chiede di accedere di nuovo.
+      if (S.get(K.token, null) === token) expiredToken = token;
+      setStatus("expired");
+    } else setStatus(r.error === "offline" ? "offline" : "error", r.error);
     const out = { ok: r.ok, pushed: r.pushed, pulled: r.pulled };
     if (!r.ok) out.error = r.error;
     return out;
@@ -595,6 +613,7 @@
     if (!S) return { ok: false, error: "non inizializzato" };
     const t = String(token == null ? "" : token).trim();
     const prev = S.get(K.token, null);
+    expiredToken = null;
     if (!t) {
       S.remove(K.token, SILENT);
       if (timer !== null && clearT) { clearT(timer); timer = null; }
@@ -635,37 +654,113 @@
     return out;
   }
 
-  // Link di collegamento: https://…/fitness-hub/#sync=<64 hex>. Funzione pura: il token o null
-  // (qualsiasi altro hash, o lunghezza/caratteri sbagliati, è ignorato).
-  function linkTokenFromHash(hash) {
-    const m = /^#sync=([0-9a-fA-F]{64})$/.exec(String(hash == null ? "" : hash));
-    return m ? m[1].toLowerCase() : null; // minuscolo: lo stesso token scritto in maiuscolo non è "diverso"
-  }
-  // All'avvio (dopo init): se l'hash è un link valido, ripulisce l'URL (replaceState) e collega il
-  // device. Ritorna la Promise di setToken, o null se non c'era niente da fare. Il token non si logga.
-  // confirmReplace (opzionale): chiamata se è già salvato un token DIVERSO; false → resta il vecchio
-  // (l'hash viene comunque ripulito) e la Promise risolve { ok:false, error:"declined" }.
-  function consumeLinkHash(loc, hist, confirmReplace) {
-    const l = loc || (typeof location !== "undefined" ? location : null);
-    const h = hist || (typeof history !== "undefined" ? history : null);
-    const token = linkTokenFromHash(l && l.hash);
-    if (!token) return null;
-    try { if (h && typeof h.replaceState === "function") h.replaceState(null, "", (l.pathname || "") + (l.search || "")); } catch (_) {}
-    const cur = S ? S.get(K.token, null) : null;
-    if (cur && String(cur).toLowerCase() !== token && typeof confirmReplace === "function") {
-      let yes = false;
-      try { yes = !!confirmReplace(); } catch (_) {}
-      if (!yes) return Promise.resolve({ ok: false, error: "declined" });
-    }
-    return setToken(token);
-  }
-
   // Ricalcola plan_workout / plan_diet dai record in cache (dopo un ripristino del backup). Ritorna le chiavi cambiate.
   function refreshPlansNow() {
     if (!S) return [];
     const changed = refreshPlans();
     if (changed.length) emit("lfh-data", { keys: changed });
     return changed;
+  }
+
+  // ── account (Task 9C): accesso con email + password al posto del token incollato ──
+  function defaultDeviceName() {
+    const ua = typeof navigator !== "undefined" && navigator && navigator.userAgent ? navigator.userAgent : "";
+    return `PWA ${/iPad/.test(ua) ? "iPad" : /iPhone/.test(ua) ? "iPhone" : /Macintosh/.test(ua) ? "Mac" : "browser"}`;
+  }
+  // POST/GET a una rotta del Worker → { status, json } (status 0 = rete assente). Mai log del corpo (password).
+  async function api(path, { method = "POST", body, bearer } = {}) {
+    if (!F) return { status: 0, json: null };
+    const headers = {};
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (bearer) headers.Authorization = `Bearer ${bearer}`;
+    let res;
+    try { res = await F(`${API}${path}`, body === undefined ? { method, headers } : { method, headers, body: JSON.stringify(body) }); }
+    catch (_) { return { status: 0, json: null }; }
+    let j = null;
+    try { j = await res.json(); } catch (_) {}
+    return { status: res.status, json: j };
+  }
+  function authError(status) {
+    if (status === 401) return "credentials";
+    if (status === 429) return "rate";
+    if (status === 409) return "exists";
+    if (status === 400) return "invalid";
+    return "retry"; // rete assente, 5xx, Cloudflare 1102…: "riprova", mai "password sbagliata"
+  }
+  const cleanEmail = (e) => String(e == null ? "" : e).trim().toLowerCase();
+  // Sessione ricevuta: diventa il Bearer del device (al posto del token legacy o di una sessione scaduta) e si sincronizza.
+  // Stesso proprietario: cache, cursore e coda restano validi (la coda parte con la nuova sessione).
+  async function adoptSession(j) {
+    S.set(K.token, j.session, SILENT);
+    S.set(K.email, typeof j.email === "string" && j.email ? j.email : null, SILENT);
+    expiredToken = null;
+    setStatus("idle");
+    const r = await syncNow();
+    return { ok: true, email: S.get(K.email, null), synced: !!(r && r.ok) };
+  }
+  function credentialsOk(email, password) {
+    return typeof password === "string" && password.length > 0 && cleanEmail(email).length > 0;
+  }
+  async function login(email, password, deviceName) {
+    if (!S) return { ok: false, error: "retry" };
+    if (!credentialsOk(email, password)) return { ok: false, error: "invalid" };
+    const r = await api("/v1/auth/login", { body: { email: cleanEmail(email), password, deviceName: deviceName || defaultDeviceName() } });
+    if (r.status === 200 && isObj(r.json) && typeof r.json.session === "string" && r.json.session) return adoptSession(r.json);
+    return { ok: false, error: authError(r.status) };
+  }
+  // Crea l'account del proprietario dal device ancora collegato col token legacy (POST /v1/auth/claim).
+  async function claim(email, password, deviceName) {
+    if (!S) return { ok: false, error: "retry" };
+    const legacy = S.get(K.token, null);
+    if (!legacy || S.get(K.email, null)) return { ok: false, error: "claimUnavailable" };
+    if (!credentialsOk(email, password)) return { ok: false, error: "invalid" };
+    const r = await api("/v1/auth/claim", { bearer: legacy, body: { email: cleanEmail(email), password, deviceName: deviceName || defaultDeviceName() } });
+    if (r.status === 200 && isObj(r.json) && typeof r.json.session === "string" && r.json.session) return adoptSession(r.json);
+    return { ok: false, error: r.status === 401 ? "claimUnavailable" : authError(r.status) };
+  }
+  // Esci: revoca la sessione sul server se raggiungibile, poi scollega il device. Dati locali e coda restano
+  // (al prossimo accesso con lo stesso account partono). remote = il server ha confermato la revoca.
+  async function logout() {
+    if (!S) return { ok: false, remote: false };
+    const tok = S.get(K.token, null);
+    let remote = false;
+    if (tok && S.get(K.email, null)) remote = (await api("/v1/auth/logout", { bearer: tok, body: {} })).status === 200;
+    S.remove(K.token, SILENT);
+    S.remove(K.email, SILENT);
+    expiredToken = null;
+    if (timer !== null && clearT) { clearT(timer); timer = null; }
+    setStatus("unlinked");
+    return { ok: true, remote };
+  }
+  async function changePassword(current, next) {
+    if (!S) return { ok: false, error: "retry" };
+    const tok = S.get(K.token, null);
+    if (!tok || !S.get(K.email, null)) return { ok: false, error: "expired" };
+    if (typeof current !== "string" || !current || typeof next !== "string") return { ok: false, error: "invalid" };
+    const r = await api("/v1/auth/password", { bearer: tok, body: { current, next } });
+    if (r.status === 200) return { ok: true };
+    if (r.status === 401) {
+      // 401 = password attuale sbagliata ("credenziali non valide") oppure sessione non più valida
+      if (isObj(r.json) && r.json.error === "credenziali non valide") return { ok: false, error: "credentials" };
+      expiredToken = tok;
+      setStatus("expired");
+      return { ok: false, error: "expired" };
+    }
+    return { ok: false, error: authError(r.status) };
+  }
+  async function accountInfo() {
+    if (!S) return { ok: false, error: "retry" };
+    const tok = S.get(K.token, null);
+    if (!tok) return { ok: false, error: "unlinked" };
+    const r = await api("/v1/me", { method: "GET", bearer: tok });
+    if (r.status === 200 && isObj(r.json)) return { ok: true, ownerId: r.json.ownerId || null, email: typeof r.json.email === "string" ? r.json.email : null };
+    if (r.status === 401) { expiredToken = tok; setStatus("expired"); return { ok: false, error: "expired" }; }
+    return { ok: false, error: "retry" };
+  }
+  function account() {
+    const linked = hasToken();
+    const email = S ? S.get(K.email, null) : null;
+    return { email: linked && email ? email : null, linked, legacy: linked && !email, expired: linked && state.status === "expired" };
   }
 
   function getRecord(collection, id) { return S ? effective(collection, String(id)) : null; }
@@ -683,7 +778,7 @@
     setT = o.setTimeout || (typeof setTimeout === "function" ? (fn, ms) => setTimeout(fn, ms) : null);
     clearT = o.clearTimeout || (typeof clearTimeout === "function" ? (id) => clearTimeout(id) : null);
     todayFn = typeof o.today === "function" ? o.today : null;
-    timer = null; flushScheduled = false; firstRunning = false;
+    timer = null; flushScheduled = false; firstRunning = false; expiredToken = null;
     dirty.clear(); touched.clear();
     chain = Promise.resolve(); queued = null;
     buildIndex();
@@ -701,6 +796,9 @@
     return SyncV2;
   }
 
-  const SyncV2 = { API, init, setToken, hasToken, linkTokenFromHash, consumeLinkHash, refreshPlans: refreshPlansNow, syncNow, rebaseline, putRecords, getRecord, listRecords, activePlans, status };
+  const SyncV2 = {
+    API, init, setToken, hasToken, refreshPlans: refreshPlansNow, syncNow, rebaseline, putRecords, getRecord, listRecords, activePlans, status,
+    login, claim, logout, changePassword, accountInfo, account,
+  };
   window.SyncV2 = SyncV2;
 })();

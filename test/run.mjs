@@ -6,6 +6,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
+import { createHash } from "node:crypto";
 
 const require = createRequire(import.meta.url);
 const babel = require("@babel/core");
@@ -850,7 +851,7 @@ await (async () => {
     const net = { offline: false, requests: [], responses: [], hook: null, transform: null, fake: null };
     const fetchFn = async (url, init) => {
       if (net.offline) throw new TypeError("Failed to fetch");
-      net.requests.push({ url, body: JSON.parse(init.body), bytes: Buffer.byteLength(init.body) });
+      net.requests.push({ url, method: init.method, body: init.body ? JSON.parse(init.body) : null, bytes: init.body ? Buffer.byteLength(init.body) : 0 });
       if (net.fake) { // risposta finta (es. 400 di validazione), il server non vede la richiesta
         const f = net.fake; net.fake = null;
         if (net.hook) { const h = net.hook; net.hook = null; await h(); }
@@ -879,7 +880,7 @@ await (async () => {
       sb, S, SV, net, events, timers, clock, logs, reinit: () => SV.init(opts),
       sync: () => SV.syncNow(),
       outbox: () => Object.keys(S.get("v2outbox", {}) || {}),
-      sent: (from = 0) => net.requests.slice(from).flatMap(r => r.body.changes),
+      sent: (from = 0) => net.requests.slice(from).flatMap(r => (r.body && Array.isArray(r.body.changes) ? r.body.changes : [])),
     };
   }
 
@@ -1306,7 +1307,7 @@ await (async () => {
       env.SYNC_TOKEN = "ff".repeat(32);
       let threw = false, r;
       try { r = await A.sync(); } catch (_) { threw = true; }
-      ok("401: status error, nessuna eccezione, coda intatta", !threw && !r.ok && r.error === "unauthorized" && A.SV.status().status === "error" && A.outbox().length === 1);
+      ok("401: status expired, nessuna eccezione, coda intatta, token tenuto", !threw && !r.ok && r.error === "unauthorized" && A.SV.status().status === "expired" && A.outbox().length === 1 && A.SV.hasToken());
       A.S.remove("syncToken");
       const r2 = await A.sync();
       ok("token rimosso: status unlinked, coda intatta", !r2.ok && r2.error === "unlinked" && A.SV.status().status === "unlinked" && A.outbox().length === 1);
@@ -1315,6 +1316,115 @@ await (async () => {
       env.SYNC_TOKEN = TOKEN;
       const good = await A.SV.setToken(TOKEN);
       ok("setToken giusto: la coda parte", good.ok && A.outbox().length === 0 && find(await serverRecords(env), "dayState", `${TODAY}:notes`).data.value === "x");
+    }
+
+    // ── account (Task 9C): claim col token legacy, accesso su un altro device, uscita, sessione revocata ──
+    {
+      const env = await backend();
+      env.PASSWORD_PEPPER = "7e57".repeat(16);   // pepper di test (pubblico), mai quello vero
+      env.PRIMARY_OWNER = "owner-test";
+      const PW = "password-di-prova-1", PW2 = "password-nuova-22", EMAIL = "lorenzo@example.test";
+      const A = device(env), B = device(env, { t: T0 + 5 }), C = device(env, { t: T0 + 9 });
+      ok("SyncV2 espone login/claim/logout/changePassword/accountInfo/account", ["login", "claim", "logout", "changePassword", "accountInfo", "account"].every(k => typeof A.SV[k] === "function"));
+      ok("#sync=: linkTokenFromHash/consumeLinkHash non esistono più", A.SV.linkTokenFromHash === undefined && A.SV.consumeLinkHash === undefined);
+      ok("account(): device mai collegato → non collegato, nessuna email", (() => { const a = A.SV.account(); return !a.linked && !a.legacy && a.email === null && !a.expired; })());
+      ok("claim senza token legacy → claimUnavailable, nessuna richiesta", (await A.SV.claim(EMAIL, PW)).error === "claimUnavailable" && A.net.requests.length === 0);
+      await A.SV.setToken(TOKEN);
+      await C.SV.setToken(TOKEN);
+      ok("account(): collegato col token legacy → legacy", (() => { const a = A.SV.account(); return a.linked && a.legacy && a.email === null; })());
+      const me0 = await A.SV.accountInfo();
+      ok("accountInfo() col token legacy prima del claim: email null (claim possibile)", me0.ok && me0.email === null && me0.ownerId === "owner-test");
+      ok("accountInfo(): GET /v1/me senza corpo", A.net.requests.some(r => r.method === "GET" && r.url.endsWith("/v1/me") && r.body === null));
+      A.S.set(`notes_${TODAY}`, "coda prima del claim");
+      await tick();
+      A.net.offline = true; await A.sync(); A.net.offline = false;
+      ok("prima del claim: una modifica in coda", A.outbox().length === 1);
+      const c0 = await A.SV.claim(EMAIL, "corta");
+      ok("claim con password corta → invalid (400), token legacy invariato", !c0.ok && c0.error === "invalid" && A.S.get("syncToken") === TOKEN);
+      A.net.offline = true;
+      const cOff = await A.SV.claim(EMAIL, PW);
+      A.net.offline = false;
+      ok("claim senza rete → retry (mai «password sbagliata»), token legacy invariato", !cOff.ok && cOff.error === "retry" && A.S.get("syncToken") === TOKEN);
+      const c1 = await A.SV.claim("  Lorenzo@Example.TEST ", PW, "PWA test");
+      const sessA = A.S.get("syncToken");
+      ok("claim ok: syncToken = sessione (43 caratteri), accountEmail salvata", c1.ok && c1.email === EMAIL && sessA !== TOKEN && /^[A-Za-z0-9_-]{43}$/.test(sessA) && A.S.get("accountEmail") === EMAIL);
+      ok("claim ok: account() = con email, non più legacy; sync riuscito e coda partita",
+        A.SV.account().email === EMAIL && !A.SV.account().legacy && A.SV.status().status === "ok" && A.outbox().length === 0 &&
+        find(await serverRecords(env), "dayState", `${TODAY}:notes`).data.value === "coda prima del claim");
+      ok("claim ok: account creato per PRIMARY_OWNER con la sessione salvata col deviceName",
+        (await env.DB.prepare("SELECT id FROM accounts").first("id")) === "owner-test" && (await env.DB.prepare("SELECT device_name FROM sessions").first("device_name")) === "PWA test");
+      const c2 = await C.SV.claim(EMAIL, PW);
+      ok("secondo claim (altro device col token legacy) → exists (409), token legacy invariato", !c2.ok && c2.error === "exists" && C.S.get("syncToken") === TOKEN && C.S.get("accountEmail", null) === null);
+      ok("accountInfo() col token legacy dopo il claim: email dell'account (niente più claim)", (await C.SV.accountInfo()).email === EMAIL);
+      ok("claim da un device già con account → claimUnavailable", (await A.SV.claim(EMAIL, PW)).error === "claimUnavailable");
+
+      // B: accesso con lo stesso account
+      const b0 = await B.SV.login(EMAIL, "sbagliata-123");
+      ok("login con password sbagliata → credentials, niente token", !b0.ok && b0.error === "credentials" && !B.SV.hasToken() && B.S.get("accountEmail", null) === null);
+      B.net.fake = { status: 503, json: { error: "errore interno" } };
+      const b5 = await B.SV.login(EMAIL, PW);
+      ok("login con 5xx → retry (mai «password sbagliata»)", !b5.ok && b5.error === "retry" && !B.SV.hasToken());
+      A.S.set("spesaChecked", { "proteine-0": true });
+      await tick(); await A.sync();
+      const b1 = await B.SV.login("LORENZO@example.test", PW);
+      ok("login ok su B: sessione propria, email salvata, primo sync fatto", b1.ok && B.S.get("syncToken") !== sessA && B.S.get("accountEmail") === EMAIL && B.SV.status().status === "ok");
+      ok("B vede le spunte di A", (B.S.get("spesaChecked") || {})["proteine-0"] === true && B.S.get(`notes_${TODAY}`) === "coda prima del claim");
+      B.S.set("spesaChecked", { "proteine-0": true, "proteine-1": true });
+      await tick(); await B.sync(); await A.sync();
+      ok("A vede le spunte di B", (A.S.get("spesaChecked") || {})["proteine-1"] === true);
+
+      // Sessione revocata sul server → expired, coda intatta, niente martellamento, nuovo accesso → la coda parte
+      await env.DB.prepare("UPDATE sessions SET revoked = 1 WHERE id = ?").bind(createHash("sha256").update(sessA).digest("hex")).run();
+      A.S.set(`notes_${TODAY}`, "scritta con la sessione revocata");
+      await tick();
+      const ex = await A.sync();
+      ok("sessione revocata: 401 → status expired, coda intatta, token e email restano", !ex.ok && ex.error === "unauthorized" && A.SV.status().status === "expired" &&
+        A.sb.window._syncState.status === "expired" && A.outbox().length === 1 && A.S.get("syncToken") === sessA && A.SV.account().expired && A.SV.account().email === EMAIL);
+      const nReq = A.net.requests.length;
+      const ex2 = await A.sync();
+      ok("expired: i sync successivi non chiamano il server (nessun martellamento)", !ex2.ok && A.net.requests.length === nReq && A.SV.status().status === "expired");
+      const a2 = await A.SV.login(EMAIL, PW);
+      ok("accedi di nuovo: nuova sessione, la coda arriva al server", a2.ok && A.S.get("syncToken") !== sessA && A.outbox().length === 0 && A.SV.status().status === "ok" &&
+        find(await serverRecords(env), "dayState", `${TODAY}:notes`).data.value === "scritta con la sessione revocata");
+
+      // Cambio password: attuale sbagliata → credentials; ok → le ALTRE sessioni (B) scadono
+      ok("cambio password con quella attuale sbagliata → credentials", (await A.SV.changePassword("sbagliata-123", PW2)).error === "credentials");
+      ok("cambio password con la nuova troppo corta → invalid", (await A.SV.changePassword(PW, "corta")).error === "invalid");
+      const cp = await A.SV.changePassword(PW, PW2);
+      ok("cambio password ok, A resta collegato", cp.ok && A.SV.account().email === EMAIL && (await A.sync()).ok);
+      const bx = await B.sync();
+      ok("…B (altra sessione) → expired", !bx.ok && B.SV.status().status === "expired");
+      ok("…vecchia password rifiutata, nuova accettata", (await B.SV.login(EMAIL, PW)).error === "credentials" && (await B.SV.login(EMAIL, PW2)).ok);
+
+      // Esci: sessione revocata sul server, device scollegato, dati locali e coda restano
+      B.net.offline = true;
+      B.S.set(`notes_${TODAY}`, "offline prima di uscire");
+      await tick(); await B.sync();
+      B.net.offline = false;
+      const sessB = B.S.get("syncToken");
+      const lo = await B.SV.logout();
+      ok("logout: token ed email via, status unlinked, dati locali e coda restano", lo.ok && lo.remote && !B.SV.hasToken() && B.S.get("accountEmail", null) === null &&
+        B.SV.status().status === "unlinked" && B.outbox().length === 1 && (B.S.get("spesaChecked") || {})["proteine-1"] === true);
+      const meOld = await worker.fetch(new Request(API + "/v1/me", { headers: { Authorization: "Bearer " + sessB } }), env);
+      ok("logout: la sessione è revocata sul server", meOld.status === 401);
+      ok("logout: account() = non collegato", !B.SV.account().linked && B.SV.account().email === null);
+
+      // Limite tentativi: 429 → rate (niente token)
+      const lim = await backend();
+      lim.PASSWORD_PEPPER = env.PASSWORD_PEPPER;
+      const D = device(lim);
+      for (let i = 0; i < 5; i++) await D.SV.login(EMAIL, "sbagliata-" + i);
+      const d6 = await D.SV.login(EMAIL, "sbagliata-x");
+      ok("login oltre il limite → rate (429)", !d6.ok && d6.error === "rate" && !D.SV.hasToken());
+
+      // Mai la password: né in storage, né nei log, né negli URL delle richieste
+      const all = [A, B, C, D];
+      const dump = (X) => JSON.stringify(X.S.keys().map(k => [k, X.S.get(k, null)]));
+      ok("nessuna password in storage (tutte le chiavi, anche errorLog)", all.every(X => ![PW, PW2, "sbagliata-123"].some(p => dump(X).includes(p))));
+      ok("nessuna password nei log degli errori", all.every(X => !X.logs.some(l => [PW, PW2].some(p => l.includes(p)))));
+      ok("nessuna password negli URL (solo nel corpo delle POST /v1/auth/*)", all.every(X => X.net.requests.every(r => ![PW, PW2].some(p => r.url.includes(p)))) &&
+        A.net.requests.filter(r => r.body && JSON.stringify(r.body).includes(PW)).every(r => r.method === "POST" && /\/v1\/auth\/(claim|login|password)$/.test(r.url)));
+      ok("accountEmail e syncToken non generano modifiche da sincronizzare", !all.some(X => X.sent().some(c => /accountEmail|syncToken/.test(JSON.stringify(c)))));
     }
 
     // ── ripristino di un backup vecchio su device collegato (Ruling 14: rebaseline) ──
@@ -1663,7 +1773,7 @@ console.log("\nSuite App v2 — piani dal piano attivo, fallback embedded, vecch
 // ---- Suite Impostazioni v2: link #sync=, import .txt temporaneo, backup senza dati del device, export completo, CSP ----
 // Sandbox vm con storage.jsx reale (in memoria) + parser/planconv/recordmap/syncv2/impostazioni.jsx; fetch finto
 // offline (mai la rete). Le funzioni pure stanno in window.ImpostazioniLogic e window.SyncV2.
-console.log("\nSuite Impostazioni v2 — link #sync=, import .txt (id senza collisioni), backup/ripristino, export completo, CSP");
+console.log("\nSuite Impostazioni v2 — account (claim/accedi/esci), import .txt (id senza collisioni), backup/ripristino, export completo, CSP");
 await (async () => {
   const TOKEN = "ab12".repeat(16);
   const FILES = ["storage.jsx", "parser.jsx", "planconv.jsx", "schedaState.jsx", "recordmap.jsx", "syncv2.jsx", "screens/impostazioni.jsx"];
@@ -1683,51 +1793,34 @@ await (async () => {
   const fetchFn = async () => { throw new TypeError("Failed to fetch"); };
   SV.init({ storage: S, fetch: fetchFn, now: () => Date.now(), setTimeout: () => 1, clearTimeout: () => {} });
 
-  // ── #sync=<token> ──
-  ok("linkTokenFromHash: 64 hex → token", SV.linkTokenFromHash("#sync=" + TOKEN) === TOKEN);
-  ok("linkTokenFromHash: lunghezza sbagliata / non hex / altro hash / vuoto → null",
-    [("#sync=" + TOKEN.slice(1)), ("#sync=" + TOKEN + "a"), ("#sync=" + "g".repeat(64)), "#other", "#sync=", "", "sync=" + TOKEN, "#x#sync=" + TOKEN, "#sync=" + TOKEN + "&a=1", null, undefined]
-      .every(h => SV.linkTokenFromHash(h) === null));
+  // ── #sync= tolto (Task 9C): il link non collega più nulla ──
+  ok("SyncV2: niente più linkTokenFromHash/consumeLinkHash (link #sync= ignorato)", SV.linkTokenFromHash === undefined && SV.consumeLinkHash === undefined && L.tokenFromInput === undefined);
+  ok("il token non finisce mai nei log", !logs.some(l => l.includes(TOKEN)));
+
+  // ── Account: quale riquadro mostrare (logica pura) ──
   {
-    const calls = [];
-    const hist = { replaceState: (...a) => calls.push(a) };
-    const bad = SV.consumeLinkHash({ hash: "#qualcosa", pathname: "/fitness-hub/", search: "" }, hist);
-    ok("consumeLinkHash: hash diverso → ignorato (nessun token, URL intatto)", bad === null && calls.length === 0 && !SV.hasToken());
-    const p = SV.consumeLinkHash({ hash: "#sync=" + TOKEN, pathname: "/fitness-hub/", search: "?v=1" }, hist);
-    ok("consumeLinkHash: hash valido → ripulisce l'URL (replaceState senza hash)", !!p && calls.length === 1 && calls[0][2] === "/fitness-hub/?v=1");
-    const r = await p;
-    ok("consumeLinkHash: syncToken salvato (anche senza rete), nessun errore di forma", S.get("syncToken") === TOKEN && SV.hasToken() && r && r.error !== "unauthorized");
-    ok("il token non finisce mai nei log", !logs.some(l => l.includes(TOKEN)));
-    SV.setToken("");
-    ok("setToken('') scollega", !SV.hasToken() && S.get("syncToken", null) === null);
-    // Token già salvato: stesso token → nessuna domanda; diverso → domanda, e se rifiutata resta il vecchio (hash ripulito comunque)
-    const OTHER = "ef56".repeat(16), asks = [];
-    const loc = { hash: "#sync=" + TOKEN, pathname: "/fitness-hub/", search: "" };
-    S.set("syncToken", TOKEN, { silent: true });
-    calls.length = 0;
-    await SV.consumeLinkHash(loc, hist, () => { asks.push(1); return false; });
-    ok("consumeLinkHash: stesso token già salvato → nessuna conferma, hash ripulito", asks.length === 0 && calls.length === 1 && S.get("syncToken") === TOKEN);
-    S.set("syncToken", OTHER, { silent: true });
-    calls.length = 0;
-    const rd = await SV.consumeLinkHash(loc, hist, () => { asks.push(1); return false; });
-    ok("consumeLinkHash: token diverso → chiede conferma; rifiutata → token invariato, hash comunque ripulito",
-      asks.length === 1 && calls.length === 1 && S.get("syncToken") === OTHER && rd && rd.error === "declined");
-    const ry = await SV.consumeLinkHash(loc, hist, () => { asks.push(1); return true; });
-    ok("consumeLinkHash: token diverso, confermata → sostituito", asks.length === 2 && S.get("syncToken") === TOKEN && ry && ry.error !== "declined");
-    ok("il token non finisce mai nei log (anche nei percorsi con conferma)", !logs.some(l => l.includes(TOKEN) || l.includes(OTHER)));
-    // Maiuscole/minuscole: stesso token → nessuna conferma, salvato in minuscolo
-    ok("linkTokenFromHash: hex maiuscolo → token in minuscolo", SV.linkTokenFromHash("#sync=" + TOKEN.toUpperCase()) === TOKEN);
-    calls.length = 0;
-    const nAsk = asks.length;
-    await SV.consumeLinkHash({ hash: "#sync=" + TOKEN.toUpperCase(), pathname: "/fitness-hub/", search: "" }, hist, () => { asks.push(1); return false; });
-    ok("consumeLinkHash: stesso token in maiuscolo → nessuna conferma, token invariato", asks.length === nAsk && calls.length === 1 && S.get("syncToken") === TOKEN);
-    S.set("syncToken", TOKEN.toUpperCase(), { silent: true }); // salvato in maiuscolo da una versione vecchia
-    await SV.consumeLinkHash(loc, hist, () => { asks.push(1); return false; });
-    ok("consumeLinkHash: token salvato in maiuscolo, link in minuscolo → nessuna conferma", asks.length === nAsk);
-    ok("tokenFromInput: token o link incollato in maiuscolo → minuscolo; non valido → null",
-      L.tokenFromInput("  " + TOKEN.toUpperCase() + " ") === TOKEN && L.tokenFromInput("https://fara2106.github.io/fitness-hub/#sync=" + TOKEN.toUpperCase()) === TOKEN &&
-      L.tokenFromInput(TOKEN) === TOKEN && L.tokenFromInput("xyz") === null && L.tokenFromInput(TOKEN.slice(2)) === null);
-    SV.setToken("");
+    ok("ImpostazioniLogic espone accountMode e authMessage", typeof L.accountMode === "function" && typeof L.authMessage === "function");
+    const M = (acc, claimable, preferSignin) => L.accountMode(acc, claimable, preferSignin);
+    const off = { linked: false, legacy: false, email: null, expired: false };
+    const legacy = { linked: true, legacy: true, email: null, expired: false };
+    const signed = { linked: true, legacy: false, email: "a@b.it", expired: false };
+    ok("accountMode: non collegato → signin", M(off, null) === "signin");
+    ok("accountMode: token legacy, account da creare (o non noto) → claim", M(legacy, true) === "claim" && M(legacy, null) === "claim");
+    ok("accountMode: token legacy ma l'account esiste già → signin", M(legacy, false) === "signin");
+    ok("accountMode: token legacy, l'utente sceglie «ho già un account» → signin", M(legacy, true, true) === "signin");
+    ok("accountMode: sessione → signedIn", M(signed, null) === "signedIn");
+    ok("accountMode: 401 (sessione o token legacy spento) → expired", M({ ...signed, expired: true }, null) === "expired" && M({ ...legacy, expired: true }, true) === "expired");
+    const tt = (k) => k;
+    ok("authMessage: 401 → «Email o password non corretti»", L.authMessage("credentials", tt) === "Email o password non corretti");
+    ok("authMessage: 429 → «Troppi tentativi, riprova tra qualche minuto»", L.authMessage("rate", tt) === "Troppi tentativi, riprova tra qualche minuto");
+    ok("authMessage: 409 → «L'account esiste già: accedi»", L.authMessage("exists", tt) === "L'account esiste già: accedi");
+    ok("authMessage: rete/5xx → «Riprova…», mai «password sbagliata»", /^Riprova/.test(L.authMessage("retry", tt)) && !/password/i.test(L.authMessage("retry", tt)) &&
+      !/password/i.test(L.authMessage("qualcosa-di-ignoto", tt)));
+    // Senza rete login/claim tornano "retry" e non toccano lo storage
+    const before = JSON.stringify(S.keys().sort());
+    const r1 = await SV.login("a@b.it", "password-lunga-1");
+    ok("login offline → retry, nessuna chiave scritta", !r1.ok && r1.error === "retry" && JSON.stringify(S.keys().sort()) === before && !SV.hasToken());
+    ok("la password non finisce mai nei log", !logs.some(l => l.includes("password-lunga-1")));
   }
 
   // ── Import .txt → piano strutturato ──
@@ -1790,7 +1883,7 @@ await (async () => {
 
   // ── Backup: niente dati del device ──
   {
-    const LOCAL = ["syncToken", "v2deviceId", "v2cursor", "v2epoch", "v2outbox", "v2grp:day:2026-11-03", "v2grp:weights", "r:setLog:abc", "r:workoutPlan:workout-1", "groqApiKey", "errorLog", "plan_workout", "plan_diet"];
+    const LOCAL = ["syncToken", "accountEmail", "v2deviceId", "v2cursor", "v2epoch", "v2outbox", "v2grp:day:2026-11-03", "v2grp:weights", "r:setLog:abc", "r:workoutPlan:workout-1", "groqApiKey", "errorLog", "plan_workout", "plan_diet"];
     const KEEP = ["bodyWeight", "weightLog", "spesaChecked", "theme", "lang", "checkIn_2026-11-03", "exNotes"];
     S.clear && S.clear();
     LOCAL.forEach(k => S.set(k, "x-" + k, { silent: true }));
@@ -1839,16 +1932,38 @@ await (async () => {
     ok("i18n: stringhe Sheets orfane rimosse", !/Collega il tuo Sheets|L'URL del foglio Google/.test(i18n));
     const src = readFileSync(join(ROOT, "screens", "impostazioni.jsx"), "utf8");
     const used = [...src.matchAll(/\bt\("((?:[^"\\]|\\.)*)"\)/g)].map(m => m[1].replace(/\\"/g, '"'));
-    const newKeys = ["Collega questo device", "Scollega", "Collega", "Incolla il token o il link", "Token non valido: servono 64 caratteri esadecimali", "Token rifiutato dal server",
-      "Collegato e sincronizzato", "Token salvato, ma il server non è raggiungibile: riprova più tardi", "modifiche in coda", "Sola lettura · l'import .txt è temporaneo", "Scheda attiva", "Dieta attiva",
-      "Il link con #sync=<token> funziona nel browser. Nell'app installata sulla Home incolla qui il token (il browser ha uno storage separato).", "Questo device è già collegato con un altro token. Sostituirlo?", "Piani archiviati", "Importa scheda .txt (temporaneo)", "Importa dieta .txt (temporaneo)", "Crea un nuovo piano attivo e archivia quello precedente", "Il piano attivo in testo leggibile",
-      "Tutto lo storage locale, tranne token e chiave Groq", "Nessun piano: si usa il testo predefinito dell'app", "Collegato", "Token di sincronizzazione"];
-    ok("i18n: ogni nuova stringa dell'UI Impostazioni è usata e ha la traduzione EN", newKeys.every(k => used.includes(k) && i18n.includes(JSON.stringify(k) + ": { en:")));
+    const newKeys = ["modifiche in coda", "Sola lettura · l'import .txt è temporaneo", "Scheda attiva", "Dieta attiva",
+      "Piani archiviati", "Importa scheda .txt (temporaneo)", "Importa dieta .txt (temporaneo)", "Crea un nuovo piano attivo e archivia quello precedente", "Il piano attivo in testo leggibile",
+      "Tutto lo storage locale, tranne token e chiave Groq", "Nessun piano: si usa il testo predefinito dell'app",
+      // Account (Task 9C)
+      "Account", "Crea il tuo account", "Accedi", "Accedi di nuovo", "Esci", "Cambia password", "Email", "Password", "Conferma password", "Almeno 10 caratteri",
+      "Password attuale", "Nuova password", "Crea account", "Ho già un account: accedi", "Le password non coincidono", "Password cambiata: gli altri device dovranno accedere di nuovo",
+      "Uscire da questo device? I dati restano qui e tornano a sincronizzarsi quando accedi di nuovo.", "Sessione scaduta: i dati restano sul device e partono dopo l'accesso",
+      "Questo device usa ancora il vecchio token. Crea l'account con cui accederai da tutti i device.", "Accedi per sincronizzare i dati fra i tuoi device",
+      "Email o password non corretti", "Troppi tentativi, riprova tra qualche minuto", "L'account esiste già: accedi", "Riprova: server non raggiungibile",
+      "Password attuale non corretta", "Controlla email e password (almeno 10 caratteri)", "Il vecchio token non vale più: accedi con email e password", "Accesso eseguito", "Annulla"];
+    // usata = t("…") statico oppure messaggio della tabella _AUTH_MSG (tradotto con t() in _authMessage)
+    const authMsgs = [...((src.match(/const _AUTH_MSG = \{([\s\S]*?)\n\};/) || [, ""])[1]).matchAll(/:\s*"((?:[^"\\]|\\.)*)"/g)].map(m => m[1]);
+    const isUsed = (k) => used.includes(k) || authMsgs.includes(k);
+    const missing = newKeys.filter(k => !(isUsed(k) && i18n.includes(JSON.stringify(k) + ": { en:")));
+    ok("i18n: ogni nuova stringa dell'UI Impostazioni è usata e ha la traduzione EN" + (missing.length ? " — mancano: " + missing.join(" | ") : ""), missing.length === 0);
+    ok("i18n: ogni messaggio d'errore dell'account ha la traduzione EN", authMsgs.length >= 6 && authMsgs.every(k => i18n.includes(JSON.stringify(k) + ": { en:")));
+    const goneKeys = ["Collega questo device", "Scollega", "Incolla il token o il link", "Token non valido: servono 64 caratteri esadecimali", "Token rifiutato dal server",
+      "Token salvato, ma il server non è raggiungibile: riprova più tardi", "Il link con #sync=<token> funziona nel browser. Nell'app installata sulla Home incolla qui il token (il browser ha uno storage separato).",
+      "Questo device è già collegato con un altro token. Sostituirlo?", "Token di sincronizzazione"];
+    ok("i18n: le stringhe del token incollato non sono più usate né nel dizionario", goneKeys.every(k => !used.includes(k) && !i18n.includes(JSON.stringify(k) + ":")));
+    const navSrc = readFileSync(join(ROOT, "nav.jsx"), "utf8");
+    ok("SyncBadge: stato expired con etichetta tradotta", /expired:\s*\{[^}]*t\("Accedi di nuovo"\)/.test(navSrc) && i18n.includes('"Accedi di nuovo": { en:'));
+    const onb = readFileSync(join(ROOT, "screens", "onboarding.jsx"), "utf8");
+    ok("onboarding: passo Account (AccountPanel), saltabile", /window\.AccountPanel/.test(onb) && /storageKey:\s*"accountEmail"/.test(onb) && i18n.includes('"Più tardi": { en:') && /t\("Più tardi"\)/.test(onb));
+    ok("campi password con autocomplete per il portachiavi (username / current-password / new-password)",
+      /type="email"[^>]*autoComplete="username"|autoComplete="username"[^>]*type="email"/.test(src) && /autoComplete="current-password"/.test(src) && /autoComplete="new-password"/.test(src) && /type="password"/.test(src));
+    ok("nessun <form> nell'UI account", !/<form[\s>]/.test(src) && !/<form[\s>]/.test(onb));
     ok("i18n: le stringhe tolte (import/export vecchi) non sono più usate", !used.some(k => /^Importa (scheda|dieta) \(\.txt\)$|^Il testo attuale|^Importa scheda\.txt e dieta\.txt$/.test(k)));
     const mount = readFileSync(join(ROOT, "app.jsx"), "utf8");
-    ok("app.jsx: consumeLinkHash chiamato dopo SyncV2.init dentro storage.onReady, con conferma di sostituzione", /SyncV2\.init\([\s\S]{0,900}consumeLinkHash\(undefined, undefined,\s*\(\) => window\.confirm\(/.test(mount));
-    ok("impostazioni.jsx: dopo il ripristino si ricalcola la cache piani e si fa il rebaseline; il collegamento chiede conferma se il token cambia",
-      /_restoreBackupData\(window\.storage[\s\S]{0,300}SyncV2\.refreshPlans\(\)[\s\S]{0,300}SyncV2\.rebaseline\(\)/.test(src) && /String\(cur\)\.toLowerCase\(\) !== token && !window\.confirm\(/.test(src));
+    ok("app.jsx: il link #sync= non è più gestito (niente consumeLinkHash)", !/consumeLinkHash|#sync=/.test(mount));
+    ok("impostazioni.jsx: dopo il ripristino si ricalcola la cache piani e si fa il rebaseline",
+      /_restoreBackupData\(window\.storage[\s\S]{0,300}SyncV2\.refreshPlans\(\)[\s\S]{0,300}SyncV2\.rebaseline\(\)/.test(src));
     ok("i18n: conferma del ripristino dice che i dati già sincronizzati non tornano indietro (IT+EN)",
       used.includes("Ripristinare il backup? I dati locali verranno sovrascritti, ma i dati già sincronizzati non vengono riportati indietro.") &&
       /"Ripristinare il backup\? I dati locali verranno sovrascritti, ma i dati già sincronizzati non vengono riportati indietro\.": \{ en: "[^"]*won't be rolled back/.test(i18n) &&

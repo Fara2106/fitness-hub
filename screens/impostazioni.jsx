@@ -217,10 +217,10 @@ function _importPlanChanges(kind, text, fileName, now) {
   return { identical: false, changes };
 }
 
-// Chiavi SOLO del device: mai nel backup (né in export né in ripristino). Token e
-// chiave Groq sono segreti; il resto è stato del motore di sync (cursore, coda, cache record e piani).
+// Chiavi SOLO del device: mai nel backup (né in export né in ripristino). Sessione (syncToken) e
+// chiave Groq sono segreti; accountEmail dice con quale account ha fatto l'accesso QUESTO device; il resto è stato del motore di sync (cursore, coda, cache record e piani).
 // plan_workout/plan_diet sono una cache dei record dei piani (si ricalcola dai record): mai nel backup.
-const _DEVICE_LOCAL_KEYS = ["syncToken", "v2deviceId", "v2cursor", "v2epoch", "v2outbox", "groqApiKey", "errorLog", "plan_workout", "plan_diet"];
+const _DEVICE_LOCAL_KEYS = ["syncToken", "accountEmail", "v2deviceId", "v2cursor", "v2epoch", "v2outbox", "groqApiKey", "errorLog", "plan_workout", "plan_diet"];
 function _isDeviceLocalKey(k) {
   return _DEVICE_LOCAL_KEYS.indexOf(k) !== -1 || k.startsWith("v2grp:") || k.startsWith("r:");
 }
@@ -239,7 +239,7 @@ function _restoreBackupData(st, data) {
 }
 
 window.ImpostazioniLogic = {
-  importPlanChanges: _importPlanChanges, isDeviceLocalKey: _isDeviceLocalKey, tokenFromInput: _tokenFromInput,
+  importPlanChanges: _importPlanChanges, isDeviceLocalKey: _isDeviceLocalKey, accountMode: _accountMode, authMessage: _authMessage,
   backupData: _backupData, restoreBackupData: _restoreBackupData,
   validateSchedaText: _validateSchedaText, validateDietaText: _validateDietaText,
 };
@@ -449,7 +449,7 @@ const SyncNowRow = () => {
     setSyncResult(null);
     try {
       const r = window.SyncV2 ? await window.SyncV2.syncNow() : { ok: false, error: "assente" };
-      setSyncResult({ ok: !!(r && r.ok), unlinked: !!(r && r.error === "unlinked") });
+      setSyncResult({ ok: !!(r && r.ok), unlinked: !!(r && r.error === "unlinked"), expired: !!(r && r.error === "unauthorized") });
     } catch (e) {
       setSyncResult({ ok: false });
     } finally {
@@ -474,7 +474,7 @@ const SyncNowRow = () => {
           background: syncResult.ok ? "rgba(48,209,88,0.18)" : "rgba(255,69,58,0.14)",
           color: syncResult.ok ? "var(--success)" : "var(--danger)",
         }}>
-          {syncResult.ok ? "✓ " + t("Sincronizzato") : "✗ " + (syncResult.unlinked ? t("Non collegato") : t("Errore"))}
+          {syncResult.ok ? "✓ " + t("Sincronizzato") : "✗ " + (syncResult.unlinked ? t("Non collegato") : syncResult.expired ? t("Accedi di nuovo") : t("Errore"))}
         </span>
       ) : (
         <Icon name="chevron" size={13} color="var(--accent)" />
@@ -483,89 +483,202 @@ const SyncNowRow = () => {
   );
 };
 
-// ── Collega questo device: token di sync (mai mostrato per intero) ───────────
-// Il token sta solo in window.storage (syncToken), mai nel backup né sincronizzato.
-// Accetta il token da solo o l'intero link ".../#sync=<token>" incollato.
-const _TOKEN_RE = /^[0-9a-fA-F]{64}$/;
-// Token in minuscolo (com'è generato, openssl rand -hex): un link o un incolla in maiuscolo è lo stesso token.
-function _tokenFromInput(raw) {
-  const v = String(raw || "").trim();
-  const i = v.indexOf("#sync=");
-  const cand = i >= 0 ? v.slice(i + 6) : v;
-  return _TOKEN_RE.test(cand) ? cand.toLowerCase() : null;
+// ── Account (Task 9C): accesso con email + password al posto del token incollato ──
+// La sessione sta solo in window.storage (syncToken) con l'email (accountEmail): device-local, mai nel backup né
+// sincronizzate. La password vive solo nello stato del componente finché serve: mai in storage, log o URL.
+// Riquadri: non collegato → "Accedi"; collegato col vecchio token e account da creare → "Crea il tuo account" (claim);
+// con account → email, "Cambia password", "Esci"; 401 (sessione o token legacy spento) → "Accedi di nuovo".
+function _accountMode(acc, claimable, preferSignin) {
+  if (!acc || !acc.linked) return "signin";
+  if (acc.expired) return "expired";
+  if (acc.email) return "signedIn";
+  return claimable === false || preferSignin ? "signin" : "claim";
 }
-const SyncLinkRow = () => {
+const _AUTH_MSG = {
+  credentials: "Email o password non corretti",
+  rate: "Troppi tentativi, riprova tra qualche minuto",
+  exists: "L'account esiste già: accedi",
+  invalid: "Controlla email e password (almeno 10 caratteri)",
+  claimUnavailable: "Il vecchio token non vale più: accedi con email e password",
+  expired: "Sessione scaduta: i dati restano sul device e partono dopo l'accesso",
+  retry: "Riprova: server non raggiungibile",
+};
+// Messaggio per un codice d'errore di SyncV2; rete/5xx/ignoto → "riprova", mai "password sbagliata".
+function _authMessage(code, t) {
+  return t(Object.prototype.hasOwnProperty.call(_AUTH_MSG, code) ? _AUTH_MSG[code] : _AUTH_MSG.retry);
+}
+const _MIN_PASSWORD = 10;
+const _readAccount = () => (window.SyncV2 && window.SyncV2.account
+  ? window.SyncV2.account()
+  : { linked: false, legacy: false, email: null, expired: false });
+
+const AccField = ({ label, children }) => (
+  <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+    <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)", letterSpacing: 0.4, textTransform: "uppercase", paddingLeft: 2 }}>{label}</span>
+    {children}
+  </label>
+);
+const _accInput = { fontSize: 16, padding: "11px 12px", background: "var(--card-2)" };
+
+const AccountPanel = ({ onSignedIn }) => {
   const t = useT();
-  const read = () => {
-    const tok = window.storage ? window.storage.get("syncToken", null) : null;
-    return typeof tok === "string" && tok ? tok.slice(-4) : null;
-  };
-  const [tail, setTail] = React.useState(read);
-  const [val, setVal] = React.useState("");
+  const [acc, setAcc] = React.useState(_readAccount);
+  const [claimable, setClaimable] = React.useState(null);      // null = non noto (offline): si propone il claim
+  const [preferSignin, setPreferSignin] = React.useState(false);
+  const [email, setEmail] = React.useState(() => _readAccount().email || "");
+  const [pw, setPw] = React.useState("");
+  const [pw2, setPw2] = React.useState("");
+  const [cur, setCur] = React.useState("");
+  const [changing, setChanging] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
-  const [res, setRes] = React.useState(null); // {type:'ok'|'warn'|'err', msg}
+  const [res, setRes] = React.useState(null);                   // {type:'ok'|'err', msg}
   React.useEffect(() => {
-    const on = () => setTail(read());
+    const on = () => setAcc(_readAccount());
     window.addEventListener("lfh-sync", on);
     return () => window.removeEventListener("lfh-sync", on);
   }, []);
+  // Col vecchio token: /v1/me dice se l'account esiste già (email) o va creato (email null).
+  React.useEffect(() => {
+    if (!acc.legacy || acc.expired || !window.SyncV2 || !window.SyncV2.accountInfo) return;
+    let alive = true;
+    window.SyncV2.accountInfo().then((r) => {
+      if (!alive || !r || !r.ok) return;
+      setClaimable(r.email == null);
+      if (r.email) setEmail((e) => e || r.email);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [acc.legacy, acc.expired]);
 
-  const connect = async () => {
-    if (busy) return;
-    const token = _tokenFromInput(val);
-    if (!token) { setRes({ type: "err", msg: t("Token non valido: servono 64 caratteri esadecimali") }); return; }
-    if (!window.SyncV2) { setRes({ type: "err", msg: t("Errore") }); return; }
-    const cur = window.storage ? window.storage.get("syncToken", null) : null;
-    if (cur && String(cur).toLowerCase() !== token && !window.confirm(t("Questo device è già collegato con un altro token. Sostituirlo?"))) return;
-    setBusy(true); setRes(null);
-    try {
-      const r = await window.SyncV2.setToken(token);
-      setTail(read());
-      if (r && r.ok) { setVal(""); setRes({ type: "ok", msg: t("Collegato e sincronizzato") }); }
-      else if (r && r.error === "unauthorized") setRes({ type: "err", msg: t("Token rifiutato dal server") });
-      else { setVal(""); setRes({ type: "warn", msg: t("Token salvato, ma il server non è raggiungibile: riprova più tardi") }); }
-    } catch (_) {
-      setTail(read());
-      setRes({ type: "err", msg: t("Errore") });
-    } finally { setBusy(false); }
-  };
-  const unlink = async () => {
+  const mode = _accountMode(acc, claimable, preferSignin);
+  const clearPw = () => { setPw(""); setPw2(""); setCur(""); };
+  const done = (msg) => { clearPw(); setAcc(_readAccount()); setRes({ type: "ok", msg }); };
+  const fail = (code) => setRes({ type: "err", msg: _authMessage(code, t) });
+  const run = async (fn) => {
     if (busy || !window.SyncV2) return;
-    try { await window.SyncV2.setToken(""); } catch (_) {}
-    setTail(read()); setRes(null);
+    setBusy(true); setRes(null);
+    try { await fn(window.SyncV2); } catch (_) { fail("retry"); } finally { setBusy(false); }
   };
 
-  const color = res ? (res.type === "err" ? "var(--danger)" : res.type === "warn" ? "var(--warning)" : "var(--success)") : "var(--text-3)";
+  const doLogin = () => run(async (SV) => {
+    const r = await SV.login(email, pw);
+    if (r && r.ok) { done(t("Accesso eseguito")); if (onSignedIn) onSignedIn(); }
+    else fail(r && r.error);
+  });
+  const doClaim = () => run(async (SV) => {
+    if (pw.length < _MIN_PASSWORD) { fail("invalid"); return; }
+    if (pw !== pw2) { setRes({ type: "err", msg: t("Le password non coincidono") }); return; }
+    const r = await SV.claim(email, pw);
+    if (r && r.ok) { done(t("Accesso eseguito")); if (onSignedIn) onSignedIn(); return; }
+    if (r && (r.error === "exists" || r.error === "claimUnavailable")) { setPreferSignin(true); setPw2(""); }
+    fail(r && r.error);
+  });
+  const doChange = () => run(async (SV) => {
+    if (pw.length < _MIN_PASSWORD) { fail("invalid"); return; }
+    if (pw !== pw2) { setRes({ type: "err", msg: t("Le password non coincidono") }); return; }
+    const r = await SV.changePassword(cur, pw);
+    if (r && r.ok) { setChanging(false); done(t("Password cambiata: gli altri device dovranno accedere di nuovo")); return; }
+    if (r && r.error === "credentials") setRes({ type: "err", msg: t("Password attuale non corretta") });
+    else fail(r && r.error);
+    if (r && r.error === "expired") { setChanging(false); clearPw(); setAcc(_readAccount()); }
+  });
+  const doLogout = () => {
+    if (!window.confirm(t("Uscire da questo device? I dati restano qui e tornano a sincronizzarsi quando accedi di nuovo."))) return;
+    run(async (SV) => { await SV.logout(); clearPw(); setChanging(false); setPreferSignin(false); setAcc(_readAccount()); setRes(null); });
+  };
+
+  const msg = res && (
+    <div role="status" style={{ fontSize: 12, lineHeight: 1.4, color: res.type === "err" ? "var(--danger)" : "var(--success)" }}>{res.msg}</div>
+  );
+  const btn = (label, onClick, enabled, primary) => (
+    <button className={primary ? "btn primary" : "btn"} style={{ padding: "9px 16px", fontSize: 13.5 }} onClick={onClick} disabled={busy || !enabled}>
+      {busy && primary ? <span className="spinner" style={{ width: 14, height: 14 }} /> : label}
+    </button>
+  );
+  const box = (children) => (
+    <div style={{ padding: "10px 16px 14px", display: "flex", flexDirection: "column", gap: 10, borderTop: "1px solid var(--border)" }}>{children}</div>
+  );
+  const onEnter = (fn, can) => (e) => { if (e.key === "Enter" && can) fn(); };
+
+  if (mode === "signedIn") {
+    const canChange = !!cur && pw.length > 0 && pw2.length > 0;
+    return (
+      <div>
+        <IRow icon="user" iconBg="#5E5CE6" title={acc.email} sub={t("Account")}>
+          <button className="btn" style={{ padding: "6px 12px", fontSize: 12 }} onClick={doLogout} disabled={busy}>{t("Esci")}</button>
+        </IRow>
+        <IRow icon="lock" iconBg="#8E8E93" title={t("Cambia password")} onClick={() => { setChanging((c) => !c); clearPw(); setRes(null); }}
+          trailing={<Icon name={changing ? "chevron-down" : "chevron"} size={13} color="var(--accent)" />} />
+        {changing && box(<React.Fragment>
+          {/* username nascosto: il portachiavi associa la nuova password all'account giusto */}
+          <input type="email" autoComplete="username" value={acc.email} readOnly tabIndex={-1} aria-hidden="true"
+            style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }} />
+          <AccField label={t("Password attuale")}>
+            <input type="password" autoComplete="current-password" className="input" style={_accInput} value={cur} onChange={(e) => setCur(e.target.value)} />
+          </AccField>
+          <AccField label={t("Nuova password")}>
+            <input type="password" autoComplete="new-password" className="input" style={_accInput} value={pw} onChange={(e) => setPw(e.target.value)} />
+          </AccField>
+          <AccField label={t("Conferma password")}>
+            <input type="password" autoComplete="new-password" className="input" style={_accInput} value={pw2} onChange={(e) => setPw2(e.target.value)} onKeyDown={onEnter(doChange, canChange)} />
+          </AccField>
+          <div className="muted" style={{ fontSize: 11.5 }}>{t("Almeno 10 caratteri")}</div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            {btn(t("Annulla"), () => { setChanging(false); clearPw(); setRes(null); }, true, false)}
+            {btn(t("Cambia password"), doChange, canChange, true)}
+          </div>
+          {msg}
+        </React.Fragment>)}
+        {!changing && res && box(msg)}
+      </div>
+    );
+  }
+
+  if (mode === "claim") {
+    const canClaim = !!email.trim() && pw.length > 0 && pw2.length > 0;
+    return (
+      <div>
+        <IRow icon="user" iconBg="#5E5CE6" title={t("Crea il tuo account")} sub={t("Questo device usa ancora il vecchio token. Crea l'account con cui accederai da tutti i device.")} />
+        {box(<React.Fragment>
+          <AccField label={t("Email")}>
+            <input type="email" autoComplete="username" inputMode="email" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+              className="input" style={_accInput} value={email} onChange={(e) => setEmail(e.target.value)} />
+          </AccField>
+          <AccField label={t("Password")}>
+            <input type="password" autoComplete="new-password" className="input" style={_accInput} value={pw} onChange={(e) => setPw(e.target.value)} />
+          </AccField>
+          <AccField label={t("Conferma password")}>
+            <input type="password" autoComplete="new-password" className="input" style={_accInput} value={pw2} onChange={(e) => setPw2(e.target.value)} onKeyDown={onEnter(doClaim, canClaim)} />
+          </AccField>
+          <div className="muted" style={{ fontSize: 11.5 }}>{t("Almeno 10 caratteri")}</div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
+            <button className="btn" style={{ padding: "6px 0", fontSize: 12.5, background: "transparent", border: 0, color: "var(--accent)" }}
+              onClick={() => { setPreferSignin(true); clearPw(); setRes(null); }}>{t("Ho già un account: accedi")}</button>
+            {btn(t("Crea account"), doClaim, canClaim, true)}
+          </div>
+          {msg}
+        </React.Fragment>)}
+      </div>
+    );
+  }
+
+  // signin / expired
+  const canLogin = !!email.trim() && pw.length > 0;
   return (
     <div>
-      <IRow
-        icon="key"
-        iconBg="#5E5CE6"
-        title={t("Collega questo device")}
-        sub={tail ? `${t("Collegato")} · …${tail}` : t("Non collegato")}
-      >
-        {tail && <button className="btn" style={{ padding: "6px 12px", fontSize: 12 }} onClick={unlink}>{t("Scollega")}</button>}
-      </IRow>
-      <div style={{ padding: "10px 16px 14px", display: "flex", flexDirection: "column", gap: 8, borderTop: "1px solid var(--border)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            type="text"
-            autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
-            value={val}
-            onChange={(e) => setVal(e.target.value)}
-            placeholder={t("Incolla il token o il link")}
-            aria-label={t("Token di sincronizzazione")}
-            className="input input-mono"
-            style={{ flex: 1, minWidth: 0, fontSize: 13, padding: "10px 12px", WebkitTextSecurity: "disc" }}
-          />
-          <button className="btn" style={{ padding: "8px 14px", fontSize: 13 }} onClick={connect} disabled={busy || !val.trim()}>
-            {busy ? <span className="spinner" style={{ width: 14, height: 14 }} /> : t("Collega")}
-          </button>
-        </div>
-        <div style={{ fontSize: 11.5, color, lineHeight: 1.4 }}>
-          {res ? res.msg : t("Il link con #sync=<token> funziona nel browser. Nell'app installata sulla Home incolla qui il token (il browser ha uno storage separato).")}
-        </div>
-      </div>
+      <IRow icon="user" iconBg={mode === "expired" ? "#FF9F0A" : "#5E5CE6"}
+        title={mode === "expired" ? t("Accedi di nuovo") : t("Accedi")}
+        sub={mode === "expired" ? t("Sessione scaduta: i dati restano sul device e partono dopo l'accesso") : t("Accedi per sincronizzare i dati fra i tuoi device")} />
+      {box(<React.Fragment>
+        <AccField label={t("Email")}>
+          <input type="email" autoComplete="username" inputMode="email" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+            className="input" style={_accInput} value={email} onChange={(e) => setEmail(e.target.value)} />
+        </AccField>
+        <AccField label={t("Password")}>
+          <input type="password" autoComplete="current-password" className="input" style={_accInput} value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={onEnter(doLogin, canLogin)} />
+        </AccField>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>{btn(t("Accedi"), doLogin, canLogin, true)}</div>
+        {msg}
+      </React.Fragment>)}
     </div>
   );
 };
@@ -586,7 +699,8 @@ const SyncStatusRow = () => {
 
   let pending = 0;
   try { pending = window.SyncV2 ? window.SyncV2.status().pending : 0; } catch (_) {}
-  const base = time ? `${t("Ultimo sync")}: ${time} · ${t("Cloud: Cloudflare")}` : s.status === "unlinked" ? t("Device non collegato: dati solo in locale") : t("In attesa del primo sync");
+  const base = s.status === "expired" ? t("Sessione scaduta: i dati restano sul device e partono dopo l'accesso")
+    : time ? `${t("Ultimo sync")}: ${time} · ${t("Cloud: Cloudflare")}` : s.status === "unlinked" ? t("Device non collegato: dati solo in locale") : t("In attesa del primo sync");
 
   return (
     <IRow
@@ -1022,9 +1136,12 @@ const Impostazioni = ({ device, onNav, theme, setTheme, bodyWeight, setBodyWeigh
       </ISection>
 
       {/* — Sincronizzazione — */}
+      <ISection title={t("Account")}>
+        <AccountPanel />
+      </ISection>
+
       <ISection title={t("Sincronizzazione")}>
         <SyncStatusRow />
-        <SyncLinkRow />
         <SyncNowRow />
       </ISection>
 
@@ -1094,3 +1211,4 @@ const Impostazioni = ({ device, onNav, theme, setTheme, bodyWeight, setBodyWeigh
 };
 
 window.Impostazioni = Impostazioni;
+window.AccountPanel = AccountPanel;

@@ -2637,6 +2637,7 @@ window.buildDefaultNotifConfig = function () {
   };
   const K = {
     token: "syncToken",
+    email: "accountEmail",
     device: "v2deviceId",
     cursor: "v2cursor",
     epoch: "v2epoch",
@@ -2644,7 +2645,7 @@ window.buildDefaultNotifConfig = function () {
   };
   const GRP = "v2grp:",
     REC = "r:";
-  const LOCAL_ONLY = /^(r:|v2|syncToken$|plan_workout$|plan_diet$)/;
+  const LOCAL_ONLY = /^(r:|v2|syncToken$|accountEmail$|plan_workout$|plan_diet$)/;
   const DATED_KEY = /_(\d{4}-\d{2}-\d{2})$/;
   const DATED_GROUP = /:(\d{4}-\d{2}-\d{2})$/;
   const SILENT = {
@@ -2674,6 +2675,7 @@ window.buildDefaultNotifConfig = function () {
   let chain = Promise.resolve(),
     queued = null;
   let gen = 0;
+  let expiredToken = null;
   const isObj = v => v !== null && typeof v === "object" && !Array.isArray(v);
   const keyOf = (c, id) => `${c}/${id}`;
   const splitKey = k => {
@@ -3329,6 +3331,15 @@ window.buildDefaultNotifConfig = function () {
         error: "fetch assente"
       };
     }
+    if (token === expiredToken) {
+      setStatus("expired");
+      return {
+        ok: false,
+        pushed: 0,
+        pulled: 0,
+        error: "unauthorized"
+      };
+    }
     setStatus("syncing");
     let r;
     try {
@@ -3364,7 +3375,10 @@ window.buildDefaultNotifConfig = function () {
     if (r.ok) {
       pruneGroupIndex();
       setStatus("ok");
-    } else if (r.error === "rebaseline") {} else setStatus(r.error === "offline" ? "offline" : "error", r.error);
+    } else if (r.error === "rebaseline") {} else if (r.error === "unauthorized") {
+      if (S.get(K.token, null) === token) expiredToken = token;
+      setStatus("expired");
+    } else setStatus(r.error === "offline" ? "offline" : "error", r.error);
     const out = {
       ok: r.ok,
       pushed: r.pushed,
@@ -3413,6 +3427,7 @@ window.buildDefaultNotifConfig = function () {
     };
     const t = String(token == null ? "" : token).trim();
     const prev = S.get(K.token, null);
+    expiredToken = null;
     if (!t) {
       S.remove(K.token, SILENT);
       if (timer !== null && clearT) {
@@ -3469,31 +3484,6 @@ window.buildDefaultNotifConfig = function () {
     schedulePush();
     return out;
   }
-  function linkTokenFromHash(hash) {
-    const m = /^#sync=([0-9a-fA-F]{64})$/.exec(String(hash == null ? "" : hash));
-    return m ? m[1].toLowerCase() : null;
-  }
-  function consumeLinkHash(loc, hist, confirmReplace) {
-    const l = loc || (typeof location !== "undefined" ? location : null);
-    const h = hist || (typeof history !== "undefined" ? history : null);
-    const token = linkTokenFromHash(l && l.hash);
-    if (!token) return null;
-    try {
-      if (h && typeof h.replaceState === "function") h.replaceState(null, "", (l.pathname || "") + (l.search || ""));
-    } catch (_) {}
-    const cur = S ? S.get(K.token, null) : null;
-    if (cur && String(cur).toLowerCase() !== token && typeof confirmReplace === "function") {
-      let yes = false;
-      try {
-        yes = !!confirmReplace();
-      } catch (_) {}
-      if (!yes) return Promise.resolve({
-        ok: false,
-        error: "declined"
-      });
-    }
-    return setToken(token);
-  }
   function refreshPlansNow() {
     if (!S) return [];
     const changed = refreshPlans();
@@ -3501,6 +3491,227 @@ window.buildDefaultNotifConfig = function () {
       keys: changed
     });
     return changed;
+  }
+  function defaultDeviceName() {
+    const ua = typeof navigator !== "undefined" && navigator && navigator.userAgent ? navigator.userAgent : "";
+    return `PWA ${/iPad/.test(ua) ? "iPad" : /iPhone/.test(ua) ? "iPhone" : /Macintosh/.test(ua) ? "Mac" : "browser"}`;
+  }
+  async function api(path, {
+    method = "POST",
+    body,
+    bearer
+  } = {}) {
+    if (!F) return {
+      status: 0,
+      json: null
+    };
+    const headers = {};
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (bearer) headers.Authorization = `Bearer ${bearer}`;
+    let res;
+    try {
+      res = await F(`${API}${path}`, body === undefined ? {
+        method,
+        headers
+      } : {
+        method,
+        headers,
+        body: JSON.stringify(body)
+      });
+    } catch (_) {
+      return {
+        status: 0,
+        json: null
+      };
+    }
+    let j = null;
+    try {
+      j = await res.json();
+    } catch (_) {}
+    return {
+      status: res.status,
+      json: j
+    };
+  }
+  function authError(status) {
+    if (status === 401) return "credentials";
+    if (status === 429) return "rate";
+    if (status === 409) return "exists";
+    if (status === 400) return "invalid";
+    return "retry";
+  }
+  const cleanEmail = e => String(e == null ? "" : e).trim().toLowerCase();
+  async function adoptSession(j) {
+    S.set(K.token, j.session, SILENT);
+    S.set(K.email, typeof j.email === "string" && j.email ? j.email : null, SILENT);
+    expiredToken = null;
+    setStatus("idle");
+    const r = await syncNow();
+    return {
+      ok: true,
+      email: S.get(K.email, null),
+      synced: !!(r && r.ok)
+    };
+  }
+  function credentialsOk(email, password) {
+    return typeof password === "string" && password.length > 0 && cleanEmail(email).length > 0;
+  }
+  async function login(email, password, deviceName) {
+    if (!S) return {
+      ok: false,
+      error: "retry"
+    };
+    if (!credentialsOk(email, password)) return {
+      ok: false,
+      error: "invalid"
+    };
+    const r = await api("/v1/auth/login", {
+      body: {
+        email: cleanEmail(email),
+        password,
+        deviceName: deviceName || defaultDeviceName()
+      }
+    });
+    if (r.status === 200 && isObj(r.json) && typeof r.json.session === "string" && r.json.session) return adoptSession(r.json);
+    return {
+      ok: false,
+      error: authError(r.status)
+    };
+  }
+  async function claim(email, password, deviceName) {
+    if (!S) return {
+      ok: false,
+      error: "retry"
+    };
+    const legacy = S.get(K.token, null);
+    if (!legacy || S.get(K.email, null)) return {
+      ok: false,
+      error: "claimUnavailable"
+    };
+    if (!credentialsOk(email, password)) return {
+      ok: false,
+      error: "invalid"
+    };
+    const r = await api("/v1/auth/claim", {
+      bearer: legacy,
+      body: {
+        email: cleanEmail(email),
+        password,
+        deviceName: deviceName || defaultDeviceName()
+      }
+    });
+    if (r.status === 200 && isObj(r.json) && typeof r.json.session === "string" && r.json.session) return adoptSession(r.json);
+    return {
+      ok: false,
+      error: r.status === 401 ? "claimUnavailable" : authError(r.status)
+    };
+  }
+  async function logout() {
+    if (!S) return {
+      ok: false,
+      remote: false
+    };
+    const tok = S.get(K.token, null);
+    let remote = false;
+    if (tok && S.get(K.email, null)) remote = (await api("/v1/auth/logout", {
+      bearer: tok,
+      body: {}
+    })).status === 200;
+    S.remove(K.token, SILENT);
+    S.remove(K.email, SILENT);
+    expiredToken = null;
+    if (timer !== null && clearT) {
+      clearT(timer);
+      timer = null;
+    }
+    setStatus("unlinked");
+    return {
+      ok: true,
+      remote
+    };
+  }
+  async function changePassword(current, next) {
+    if (!S) return {
+      ok: false,
+      error: "retry"
+    };
+    const tok = S.get(K.token, null);
+    if (!tok || !S.get(K.email, null)) return {
+      ok: false,
+      error: "expired"
+    };
+    if (typeof current !== "string" || !current || typeof next !== "string") return {
+      ok: false,
+      error: "invalid"
+    };
+    const r = await api("/v1/auth/password", {
+      bearer: tok,
+      body: {
+        current,
+        next
+      }
+    });
+    if (r.status === 200) return {
+      ok: true
+    };
+    if (r.status === 401) {
+      if (isObj(r.json) && r.json.error === "credenziali non valide") return {
+        ok: false,
+        error: "credentials"
+      };
+      expiredToken = tok;
+      setStatus("expired");
+      return {
+        ok: false,
+        error: "expired"
+      };
+    }
+    return {
+      ok: false,
+      error: authError(r.status)
+    };
+  }
+  async function accountInfo() {
+    if (!S) return {
+      ok: false,
+      error: "retry"
+    };
+    const tok = S.get(K.token, null);
+    if (!tok) return {
+      ok: false,
+      error: "unlinked"
+    };
+    const r = await api("/v1/me", {
+      method: "GET",
+      bearer: tok
+    });
+    if (r.status === 200 && isObj(r.json)) return {
+      ok: true,
+      ownerId: r.json.ownerId || null,
+      email: typeof r.json.email === "string" ? r.json.email : null
+    };
+    if (r.status === 401) {
+      expiredToken = tok;
+      setStatus("expired");
+      return {
+        ok: false,
+        error: "expired"
+      };
+    }
+    return {
+      ok: false,
+      error: "retry"
+    };
+  }
+  function account() {
+    const linked = hasToken();
+    const email = S ? S.get(K.email, null) : null;
+    return {
+      email: linked && email ? email : null,
+      linked,
+      legacy: linked && !email,
+      expired: linked && state.status === "expired"
+    };
   }
   function getRecord(collection, id) {
     return S ? effective(collection, String(id)) : null;
@@ -3538,6 +3749,7 @@ window.buildDefaultNotifConfig = function () {
     timer = null;
     flushScheduled = false;
     firstRunning = false;
+    expiredToken = null;
     dirty.clear();
     touched.clear();
     chain = Promise.resolve();
@@ -3559,8 +3771,6 @@ window.buildDefaultNotifConfig = function () {
     init,
     setToken,
     hasToken,
-    linkTokenFromHash,
-    consumeLinkHash,
     refreshPlans: refreshPlansNow,
     syncNow,
     rebaseline,
@@ -3568,7 +3778,13 @@ window.buildDefaultNotifConfig = function () {
     getRecord,
     listRecords,
     activePlans,
-    status
+    status,
+    login,
+    claim,
+    logout,
+    changePassword,
+    accountInfo,
+    account
   };
   window.SyncV2 = SyncV2;
 })();
@@ -5026,44 +5242,95 @@ const I18N_DICT = {
   "Importa": {
     en: "Import"
   },
-  "Collega questo device": {
-    en: "Link this device"
-  },
-  "Collegato": {
-    en: "Linked"
-  },
-  "Scollega": {
-    en: "Unlink"
-  },
-  "Collega": {
-    en: "Link"
-  },
-  "Token di sincronizzazione": {
-    en: "Sync token"
-  },
-  "Incolla il token o il link": {
-    en: "Paste the token or link"
-  },
-  "Token non valido: servono 64 caratteri esadecimali": {
-    en: "Invalid token: 64 hexadecimal characters needed"
-  },
-  "Token rifiutato dal server": {
-    en: "Token rejected by the server"
-  },
-  "Collegato e sincronizzato": {
-    en: "Linked and synced"
-  },
-  "Token salvato, ma il server non è raggiungibile: riprova più tardi": {
-    en: "Token saved, but the server is unreachable: try again later"
-  },
-  "Il link con #sync=<token> funziona nel browser. Nell'app installata sulla Home incolla qui il token (il browser ha uno storage separato).": {
-    en: "The #sync=<token> link works in the browser. In the app installed on the Home screen, paste the token here (the browser has separate storage)."
-  },
-  "Questo device è già collegato con un altro token. Sostituirlo?": {
-    en: "This device is already linked with a different token. Replace it?"
-  },
   "modifiche in coda": {
     en: "changes queued"
+  },
+  "Account": {
+    en: "Account"
+  },
+  "Crea il tuo account": {
+    en: "Create your account"
+  },
+  "Accedi": {
+    en: "Sign in"
+  },
+  "Accedi di nuovo": {
+    en: "Sign in again"
+  },
+  "Esci": {
+    en: "Sign out"
+  },
+  "Cambia password": {
+    en: "Change password"
+  },
+  "Email": {
+    en: "Email"
+  },
+  "Password": {
+    en: "Password"
+  },
+  "Conferma password": {
+    en: "Confirm password"
+  },
+  "Almeno 10 caratteri": {
+    en: "At least 10 characters"
+  },
+  "Password attuale": {
+    en: "Current password"
+  },
+  "Nuova password": {
+    en: "New password"
+  },
+  "Crea account": {
+    en: "Create account"
+  },
+  "Ho già un account: accedi": {
+    en: "I already have an account: sign in"
+  },
+  "Le password non coincidono": {
+    en: "The passwords don't match"
+  },
+  "Password cambiata: gli altri device dovranno accedere di nuovo": {
+    en: "Password changed: your other devices will need to sign in again"
+  },
+  "Uscire da questo device? I dati restano qui e tornano a sincronizzarsi quando accedi di nuovo.": {
+    en: "Sign out on this device? Your data stays here and syncs again when you sign back in."
+  },
+  "Sessione scaduta: i dati restano sul device e partono dopo l'accesso": {
+    en: "Session expired: your data stays on this device and syncs after you sign in"
+  },
+  "Questo device usa ancora il vecchio token. Crea l'account con cui accederai da tutti i device.": {
+    en: "This device still uses the old token. Create the account you'll sign in with on all your devices."
+  },
+  "Accedi per sincronizzare i dati fra i tuoi device": {
+    en: "Sign in to sync your data across your devices"
+  },
+  "Email o password non corretti": {
+    en: "Incorrect email or password"
+  },
+  "Troppi tentativi, riprova tra qualche minuto": {
+    en: "Too many attempts, try again in a few minutes"
+  },
+  "L'account esiste già: accedi": {
+    en: "The account already exists: sign in"
+  },
+  "Riprova: server non raggiungibile": {
+    en: "Try again: server unreachable"
+  },
+  "Password attuale non corretta": {
+    en: "Current password is incorrect"
+  },
+  "Controlla email e password (almeno 10 caratteri)": {
+    en: "Check email and password (at least 10 characters)"
+  },
+  "Il vecchio token non vale più: accedi con email e password": {
+    en: "The old token no longer works: sign in with email and password"
+  },
+  "Accesso eseguito": {
+    en: "Signed in"
+  },
+  "Più tardi": {
+    en: "Later"
   },
   "Sola lettura · l'import .txt è temporaneo": {
     en: "Read-only · .txt import is temporary"
@@ -6982,6 +7249,12 @@ const SyncBadge = ({
       bg: "rgba(120,120,128,0.14)",
       icon: "cloud-off",
       label: t("Non collegato")
+    },
+    expired: {
+      color: "var(--warning)",
+      bg: "rgba(255,159,10,0.14)",
+      icon: "lock",
+      label: t("Accedi di nuovo")
     }
   };
   const cfg = CFG[status] || CFG.ok;
@@ -7667,6 +7940,15 @@ window.sanitizeSchedaProg = sanitizeSchedaProg;
 // ══ screens/onboarding.jsx ══
 ;(function () {
 const STEPS = [{
+  label: "Account",
+  title: "Accedi",
+  sub: "Accedi per sincronizzare i dati fra i tuoi device",
+  icon: "user",
+  iconColor: "#5E5CE6",
+  field: "account",
+  storageKey: "accountEmail",
+  custom: true
+}, {
   label: "Coach",
   title: "API key Groq",
   sub: "Per attivare l'AI Coach. Ottienila su console.groq.com — gratuita.",
@@ -7713,10 +7995,12 @@ const Onboarding = ({
   const [step, setStep] = React.useState(0);
   const [values, setValues] = React.useState(() => {
     const init = {
+      account: "",
       api: "",
       weight: ""
     };
     STEPS.forEach(s => {
+      if (s.custom) return;
       if (window.storage) {
         const val = window.storage.get(s.storageKey, "");
         if (val) init[s.field] = String(val);
@@ -7743,10 +8027,12 @@ const Onboarding = ({
   if (activeSteps.length === 0) return null;
   const current = activeSteps[step];
   const isLast = step === activeSteps.length - 1;
-  const canNext = values[current.field].trim().length > 0;
+  const canNext = current.custom ? true : values[current.field].trim().length > 0;
+  const accountDone = current.custom && _stepAlreadyDone(current);
   const handleDone = () => {
     setSaving(true);
     STEPS.forEach(s => {
+      if (s.custom) return;
       const val = values[s.field].trim();
       if (val && window.storage) {
         if (s.storageKey === "bodyWeight") {
@@ -7919,7 +8205,20 @@ const Onboarding = ({
       fontSize: isDesktop ? 16 : 14,
       lineHeight: 1.5
     }
-  }, t(current.sub))), React.createElement("div", {
+  }, t(current.sub))), current.custom ? React.createElement("div", {
+    className: "fade-up",
+    key: `f${step}`,
+    style: {
+      textAlign: "left",
+      maxWidth: 420,
+      margin: "0 auto",
+      width: "100%"
+    }
+  }, React.createElement("div", {
+    className: "ios-list"
+  }, window.AccountPanel ? React.createElement(window.AccountPanel, {
+    onSignedIn: () => setTimeout(handleNext, 600)
+  }) : null)) : React.createElement("div", {
     className: "fade-up",
     key: `f${step}`,
     style: {
@@ -7987,7 +8286,7 @@ const Onboarding = ({
       width: 16,
       height: 16
     }
-  }) : React.createElement(React.Fragment, null, isLast ? t("Iniziamo") : t("Continua"), React.createElement(Icon, {
+  }) : React.createElement(React.Fragment, null, current.custom && !accountDone ? t("Più tardi") : isLast ? t("Iniziamo") : t("Continua"), React.createElement(Icon, {
     name: "chevron",
     size: 15,
     strokeWidth: 2.4
@@ -16410,7 +16709,7 @@ function _importPlanChanges(kind, text, fileName, now) {
     changes
   };
 }
-const _DEVICE_LOCAL_KEYS = ["syncToken", "v2deviceId", "v2cursor", "v2epoch", "v2outbox", "groqApiKey", "errorLog", "plan_workout", "plan_diet"];
+const _DEVICE_LOCAL_KEYS = ["syncToken", "accountEmail", "v2deviceId", "v2cursor", "v2epoch", "v2outbox", "groqApiKey", "errorLog", "plan_workout", "plan_diet"];
 function _isDeviceLocalKey(k) {
   return _DEVICE_LOCAL_KEYS.indexOf(k) !== -1 || k.startsWith("v2grp:") || k.startsWith("r:");
 }
@@ -16431,7 +16730,8 @@ function _restoreBackupData(st, data) {
 window.ImpostazioniLogic = {
   importPlanChanges: _importPlanChanges,
   isDeviceLocalKey: _isDeviceLocalKey,
-  tokenFromInput: _tokenFromInput,
+  accountMode: _accountMode,
+  authMessage: _authMessage,
   backupData: _backupData,
   restoreBackupData: _restoreBackupData,
   validateSchedaText: _validateSchedaText,
@@ -16720,7 +17020,8 @@ const SyncNowRow = () => {
       };
       setSyncResult({
         ok: !!(r && r.ok),
-        unlinked: !!(r && r.error === "unlinked")
+        unlinked: !!(r && r.error === "unlinked"),
+        expired: !!(r && r.error === "unauthorized")
       });
     } catch (e) {
       setSyncResult({
@@ -16750,158 +17051,418 @@ const SyncNowRow = () => {
       background: syncResult.ok ? "rgba(48,209,88,0.18)" : "rgba(255,69,58,0.14)",
       color: syncResult.ok ? "var(--success)" : "var(--danger)"
     }
-  }, syncResult.ok ? "✓ " + t("Sincronizzato") : "✗ " + (syncResult.unlinked ? t("Non collegato") : t("Errore"))) : React.createElement(Icon, {
+  }, syncResult.ok ? "✓ " + t("Sincronizzato") : "✗ " + (syncResult.unlinked ? t("Non collegato") : syncResult.expired ? t("Accedi di nuovo") : t("Errore"))) : React.createElement(Icon, {
     name: "chevron",
     size: 13,
     color: "var(--accent)"
   }));
 };
-const _TOKEN_RE = /^[0-9a-fA-F]{64}$/;
-function _tokenFromInput(raw) {
-  const v = String(raw || "").trim();
-  const i = v.indexOf("#sync=");
-  const cand = i >= 0 ? v.slice(i + 6) : v;
-  return _TOKEN_RE.test(cand) ? cand.toLowerCase() : null;
+function _accountMode(acc, claimable, preferSignin) {
+  if (!acc || !acc.linked) return "signin";
+  if (acc.expired) return "expired";
+  if (acc.email) return "signedIn";
+  return claimable === false || preferSignin ? "signin" : "claim";
 }
-const SyncLinkRow = () => {
+const _AUTH_MSG = {
+  credentials: "Email o password non corretti",
+  rate: "Troppi tentativi, riprova tra qualche minuto",
+  exists: "L'account esiste già: accedi",
+  invalid: "Controlla email e password (almeno 10 caratteri)",
+  claimUnavailable: "Il vecchio token non vale più: accedi con email e password",
+  expired: "Sessione scaduta: i dati restano sul device e partono dopo l'accesso",
+  retry: "Riprova: server non raggiungibile"
+};
+function _authMessage(code, t) {
+  return t(Object.prototype.hasOwnProperty.call(_AUTH_MSG, code) ? _AUTH_MSG[code] : _AUTH_MSG.retry);
+}
+const _MIN_PASSWORD = 10;
+const _readAccount = () => window.SyncV2 && window.SyncV2.account ? window.SyncV2.account() : {
+  linked: false,
+  legacy: false,
+  email: null,
+  expired: false
+};
+const AccField = ({
+  label,
+  children
+}) => React.createElement("label", {
+  style: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 5
+  }
+}, React.createElement("span", {
+  style: {
+    fontSize: 11,
+    fontWeight: 600,
+    color: "var(--text-3)",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+    paddingLeft: 2
+  }
+}, label), children);
+const _accInput = {
+  fontSize: 16,
+  padding: "11px 12px",
+  background: "var(--card-2)"
+};
+const AccountPanel = ({
+  onSignedIn
+}) => {
   const t = useT();
-  const read = () => {
-    const tok = window.storage ? window.storage.get("syncToken", null) : null;
-    return typeof tok === "string" && tok ? tok.slice(-4) : null;
-  };
-  const [tail, setTail] = React.useState(read);
-  const [val, setVal] = React.useState("");
+  const [acc, setAcc] = React.useState(_readAccount);
+  const [claimable, setClaimable] = React.useState(null);
+  const [preferSignin, setPreferSignin] = React.useState(false);
+  const [email, setEmail] = React.useState(() => _readAccount().email || "");
+  const [pw, setPw] = React.useState("");
+  const [pw2, setPw2] = React.useState("");
+  const [cur, setCur] = React.useState("");
+  const [changing, setChanging] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [res, setRes] = React.useState(null);
   React.useEffect(() => {
-    const on = () => setTail(read());
+    const on = () => setAcc(_readAccount());
     window.addEventListener("lfh-sync", on);
     return () => window.removeEventListener("lfh-sync", on);
   }, []);
-  const connect = async () => {
-    if (busy) return;
-    const token = _tokenFromInput(val);
-    if (!token) {
-      setRes({
-        type: "err",
-        msg: t("Token non valido: servono 64 caratteri esadecimali")
-      });
-      return;
-    }
-    if (!window.SyncV2) {
-      setRes({
-        type: "err",
-        msg: t("Errore")
-      });
-      return;
-    }
-    const cur = window.storage ? window.storage.get("syncToken", null) : null;
-    if (cur && String(cur).toLowerCase() !== token && !window.confirm(t("Questo device è già collegato con un altro token. Sostituirlo?"))) return;
+  React.useEffect(() => {
+    if (!acc.legacy || acc.expired || !window.SyncV2 || !window.SyncV2.accountInfo) return;
+    let alive = true;
+    window.SyncV2.accountInfo().then(r => {
+      if (!alive || !r || !r.ok) return;
+      setClaimable(r.email == null);
+      if (r.email) setEmail(e => e || r.email);
+    }).catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [acc.legacy, acc.expired]);
+  const mode = _accountMode(acc, claimable, preferSignin);
+  const clearPw = () => {
+    setPw("");
+    setPw2("");
+    setCur("");
+  };
+  const done = msg => {
+    clearPw();
+    setAcc(_readAccount());
+    setRes({
+      type: "ok",
+      msg
+    });
+  };
+  const fail = code => setRes({
+    type: "err",
+    msg: _authMessage(code, t)
+  });
+  const run = async fn => {
+    if (busy || !window.SyncV2) return;
     setBusy(true);
     setRes(null);
     try {
-      const r = await window.SyncV2.setToken(token);
-      setTail(read());
-      if (r && r.ok) {
-        setVal("");
-        setRes({
-          type: "ok",
-          msg: t("Collegato e sincronizzato")
-        });
-      } else if (r && r.error === "unauthorized") setRes({
-        type: "err",
-        msg: t("Token rifiutato dal server")
-      });else {
-        setVal("");
-        setRes({
-          type: "warn",
-          msg: t("Token salvato, ma il server non è raggiungibile: riprova più tardi")
-        });
-      }
+      await fn(window.SyncV2);
     } catch (_) {
-      setTail(read());
-      setRes({
-        type: "err",
-        msg: t("Errore")
-      });
+      fail("retry");
     } finally {
       setBusy(false);
     }
   };
-  const unlink = async () => {
-    if (busy || !window.SyncV2) return;
-    try {
-      await window.SyncV2.setToken("");
-    } catch (_) {}
-    setTail(read());
-    setRes(null);
+  const doLogin = () => run(async SV => {
+    const r = await SV.login(email, pw);
+    if (r && r.ok) {
+      done(t("Accesso eseguito"));
+      if (onSignedIn) onSignedIn();
+    } else fail(r && r.error);
+  });
+  const doClaim = () => run(async SV => {
+    if (pw.length < _MIN_PASSWORD) {
+      fail("invalid");
+      return;
+    }
+    if (pw !== pw2) {
+      setRes({
+        type: "err",
+        msg: t("Le password non coincidono")
+      });
+      return;
+    }
+    const r = await SV.claim(email, pw);
+    if (r && r.ok) {
+      done(t("Accesso eseguito"));
+      if (onSignedIn) onSignedIn();
+      return;
+    }
+    if (r && (r.error === "exists" || r.error === "claimUnavailable")) {
+      setPreferSignin(true);
+      setPw2("");
+    }
+    fail(r && r.error);
+  });
+  const doChange = () => run(async SV => {
+    if (pw.length < _MIN_PASSWORD) {
+      fail("invalid");
+      return;
+    }
+    if (pw !== pw2) {
+      setRes({
+        type: "err",
+        msg: t("Le password non coincidono")
+      });
+      return;
+    }
+    const r = await SV.changePassword(cur, pw);
+    if (r && r.ok) {
+      setChanging(false);
+      done(t("Password cambiata: gli altri device dovranno accedere di nuovo"));
+      return;
+    }
+    if (r && r.error === "credentials") setRes({
+      type: "err",
+      msg: t("Password attuale non corretta")
+    });else fail(r && r.error);
+    if (r && r.error === "expired") {
+      setChanging(false);
+      clearPw();
+      setAcc(_readAccount());
+    }
+  });
+  const doLogout = () => {
+    if (!window.confirm(t("Uscire da questo device? I dati restano qui e tornano a sincronizzarsi quando accedi di nuovo."))) return;
+    run(async SV => {
+      await SV.logout();
+      clearPw();
+      setChanging(false);
+      setPreferSignin(false);
+      setAcc(_readAccount());
+      setRes(null);
+    });
   };
-  const color = res ? res.type === "err" ? "var(--danger)" : res.type === "warn" ? "var(--warning)" : "var(--success)" : "var(--text-3)";
-  return React.createElement("div", null, React.createElement(IRow, {
-    icon: "key",
-    iconBg: "#5E5CE6",
-    title: t("Collega questo device"),
-    sub: tail ? `${t("Collegato")} · …${tail}` : t("Non collegato")
-  }, tail && React.createElement("button", {
-    className: "btn",
+  const msg = res && React.createElement("div", {
+    role: "status",
     style: {
-      padding: "6px 12px",
-      fontSize: 12
+      fontSize: 12,
+      lineHeight: 1.4,
+      color: res.type === "err" ? "var(--danger)" : "var(--success)"
+    }
+  }, res.msg);
+  const btn = (label, onClick, enabled, primary) => React.createElement("button", {
+    className: primary ? "btn primary" : "btn",
+    style: {
+      padding: "9px 16px",
+      fontSize: 13.5
     },
-    onClick: unlink
-  }, t("Scollega"))), React.createElement("div", {
-    style: {
-      padding: "10px 16px 14px",
-      display: "flex",
-      flexDirection: "column",
-      gap: 8,
-      borderTop: "1px solid var(--border)"
-    }
-  }, React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "center",
-      gap: 8
-    }
-  }, React.createElement("input", {
-    type: "text",
-    autoComplete: "off",
-    autoCorrect: "off",
-    autoCapitalize: "off",
-    spellCheck: false,
-    value: val,
-    onChange: e => setVal(e.target.value),
-    placeholder: t("Incolla il token o il link"),
-    "aria-label": t("Token di sincronizzazione"),
-    className: "input input-mono",
-    style: {
-      flex: 1,
-      minWidth: 0,
-      fontSize: 13,
-      padding: "10px 12px",
-      WebkitTextSecurity: "disc"
-    }
-  }), React.createElement("button", {
-    className: "btn",
-    style: {
-      padding: "8px 14px",
-      fontSize: 13
-    },
-    onClick: connect,
-    disabled: busy || !val.trim()
-  }, busy ? React.createElement("span", {
+    onClick: onClick,
+    disabled: busy || !enabled
+  }, busy && primary ? React.createElement("span", {
     className: "spinner",
     style: {
       width: 14,
       height: 14
     }
-  }) : t("Collega"))), React.createElement("div", {
+  }) : label);
+  const box = children => React.createElement("div", {
     style: {
-      fontSize: 11.5,
-      color,
-      lineHeight: 1.4
+      padding: "10px 16px 14px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 10,
+      borderTop: "1px solid var(--border)"
     }
-  }, res ? res.msg : t("Il link con #sync=<token> funziona nel browser. Nell'app installata sulla Home incolla qui il token (il browser ha uno storage separato)."))));
+  }, children);
+  const onEnter = (fn, can) => e => {
+    if (e.key === "Enter" && can) fn();
+  };
+  if (mode === "signedIn") {
+    const canChange = !!cur && pw.length > 0 && pw2.length > 0;
+    return React.createElement("div", null, React.createElement(IRow, {
+      icon: "user",
+      iconBg: "#5E5CE6",
+      title: acc.email,
+      sub: t("Account")
+    }, React.createElement("button", {
+      className: "btn",
+      style: {
+        padding: "6px 12px",
+        fontSize: 12
+      },
+      onClick: doLogout,
+      disabled: busy
+    }, t("Esci"))), React.createElement(IRow, {
+      icon: "lock",
+      iconBg: "#8E8E93",
+      title: t("Cambia password"),
+      onClick: () => {
+        setChanging(c => !c);
+        clearPw();
+        setRes(null);
+      },
+      trailing: React.createElement(Icon, {
+        name: changing ? "chevron-down" : "chevron",
+        size: 13,
+        color: "var(--accent)"
+      })
+    }), changing && box(React.createElement(React.Fragment, null, React.createElement("input", {
+      type: "email",
+      autoComplete: "username",
+      value: acc.email,
+      readOnly: true,
+      tabIndex: -1,
+      "aria-hidden": "true",
+      style: {
+        position: "absolute",
+        width: 1,
+        height: 1,
+        opacity: 0,
+        pointerEvents: "none"
+      }
+    }), React.createElement(AccField, {
+      label: t("Password attuale")
+    }, React.createElement("input", {
+      type: "password",
+      autoComplete: "current-password",
+      className: "input",
+      style: _accInput,
+      value: cur,
+      onChange: e => setCur(e.target.value)
+    })), React.createElement(AccField, {
+      label: t("Nuova password")
+    }, React.createElement("input", {
+      type: "password",
+      autoComplete: "new-password",
+      className: "input",
+      style: _accInput,
+      value: pw,
+      onChange: e => setPw(e.target.value)
+    })), React.createElement(AccField, {
+      label: t("Conferma password")
+    }, React.createElement("input", {
+      type: "password",
+      autoComplete: "new-password",
+      className: "input",
+      style: _accInput,
+      value: pw2,
+      onChange: e => setPw2(e.target.value),
+      onKeyDown: onEnter(doChange, canChange)
+    })), React.createElement("div", {
+      className: "muted",
+      style: {
+        fontSize: 11.5
+      }
+    }, t("Almeno 10 caratteri")), React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 8,
+        justifyContent: "flex-end"
+      }
+    }, btn(t("Annulla"), () => {
+      setChanging(false);
+      clearPw();
+      setRes(null);
+    }, true, false), btn(t("Cambia password"), doChange, canChange, true)), msg)), !changing && res && box(msg));
+  }
+  if (mode === "claim") {
+    const canClaim = !!email.trim() && pw.length > 0 && pw2.length > 0;
+    return React.createElement("div", null, React.createElement(IRow, {
+      icon: "user",
+      iconBg: "#5E5CE6",
+      title: t("Crea il tuo account"),
+      sub: t("Questo device usa ancora il vecchio token. Crea l'account con cui accederai da tutti i device.")
+    }), box(React.createElement(React.Fragment, null, React.createElement(AccField, {
+      label: t("Email")
+    }, React.createElement("input", {
+      type: "email",
+      autoComplete: "username",
+      inputMode: "email",
+      autoCapitalize: "off",
+      autoCorrect: "off",
+      spellCheck: false,
+      className: "input",
+      style: _accInput,
+      value: email,
+      onChange: e => setEmail(e.target.value)
+    })), React.createElement(AccField, {
+      label: t("Password")
+    }, React.createElement("input", {
+      type: "password",
+      autoComplete: "new-password",
+      className: "input",
+      style: _accInput,
+      value: pw,
+      onChange: e => setPw(e.target.value)
+    })), React.createElement(AccField, {
+      label: t("Conferma password")
+    }, React.createElement("input", {
+      type: "password",
+      autoComplete: "new-password",
+      className: "input",
+      style: _accInput,
+      value: pw2,
+      onChange: e => setPw2(e.target.value),
+      onKeyDown: onEnter(doClaim, canClaim)
+    })), React.createElement("div", {
+      className: "muted",
+      style: {
+        fontSize: 11.5
+      }
+    }, t("Almeno 10 caratteri")), React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 8,
+        justifyContent: "space-between",
+        alignItems: "center",
+        flexWrap: "wrap"
+      }
+    }, React.createElement("button", {
+      className: "btn",
+      style: {
+        padding: "6px 0",
+        fontSize: 12.5,
+        background: "transparent",
+        border: 0,
+        color: "var(--accent)"
+      },
+      onClick: () => {
+        setPreferSignin(true);
+        clearPw();
+        setRes(null);
+      }
+    }, t("Ho già un account: accedi")), btn(t("Crea account"), doClaim, canClaim, true)), msg)));
+  }
+  const canLogin = !!email.trim() && pw.length > 0;
+  return React.createElement("div", null, React.createElement(IRow, {
+    icon: "user",
+    iconBg: mode === "expired" ? "#FF9F0A" : "#5E5CE6",
+    title: mode === "expired" ? t("Accedi di nuovo") : t("Accedi"),
+    sub: mode === "expired" ? t("Sessione scaduta: i dati restano sul device e partono dopo l'accesso") : t("Accedi per sincronizzare i dati fra i tuoi device")
+  }), box(React.createElement(React.Fragment, null, React.createElement(AccField, {
+    label: t("Email")
+  }, React.createElement("input", {
+    type: "email",
+    autoComplete: "username",
+    inputMode: "email",
+    autoCapitalize: "off",
+    autoCorrect: "off",
+    spellCheck: false,
+    className: "input",
+    style: _accInput,
+    value: email,
+    onChange: e => setEmail(e.target.value)
+  })), React.createElement(AccField, {
+    label: t("Password")
+  }, React.createElement("input", {
+    type: "password",
+    autoComplete: "current-password",
+    className: "input",
+    style: _accInput,
+    value: pw,
+    onChange: e => setPw(e.target.value),
+    onKeyDown: onEnter(doLogin, canLogin)
+  })), React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "flex-end"
+    }
+  }, btn(t("Accedi"), doLogin, canLogin, true)), msg)));
 };
 const SyncStatusRow = () => {
   const t = useT();
@@ -16925,7 +17486,7 @@ const SyncStatusRow = () => {
   try {
     pending = window.SyncV2 ? window.SyncV2.status().pending : 0;
   } catch (_) {}
-  const base = time ? `${t("Ultimo sync")}: ${time} · ${t("Cloud: Cloudflare")}` : s.status === "unlinked" ? t("Device non collegato: dati solo in locale") : t("In attesa del primo sync");
+  const base = s.status === "expired" ? t("Sessione scaduta: i dati restano sul device e partono dopo l'accesso") : time ? `${t("Ultimo sync")}: ${time} · ${t("Cloud: Cloudflare")}` : s.status === "unlinked" ? t("Device non collegato: dati solo in locale") : t("In attesa del primo sync");
   return React.createElement(IRow, {
     icon: "cloud",
     iconBg: "#30D158",
@@ -17661,8 +18222,10 @@ const Impostazioni = ({
     placeholder: "gsk_…",
     testFn: () => window.groqAPI.testConnection()
   })), React.createElement(ISection, {
+    title: t("Account")
+  }, React.createElement(AccountPanel, null)), React.createElement(ISection, {
     title: t("Sincronizzazione")
-  }, React.createElement(SyncStatusRow, null), React.createElement(SyncLinkRow, null), React.createElement(SyncNowRow, null)), React.createElement(ISection, {
+  }, React.createElement(SyncStatusRow, null), React.createElement(SyncNowRow, null)), React.createElement(ISection, {
     title: t("Piani"),
     subtitle: t("Sola lettura · l'import .txt è temporaneo")
   }, React.createElement(PlanKindRows, {
@@ -17738,6 +18301,7 @@ const Impostazioni = ({
   })));
 };
 window.Impostazioni = Impostazioni;
+window.AccountPanel = AccountPanel;
 })();
 
 // ══ screens/promemoria.jsx ══
@@ -18361,15 +18925,6 @@ if (window.storage) {
     } catch (e) {
       if (window._logError) window._logError(e);else console.warn("[sync] init:", e);
     }
-    try {
-      const tr = k => {
-        const l = window.storage.get("lang", "it"),
-          e = window.I18N_DICT && window.I18N_DICT[k];
-        return l === "it" ? k : e && e[l] || k;
-      };
-      const p = window.SyncV2 && window.SyncV2.consumeLinkHash(undefined, undefined, () => window.confirm(tr("Questo device è già collegato con un altro token. Sostituirlo?")));
-      if (p && p.catch) p.catch(() => {});
-    } catch (_) {}
   });
 }
 function _syncNow() {

@@ -196,6 +196,8 @@ const SyncBadge = ({ compact }) => {
     offline: { color: "var(--text-3)",  bg: "rgba(120,120,128,0.14)", icon: "cloud-off", label: t("Offline") },
     // Device senza token: l'app funziona solo in locale, la coda resta in attesa.
     unlinked: { color: "var(--text-3)", bg: "rgba(120,120,128,0.14)", icon: "cloud-off", label: t("Non collegato") },
+    // 401: sessione scaduta o revocata (o token legacy spento). Dati e coda restano: Impostazioni → Account.
+    expired: { color: "var(--warning)", bg: "rgba(255,159,10,0.14)", icon: "lock", label: t("Accedi di nuovo") },
   };
   const cfg = CFG[status] || CFG.ok;
 

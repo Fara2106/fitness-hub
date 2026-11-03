@@ -4,7 +4,7 @@
 // backend nuovo; più context WebKit sullo stesso backend = più device. Lancio:
 // `npm run test:e2e` (serve WebKit di Playwright: `npx playwright-core install webkit`
 // la prima volta). Serve il repo in locale sotto /fitness-hub/ come GitHub Pages;
-// solo /groq del proxy legacy è finto. Exit 0 = tutto verde; exit 1 = almeno un FAIL.
+// solo /groq del proxy legacy è finto. Account di test (Task 9C): ACCOUNT in mock.mjs (valori finti). Exit 0 = tutto verde; exit 1 = almeno un FAIL.
 // `E2E_ONLY=<regex>` lancia solo gli scenari il cui nome corrisponde.
 // Copre i bug della QA 2026-11-03 e i modi di rompersi del sync v2 (palestra offline,
 // race fra device, pull durante la modifica, piano cambiato in giornata).
@@ -14,7 +14,9 @@ import { readFile, writeFile, mkdtemp } from "node:fs/promises";
 import { join, dirname, extname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { installMock, newBackend, seedPlans, records, getRecord, backendSeq, TOKEN } from "./mock.mjs";
+import { installMock, newBackend, seedPlans, records, getRecord, backendSeq, TOKEN, ACCOUNT, claimAccount } from "./mock.mjs";
+import { createHash } from "node:crypto";
+import { mkdirSync } from "node:fs";
 
 const require = createRequire(import.meta.url);
 const { webkit, devices } = require("playwright-core");
@@ -53,8 +55,8 @@ const SEED_NEW = { onboardingDone: true };
 
 const ready = (page) => page.waitForFunction(() => document.querySelector(".lfh-scroll"), null, { timeout: 15000 });
 
-// Apre l'app come un device vero: link `#sync=<token>` (consumato dall'app, che poi
-// ripulisce l'URL) → primo sync → storage seminato (onboarding, peso) → reload.
+// Apre l'app come un device già collegato col token legacy (come i device di prima del Task 9C):
+// storage seminato (token, onboarding, peso) → reload → primo sync.
 // link:false = device mai collegato. Ritorna { ctx, page }.
 async function openApp(ctxOpts, backend, { link = true, seed = SEED_NEW } = {}) {
   const ctx = await browser.newContext(ctxOpts);
@@ -63,9 +65,12 @@ async function openApp(ctxOpts, backend, { link = true, seed = SEED_NEW } = {}) 
   page._errors = [];
   page._desk = ctxOpts === IPAD;
   page.on("pageerror", e => page._errors.push(e.message));
-  await page.goto(link ? URL0 + "#sync=" + TOKEN : URL0);
+  await page.goto(URL0);
   await ready(page).catch(() => page.waitForSelector("body"));
-  await page.evaluate(seed => { for (const k of Object.keys(seed)) window.storage.set(k, seed[k]); }, seed);
+  await page.evaluate(({ seed, token }) => {
+    for (const k of Object.keys(seed)) window.storage.set(k, seed[k]);
+    if (token) window.storage.set("syncToken", token, { silent: true });
+  }, { seed, token: link ? TOKEN : null });
   await page.waitForTimeout(250);
   await page.reload();
   await ready(page);
@@ -480,8 +485,8 @@ await scenario("Peso — registrazione e sync tra device", async () => {
   await A.ctx.close(); await B.ctx.close();
 });
 
-// ── 3f. Collegamento: link #sync= e device non collegato ───────────────────
-await scenario("Collegamento — device non collegato e link #sync=", async () => {
+// ── 3f. Collegamento: device non collegato, link #sync= ignorato ─────────────
+await scenario("Collegamento — device non collegato, link #sync= ignorato", async () => {
   const be = await newBackend(); await seedPlans(be);
   const C = await openApp(IPHONE, be, { link: false, seed: SEED_FIRST });
   const badge = () => C.page.locator('.pill[title]').evaluateAll(els => els.map(e => e.getAttribute("title")));
@@ -490,31 +495,147 @@ await scenario("Collegamento — device non collegato e link #sync=", async () =
   await nav(C.page, "Spesa"); await C.page.waitForTimeout(500);
   await C.page.getByText("Petto di pollo", { exact: true }).click(); await C.page.waitForTimeout(500);
   const r0 = await sync(C.page);
-  // Mai collegato: niente coda (il primo sync porta al server i dati solo-locali), la spunta resta sul device.
   const sc0 = await store(C.page, "spesaChecked");
   ok("senza token la spunta resta sul device e il sync dice «non collegato»", r0.error === "unlinked" && sc0 && sc0["proteine-0"] === true && (await records(be, "shoppingCheck")).length === 0, JSON.stringify([r0, sc0]));
   await nav(C.page, "Scheda"); await C.page.waitForTimeout(500);
   ok("senza token: la Scheda mostra il piano di riserva", /\d+\/\d+ serie completate/.test(await bodyText(C.page)));
   await nav(C.page, "Setup"); await C.page.waitForTimeout(400);
-  ok("Impostazioni: «Device non collegato»", (await bodyText(C.page)).includes("Device non collegato"));
-
-  // Link con token SBAGLIATO (64 hex ma non quello del server): rifiutato, resta non collegato.
-  const bad = await C.ctx.newPage();
-  bad._errors = []; bad.on("pageerror", e => bad._errors.push(e.message));
+  const txt = await bodyText(C.page);
+  ok("Impostazioni: «Device non collegato» e riquadro «Accedi» (niente campo token)", txt.includes("Device non collegato") && txt.includes("Accedi per sincronizzare") && !/Incolla il token|Collega questo device/.test(txt));
+  // Il vecchio link col token nell'hash non collega più nulla (Task 9C).
+  const p2 = await C.ctx.newPage();
+  p2._errors = []; p2.on("pageerror", e => p2._errors.push(e.message));
   await C.page.close();
-  await bad.goto(URL0 + "#sync=" + "ab".repeat(32));
-  await ready(bad); await bad.waitForTimeout(1500);
-  ok("link con token sbagliato: hash ripulito, token non salvato", (await bad.evaluate(() => location.hash)) === "" && (await store(bad, "syncToken")) == null);
-  // Link giusto.
-  await bad.goto(URL0 + "?l=1#sync=" + TOKEN);
-  await ready(bad);
-  ok("link giusto: l'hash sparisce dall'URL", await until(() => bad.evaluate(() => location.hash === "")));
-  ok("…il token è salvato sul device", (await store(bad, "syncToken")) === TOKEN);
-  ok("…la coda arriva sul backend", await until(async () => (await records(be, "shoppingCheck")).filter(r => r.data.checked).length === 1));
-  ok("…e il badge non dice più «Non collegato»", await until(async () => !(await bad.locator(".pill[title]").evaluateAll(els => els.map(e => e.getAttribute("title")))).includes("Non collegato")));
-  ok("…coda vuota", await until(async () => (await pending(bad)) === 0));
-  ok("nessun errore JS", bad._errors.length === 0 && C.page._errors.length === 0, [...bad._errors, ...C.page._errors].join(" | "));
+  await p2.goto(URL0 + "#sync=" + TOKEN);
+  await ready(p2); await p2.waitForTimeout(1500);
+  ok("link #sync=<token giusto> ignorato: nessun token salvato, nessun sync", (await store(p2, "syncToken")) == null && !be.log.some(l => l.includes("/v1/sync")) && (await records(be, "shoppingCheck")).length === 0);
+  ok("…la spunta resta sul device", ((await store(p2, "spesaChecked")) || {})["proteine-0"] === true);
+  ok("nessun errore JS", p2._errors.length === 0, p2._errors.join(" | "));
   await C.ctx.close();
+});
+
+// ── 3g. Account: claim dal device col token, accesso su un altro device, sessione revocata, esci ──
+await scenario("Account — crea dal token legacy, accedi su iPad, sessione revocata, esci", async () => {
+  const be = await newBackend(); await seedPlans(be);
+  const SHOTS = join(ROOT, ".superpowers", "sdd", "2026-11-03-fase3-app-swift-iphone", "task-9C-screens");
+  try { mkdirSync(SHOTS, { recursive: true }); } catch (_) {}
+  const shot = (page, name) => page.screenshot({ path: join(SHOTS, name + ".png") }).catch(() => {});
+  const urls = [], posts = [];
+  const track = (ctx) => ctx.on("request", (r) => { urls.push(r.url()); const d = r.postData(); if (d) posts.push([r.url(), d]); });
+  const A = await openApp(IPHONE, be, { seed: SEED_FIRST });
+  track(A.ctx);
+  const B = await openApp(IPAD, be, { link: false, seed: SEED_FIRST });
+  track(B.ctx);
+  const badge = (page) => page.locator('.pill[title]').evaluateAll(els => els.map(e => e.getAttribute("title")));
+  const fillIn = async (page, sel, v) => { const l = page.locator(sel); await l.click(); await l.fill(v); };
+
+  // A (collegato col token legacy): Impostazioni → Account → «Crea il tuo account»
+  await nav(A.page, "Setup"); await A.page.waitForTimeout(600);
+  ok("A col token legacy: riquadro «Crea il tuo account» con l'avviso dei 10 caratteri",
+    await until(async () => { const t = await bodyText(A.page); return t.includes("Crea il tuo account") && t.includes("Almeno 10 caratteri"); }));
+  ok("campi per il portachiavi: email username + due new-password", (await A.page.locator('input[type="email"][autocomplete="username"]').count()) === 1 &&
+    (await A.page.locator('input[type="password"][autocomplete="new-password"]').count()) === 2);
+  await fillIn(A.page, 'input[autocomplete="username"]', ACCOUNT.email);
+  await fillIn(A.page, 'input[autocomplete="new-password"] >> nth=0', ACCOUNT.password);
+  await fillIn(A.page, 'input[autocomplete="new-password"] >> nth=1', ACCOUNT.password + "x");
+  await A.page.getByRole("button", { name: "Crea account" }).click(); await A.page.waitForTimeout(300);
+  ok("conferma diversa → «Le password non coincidono», niente richiesta", (await bodyText(A.page)).includes("Le password non coincidono") && !be.log.some(l => l.includes("/v1/auth/claim")));
+  await shot(A.page, "1-crea-account");
+  await fillIn(A.page, 'input[autocomplete="new-password"] >> nth=1', ACCOUNT.password);
+  await A.page.getByRole("button", { name: "Crea account" }).click();
+  ok("claim ok: A ha la sessione e l'email (non più il token legacy)", await until(async () => (await store(A.page, "accountEmail")) === ACCOUNT.email && (await store(A.page, "syncToken")) !== TOKEN));
+  ok("…l'account è sul backend, per il proprietario dei record", (await be.env.DB.prepare("SELECT id FROM accounts").first("id")) === "owner-test");
+  ok("…Impostazioni mostra l'email, «Cambia password» ed «Esci»", await until(async () => { const t = await bodyText(A.page); return t.includes(ACCOUNT.email) && t.includes("Cambia password") && t.includes("Esci"); }));
+  await shot(A.page, "2-account-attivo");
+
+  // B (iPad, mai collegato): «Accedi» con lo stesso account
+  await nav(B.page, "Setup"); await B.page.waitForTimeout(600);
+  await fillIn(B.page, 'input[autocomplete="username"]', ACCOUNT.email);
+  await fillIn(B.page, 'input[autocomplete="current-password"]', "password-sbagliata");
+  await B.page.getByRole("button", { name: "Accedi", exact: true }).click();
+  ok("B: password sbagliata → «Email o password non corretti»", await until(async () => (await bodyText(B.page)).includes("Email o password non corretti")));
+  await shot(B.page, "3-accedi-errore");
+  await fillIn(B.page, 'input[autocomplete="current-password"]', ACCOUNT.password);
+  await B.page.getByRole("button", { name: "Accedi", exact: true }).click();
+  ok("B: accesso ok con lo stesso account", await until(async () => (await store(B.page, "accountEmail")) === ACCOUNT.email && !!(await store(B.page, "syncToken"))));
+
+  // Stesse spunte sui due device
+  await nav(A.page, "Spesa"); await A.page.waitForTimeout(500);
+  await A.page.getByText("Petto di pollo", { exact: true }).click(); await A.page.waitForTimeout(300);
+  await sync(A.page); await sync(B.page);
+  ok("B vede la spunta di A", await until(async () => { await sync(B.page); return ((await store(B.page, "spesaChecked")) || {})["proteine-0"] === true; }));
+  await nav(B.page, "Spesa"); await B.page.waitForTimeout(500);
+  await B.page.getByText("Uova di gallina", { exact: true }).click(); await B.page.waitForTimeout(300);
+  await sync(B.page);
+  ok("A vede la spunta di B", await until(async () => { await sync(A.page); return ((await store(A.page, "spesaChecked")) || {})["proteine-2"] === true; }),
+    JSON.stringify(await store(A.page, "spesaChecked")));
+
+  // Sessione di B revocata sul server → «Accedi di nuovo», coda intatta, nuovo accesso → la coda parte
+  const tokB = await store(B.page, "syncToken");
+  await be.env.DB.prepare("UPDATE sessions SET revoked = 1 WHERE id = ?").bind(createHash("sha256").update(tokB).digest("hex")).run();
+  await B.page.getByText("Petto di pollo", { exact: true }).click(); await B.page.waitForTimeout(300);
+  const rx = await sync(B.page);
+  await nav(B.page, "Home"); await B.page.waitForTimeout(500);
+  ok("B revocato: sync 401 → badge «Accedi di nuovo», coda intatta", rx.error === "unauthorized" && (await pending(B.page)) >= 1 &&
+    await until(async () => (await badge(B.page)).includes("Accedi di nuovo")), JSON.stringify([rx, await badge(B.page)]));
+  await shot(B.page, "4a-badge-accedi-di-nuovo");
+  await nav(B.page, "Setup"); await B.page.waitForTimeout(500);
+  ok("B: Impostazioni → «Accedi di nuovo» con l'email già scritta", (await bodyText(B.page)).includes("Accedi di nuovo") &&
+    (await B.page.locator('input[autocomplete="username"]').inputValue()) === ACCOUNT.email);
+  await shot(B.page, "4b-accedi-di-nuovo");
+  await fillIn(B.page, 'input[autocomplete="current-password"]', ACCOUNT.password);
+  await B.page.getByRole("button", { name: "Accedi", exact: true }).click();
+  ok("B: accesso di nuovo → la coda arriva al server", await until(async () => (await pending(B.page)) === 0 && (await store(B.page, "syncToken")) !== tokB &&
+    (await getRecord(be, "shoppingCheck", "proteine-0")).data.checked === false));
+
+  // A: Esci (conferma) → scollegato, dati locali intatti, sessione revocata
+  await nav(A.page, "Setup"); await A.page.waitForTimeout(500);
+  const tokA = await store(A.page, "syncToken");
+  A.page.once("dialog", (d) => d.accept());
+  await A.page.getByRole("button", { name: "Esci", exact: true }).click();
+  ok("A: Esci → token ed email via, badge «Non collegato», spunte locali intatte",
+    await until(async () => (await store(A.page, "syncToken")) == null && (await store(A.page, "accountEmail")) == null && (await badge(A.page)).includes("Non collegato")) &&
+    ((await store(A.page, "spesaChecked")) || {})["proteine-0"] === true);
+  ok("…la sessione di A è revocata sul server", (await be.env.DB.prepare("SELECT revoked FROM sessions WHERE id = ?").bind(createHash("sha256").update(tokA).digest("hex")).first("revoked")) === 1);
+  ok("…Impostazioni torna su «Accedi»", await until(async () => (await bodyText(A.page)).includes("Accedi per sincronizzare")));
+
+  // Mai la password: né in storage (errorLog compreso), né negli URL; nel corpo solo delle POST di accesso
+  const dump = (page) => page.evaluate(() => JSON.stringify(window.storage.keys().map(k => [k, window.storage.get(k, null)])));
+  const pw = ACCOUNT.password;
+  ok("nessuna password in storage né in errorLog (A e B)", !(await dump(A.page)).includes(pw) && !(await dump(B.page)).includes(pw) &&
+    !JSON.stringify(await store(A.page, "errorLog")).includes(pw) && !JSON.stringify(await store(B.page, "errorLog")).includes(pw));
+  ok("nessuna password negli URL delle richieste", urls.length > 0 && urls.every(u => !u.includes(pw) && !u.includes(encodeURIComponent(pw))));
+  ok("password solo nel corpo di POST /v1/auth/claim|login", posts.filter(([, d]) => d.includes(pw)).every(([u]) => /\/v1\/auth\/(claim|login)$/.test(u)) &&
+    posts.some(([u, d]) => /\/v1\/auth\/claim$/.test(u) && d.includes(pw)));
+  ok("nessun errore JS", A.page._errors.length === 0 && B.page._errors.length === 0, [...A.page._errors, ...B.page._errors].join(" | "));
+  await A.ctx.close(); await B.ctx.close();
+});
+
+// ── 3h. Onboarding: passo Account saltabile; accesso dal primo avvio ─────────
+await scenario("Onboarding — passo Account (saltabile o con accesso)", async () => {
+  const be = await newBackend(); await seedPlans(be);
+  // account già esistente (creato con un claim dal token legacy, come farà Lorenzo dall'iPhone)
+  ok("account di test creato col claim", (await claimAccount(be)) === 200);
+  for (const signIn of [false, true]) {
+    const ctx = await browser.newContext(IPHONE);
+    await installMock(ctx, be, { origin: ORIGIN });
+    const page = await ctx.newPage();
+    const errors = []; page.on("pageerror", e => errors.push(e.message));
+    await page.goto(URL0);
+    ok(`primo avvio: passo Account con «Più tardi»${signIn ? " (accesso)" : ""}`, await until(async () => { const t = await bodyText(page); return t.includes("Accedi per sincronizzare") && t.includes("Più tardi"); }));
+    if (!signIn) {
+      await page.getByRole("button", { name: /Più tardi/ }).click(); await page.waitForTimeout(500);
+      ok("«Più tardi» → passo successivo (Groq), nessun token", (await bodyText(page)).includes("API key Groq") && (await store(page, "syncToken")) == null);
+    } else {
+      await page.locator('input[autocomplete="username"]').fill(ACCOUNT.email);
+      await page.locator('input[autocomplete="current-password"]').fill(ACCOUNT.password);
+      await page.getByRole("button", { name: "Accedi", exact: true }).click();
+      ok("accesso dall'onboarding → sessione salvata e passo successivo", await until(async () => (await store(page, "accountEmail")) === ACCOUNT.email && (await bodyText(page)).includes("API key Groq")));
+      ok("…e i piani arrivano dal server", await until(async () => !!(await store(page, "plan_workout"))));
+    }
+    ok("nessun errore JS", errors.length === 0, errors.join(" | "));
+    await ctx.close();
+  }
 });
 
 // ── 4. Error boundary ───────────────────────────────────────────────────────

@@ -13,7 +13,10 @@ import { workoutPlanFromText, dietPlanFromText } from "../../backend/migrate/pla
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const API = "https://fitness-hub-api.lorefara97.workers.dev";
 export const PROXY = "https://fitness-hub-proxy.lorefara97.workers.dev";
-export const TOKEN = "e2e0".repeat(16);          // 64 hex: token di test (mai un segreto vero)
+export const TOKEN = "e2e0".repeat(16);          // 64 hex: token legacy di test (mai un segreto vero)
+// Account di test (Task 9C): creato dal device col token legacy (claim) o usato per accedere. Valori finti.
+export const ACCOUNT = { email: "e2e@example.test", password: "e2e-password-di-prova" };
+const PEPPER = "7e57".repeat(16);                // pepper pubblico di test (come dev/local-server.mjs)
 
 // Risposta finta del Coach: SSE come Groq, con markdown da rendere.
 const GROQ_SSE = [
@@ -33,7 +36,7 @@ const H = {
 export async function newBackend() {
   const DB = createD1();
   await DB.exec(await readFile(join(ROOT, "backend", "schema.sql"), "utf8"));
-  return { env: { DB, SYNC_TOKEN: TOKEN, PRIMARY_OWNER: "owner-test", LEGACY_TOKEN_ENABLED: "true" }, delay: 0, down: false, log: [] };
+  return { env: { DB, SYNC_TOKEN: TOKEN, PRIMARY_OWNER: "owner-test", LEGACY_TOKEN_ENABLED: "true", PASSWORD_PEPPER: PEPPER }, delay: 0, down: false, log: [] };
 }
 
 const parseRow = (r) => ({
@@ -67,6 +70,16 @@ export async function seedPlans(backend) {
     body: JSON.stringify({ deviceId: "seed", cursor: 0, changes: recs.map(r => ({ collection: r.collection, id: r.id, data: r.data, updatedAt: Date.now(), deleted: false })) }),
   }), backend.env);
   if (res.status !== 200) throw new Error("seedPlans: " + res.status + " " + await res.text());
+}
+
+// Crea l'account di test col claim (Bearer = token legacy), come farà Lorenzo dalla PWA. → status HTTP.
+export async function claimAccount(backend, account = ACCOUNT) {
+  const res = await worker.fetch(new Request(API + "/v1/auth/claim", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + TOKEN },
+    body: JSON.stringify({ email: account.email, password: account.password, deviceName: "e2e-seed" }),
+  }), backend.env);
+  return res.status;
 }
 
 // Intercetta il Worker v2 (backend vero) e il /groq del proxy legacy.
