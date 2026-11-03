@@ -89,6 +89,8 @@ restituisce (check-in 30, peso 90, serie 12 per esercizio): lo storico più vecc
 
 ### Cutover della fase 2: azzerare e rimigrare
 
+**Fatto il 2026-11-03 alle 16:3x** (backup iPhone delle 16:35 → 9 record, verify OK; PWA deployata subito dopo, iPhone collegato). La sezione resta come procedura per un eventuale nuovo azzeramento.
+
 La migrazione di oggi è reale, ma al passaggio della PWA al nuovo backend (fase 2) D1 si azzera e si rimigra dai dati
 aggiornati. Rilanciare la CLI su un D1 già popolato NON è un recupero dei dati nuovi: gli stessi record con lo stesso
 `updatedAt` risultano `stale`. Prima di rimigrare:

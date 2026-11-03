@@ -252,6 +252,8 @@ record a sé → le modifiche su device diversi si sommano naturalmente.
   salvare i dati → sostituibile.
 - **Prima versione completa**, già **precaricata** con i piani attuali.
 - **IA del Coach sul dispositivo** (Apple Intelligence), **senza Groq**.
+- (2026-11-03) **Icona più premium**: in fase 3 2–3 proposte a livelli (Icon Composer) per il Liquid Glass e le varianti chiara/scura/tinta; **tutta l'app nativa in Liquid Glass**. Dopo la fase 2, eventuale ritocco del vetro anche nella PWA.
+- (2026-11-03, fase 2) Fino alla fase 3 il **Coach web tiene Groq** (proxy legacy `/groq`) e l'**import `.txt` resta temporaneo** sul web.
 
 **Scelte mie (da confermare o correggere)**
 - Backend Cloudflare Worker + D1 (stesso account), offline-first,
