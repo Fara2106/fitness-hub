@@ -96,6 +96,33 @@ const CATEGORIES = [
   },
 ];
 
+// Lista della spesa: dal piano dieta attivo (plan_diet.data.shopping, Task 8 fase 3) oppure,
+// se il piano non la ha, da CATEGORIES. In ogni caso ogni voce ha un id che fa da chiave di
+// spunta: per CATEGORIES è `${cat.id}-${indice}` (le chiavi di sempre, quindi le spunte esistenti
+// restano valide), per il piano è l'id della voce (migrate = le stesse chiavi di oggi).
+// Forma nel piano: [{ id, title, color, icon?, items: [{ id, name, qty1, qty2, note|null }] }].
+function shoppingFromCategories(cats) {
+  return (cats || []).map((c) => ({
+    id: c.id, title: c.title, color: c.color, icon: c.icon,
+    items: c.items.map((it, i) => ({
+      id: `${c.id}-${i}`, name: it.name, qty1: it.qty1, qty2: it.qty2, note: it.note == null ? null : it.note,
+    })),
+  }));
+}
+// Ritorna le categorie da mostrare. Solo `shopping` assente (o non array) ricade su CATEGORIES.
+function spesaCategories(planData) {
+  const sh = planData && planData.shopping;
+  if (!Array.isArray(sh)) return shoppingFromCategories(CATEGORIES);
+  return sh.map((c) => ({
+    id: c.id, title: c.title, color: c.color || "var(--accent)", icon: c.icon || "spark",
+    items: (c.items || []).map((it) => ({
+      id: it.id, name: it.name, qty1: it.qty1, qty2: it.qty2, note: it.note == null ? null : it.note,
+    })),
+  }));
+}
+window.SPESA_CATEGORIES = CATEGORIES;
+window.SpesaLogic = { shoppingFromCategories, spesaCategories };
+
 // SpesaItem must be defined BEFORE CategorySection (no hoisting for const)
 const SpesaItem = ({ item, checked, onToggle, freq }) => {
   const t = useT();
@@ -147,7 +174,7 @@ const SpesaItem = ({ item, checked, onToggle, freq }) => {
 const CategorySection = ({ cat, checked, onToggle, isDesktop, freq }) => {
   const t = useT();
   const total = cat.items.length;
-  const done = cat.items.filter((_, i) => checked[`${cat.id}-${i}`]).length;
+  const done = cat.items.filter((it) => checked[it.id]).length;
   return (
     <div className="card lift" style={{ padding: 0, overflow: "hidden" }}>
       <div style={{
@@ -164,16 +191,16 @@ const CategorySection = ({ cat, checked, onToggle, isDesktop, freq }) => {
           <div className="num muted" style={{ fontSize: 11.5 }}>{done} / {total}</div>
         </div>
         <div style={{ width: 60, height: 4, borderRadius: 2, background: "var(--track)", overflow: "hidden" }}>
-          <div style={{ width: `${(done / total) * 100}%`, height: "100%", background: cat.color, transition: "width 0.3s" }} />
+          <div style={{ width: `${total ? (done / total) * 100 : 0}%`, height: "100%", background: cat.color, transition: "width 0.3s" }} />
         </div>
       </div>
       {cat.items.map((it, i) => (
         <SpesaItem
-          key={i}
+          key={it.id}
           item={it}
           freq={freq}
-          checked={!!checked[`${cat.id}-${i}`]}
-          onToggle={() => onToggle(`${cat.id}-${i}`)}
+          checked={!!checked[it.id]}
+          onToggle={() => onToggle(it.id)}
         />
       ))}
     </div>
@@ -231,11 +258,16 @@ const Spesa = ({ device, spesaChecked, setSpesaChecked, spesaFreq, setSpesaFreq 
     if (window.storage) window.storage.set("spesaExtra", next);
   };
 
+  // Lista dal piano dieta attivo (copia locale plan_diet), fallback sulla lista nel codice.
+  const [plan, setPlan] = React.useState(() => (window.storage ? window.storage.get("plan_diet", null) : null));
+  const categories = React.useMemo(() => spesaCategories(plan && plan.data), [plan]);
+
   // Dati arrivati dal sync (altro device). Spunte e frequenza in modalità
   // controllata arrivano già da AppFrame; qui lo stato locale della schermata.
-  useSyncedData(["spesaExtra", "spesaChecked", "spesaFreq"], (keys) => {
+  useSyncedData(["spesaExtra", "spesaChecked", "spesaFreq", "plan_diet"], (keys) => {
     const st = window.storage;
     if (!st) return;
+    if (keys.indexOf("plan_diet") !== -1) setPlan(st.get("plan_diet", null));
     if (keys.indexOf("spesaExtra") !== -1) setExtra(st.get("spesaExtra", []) || []);
     if (keys.indexOf("spesaChecked") !== -1) _setLocalChecked(st.get("spesaChecked", {}) || {});
     if (keys.indexOf("spesaFreq") !== -1) _setLocalFreq(st.get("spesaFreq", 1) || 1);
@@ -265,7 +297,7 @@ const Spesa = ({ device, spesaChecked, setSpesaChecked, spesaFreq, setSpesaFreq 
     setChecked({});
   };
 
-  const totalItems = CATEGORIES.reduce((n, c) => n + c.items.length, 0) + extra.length;
+  const totalItems = categories.reduce((n, c) => n + c.items.length, 0) + extra.length;
   const totalDone = Object.values(checked).filter(Boolean).length;
 
   return (
@@ -339,7 +371,7 @@ const Spesa = ({ device, spesaChecked, setSpesaChecked, spesaFreq, setSpesaFreq 
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: isDesktop ? "1fr 1fr" : "1fr", gap: isDesktop ? 16 : 12 }}>
-        {CATEGORIES.map(cat => (
+        {categories.map(cat => (
           <CategorySection key={cat.id} cat={cat} checked={checked} onToggle={toggle} isDesktop={isDesktop} freq={freq} />
         ))}
       </div>

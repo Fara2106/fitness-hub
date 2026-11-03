@@ -29,7 +29,7 @@ Protocollo di sync (push/pull, cursore, `conflicts`, `epoch`/`reset`, regola di 
                          lines: [{ id, label|null, choices: string[] }],  // componenti sempre presenti
                          note?: string|null }],                   // opzionale
                supplements: [{ id, key, name, moment, time: "HH:MM" }] }],
-  shopping?: [{ id, title, color, items: [{ id, name, qty1, qty2, note|null }] }] }   // opzionale
+  shopping?: [{ id, title, color, icon?, items: [{ id, name, qty1, qty2, note|null }] }] }   // opzionale
 ```
 Alimenti = **testo libero**: `options[].text` e `lines[].choices[]` sono stringhe (`"80g riso basmati"`); l'editor dell'app aiuta con quantità + alimento ma salva testo.
 
@@ -37,7 +37,7 @@ Alimenti = **testo libero**: `options[].text` e `lines[].choices[]` sono stringh
 
 `meal.note`: testo libero del pasto (le righe "Note:" della dieta originale). Opzionale: la PWA lo ignora, il converter `.txt` non lo scrive.
 
-`shopping` (lista della spesa del piano): opzionale. `qty1` = quantità per 1 spesa a settimana, `qty2` = per ciascuna di 2 spese. Gli item migrati dalla lista scritta nel codice della PWA (`CATEGORIES` in `screens/spesa.jsx`) tengono la chiave di oggi, `${cat.id}-${indice}` (`proteine-4`…), così le spunte `shoppingCheck` esistenti restano valide; "nuovo dal precedente" copia la lista con gli **stessi id degli item**. La PWA leggerà `shopping` dal piano e ricadrà sulla lista nel codice solo se manca (dal Task 8 della fase 3; oggi usa sempre la lista nel codice).
+`shopping` (lista della spesa del piano): opzionale. `qty1` = quantità per 1 spesa a settimana, `qty2` = per ciascuna di 2 spese. Gli item migrati dalla lista scritta nel codice della PWA (`CATEGORIES` in `screens/spesa.jsx`) tengono la chiave di oggi, `${cat.id}-${indice}` (`proteine-4`…), così le spunte `shoppingCheck` esistenti restano valide; "nuovo dal precedente" copia la lista con gli **stessi id degli item**. `icon` (opzionale) è il nome dell'icona della PWA (`flame`, `bolt`, `leaf`, `scale`, `pill`, `spark`); se manca la PWA usa `spark`. La PWA legge `shopping` dal piano attivo (`plan_diet`) e ricade sulla lista nel codice solo se la chiave manca (un array vuoto = lista vuota); la chiave di spunta è l'`id` dell'item. Un import `.txt` della dieta nella PWA copia `shopping` dal piano attivo nel nuovo. `backend/migrate/add-shopping.mjs` aggiunge la lista migrata al piano attivo (dry-run di default).
 `key` della variante: `riposo|mattina|ore17|ore21|ore22` per quelle migrate. `key` dell'integratore: chiave di spunta stabile (`vitac`, `ps`, `custom-<nome>`…). Gli integratori esistono solo se la dieta li prevede. Gli id interni dei piani migrati sono percorsi (`<planId>/d0/e2`, `<planId>/v1/m3/o0`, `<planId>/v0/s4`); quelli creati dall'editor possono essere UUID.
 
 Il client Swift conserva le chiavi che non conosce (round-trip): aggiungere campi opzionali è sicuro. Vale per ogni oggetto dei `data` (piano, giorno, esercizio, variante, pasto, categoria della spesa…, e i log): chi rilegge e risalva un record non cancella i campi aggiunti da un altro client o da una versione successiva del contratto (test: `UnknownKeysTests` in FitnessCore).

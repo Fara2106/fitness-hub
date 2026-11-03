@@ -201,6 +201,11 @@ function _importPlanChanges(kind, text, fileName, now) {
   for (let n = 2; taken.has(id); n++) id = `${baseId}-${n}`;
   const name = String(fileName || "").replace(/\.txt$/i, "") || kind;
   const plan = PC[cfg.fromText](text, { id, name, validFrom: today });
+  // La lista della spesa vive nel piano dieta ma non nel .txt: il nuovo piano la eredita dal
+  // precedente (copia, stessi id delle voci → le spunte restano valide) invece di perderla.
+  if (cfg.collection === "dietPlan" && prev && prev.data && Array.isArray(prev.data.shopping) && plan.data.shopping === undefined) {
+    plan.data.shopping = JSON.parse(JSON.stringify(prev.data.shopping));
+  }
   // Stesso contenuto del piano attivo → niente nuovo piano.
   if (prev && prev.data && JSON.stringify(PC[cfg.legacy](prev.data)) === JSON.stringify(PC[cfg.legacy](plan.data))) {
     return { identical: true, changes: [] };

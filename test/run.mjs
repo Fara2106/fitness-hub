@@ -1766,6 +1766,14 @@ await (async () => {
     SV.putRecords(d1.changes);
     const d2 = L.importPlanChanges("dieta", dieta.replace("- Opzione 1: 40g gallette grano saraceno (4)", "- Opzione 1: 99g fiocchi d'avena"), "Dieta 2.txt", NOW);
     ok("import dieta nello stesso minuto: -2 e il precedente archiviato", d2.changes[0].id === `diet-${IDDAY}-${IDMIN}-2` && d2.changes[1].data.status === "archived" && d2.changes[1].data.validTo === "2026-11-03");
+    // La lista della spesa viaggia con il piano: un import .txt della dieta la eredita dal piano attivo (stessi id).
+    const SHOP = [{ id: "proteine", title: "Proteine", color: "#FF453A", icon: "flame", items: [{ id: "proteine-0", name: "Petto di pollo", qty1: "900 g", qty2: "500 g", note: null }] }];
+    SV.putRecords([{ collection: "dietPlan", id: d1.changes[0].id, data: { ...d1.changes[0].data, shopping: SHOP } }]);
+    const d3 = L.importPlanChanges("dieta", dieta.replace("- Opzione 1: 40g gallette grano saraceno (4)", "- Opzione 1: 11g avena"), "Dieta 3.txt", NOW);
+    ok("import dieta: il nuovo piano eredita `shopping` dal piano attivo (copia, stessi id)",
+      d3.changes[0].data.shopping && JSON.stringify(d3.changes[0].data.shopping) === JSON.stringify(SHOP) && d3.changes[0].data.shopping !== SHOP);
+    ok("import dieta: il piano archiviato conserva la sua `shopping`", d3.changes[1].data.status === "archived" && JSON.stringify(d3.changes[1].data.shopping) === JSON.stringify(SHOP));
+    ok("import scheda: nessuna `shopping` sul piano allenamento", !("shopping" in r1.changes[0].data));
     // Cache plan_workout vuota (device mai collegato / cache persa): il piano attivo noto dai record viene archiviato lo stesso
     S.remove("plan_workout", { silent: true });
     const r4 = L.importPlanChanges("scheda", scheda.replace("Push-up (bodyweight)", "Floor press"), "Quarta.txt", new Date(2026, 10, 3, 11, 30, 0));
@@ -1847,6 +1855,64 @@ await (async () => {
       !i18n.includes("I dati locali attuali verranno sovrascritti"));
   }
 })();
+
+// ---- Suite Spesa: lista dal piano dieta (plan_diet.data.shopping), fallback CATEGORIES, chiavi di spunta ----
+console.log("\nSuite Spesa — shopping dal piano dieta, fallback CATEGORIES, chiavi di spunta item.id");
+{
+  const sb = { window: {}, console };
+  vm.createContext(sb);
+  const transformClassic = (f) => babel.transformFileSync(join(ROOT, f), { presets: [["@babel/preset-react", { runtime: "classic", development: false }]] }).code;
+  let loaded = true;
+  try { for (const f of ["parser.jsx", "planconv.jsx", "screens/spesa.jsx"]) vm.runInContext(transformClassic(f), sb, { filename: f }); }
+  catch (e) { loaded = false; ok("spesa.jsx si carica sotto vm — " + e.message.split("\n")[0], false); }
+  const w = sb.window;
+  const J = (x) => JSON.parse(JSON.stringify(x));
+  const SL = w.SpesaLogic;
+  ok("spesa.jsx espone window.SPESA_CATEGORIES (= CATEGORIES) e window.SpesaLogic", loaded && Array.isArray(w.SPESA_CATEGORIES) && w.SPESA_CATEGORIES.length > 0 && !!SL && typeof SL.spesaCategories === "function" && typeof SL.shoppingFromCategories === "function");
+  if (loaded && SL) {
+    const CAT = J(w.SPESA_CATEGORIES);
+    // Senza `shopping` (nessun piano, piano senza lista): CATEGORIES con le chiavi di sempre `${cat.id}-${i}`.
+    const fb = J(SL.spesaCategories(null));
+    ok("senza piano → categorie e voci di CATEGORIES, stesso ordine e stessi testi",
+      fb.length === CAT.length && fb.every((c, ci) => c.id === CAT[ci].id && c.title === CAT[ci].title && c.color === CAT[ci].color && c.icon === CAT[ci].icon &&
+        c.items.length === CAT[ci].items.length && c.items.every((it, i) => it.name === CAT[ci].items[i].name && it.qty1 === CAT[ci].items[i].qty1 && it.qty2 === CAT[ci].items[i].qty2 && it.note === (CAT[ci].items[i].note == null ? null : CAT[ci].items[i].note))));
+    ok("senza piano → chiave di spunta = `${cat.id}-${indice}` (identica a prima), es. proteine-0", fb.every((c) => c.items.every((it, i) => it.id === `${c.id}-${i}`)) && fb[0].items[0].id === "proteine-0");
+    ok("piano senza `shopping` → stesso fallback", JSON.stringify(J(SL.spesaCategories({ name: "x", variants: [] }))) === JSON.stringify(fb));
+    ok("`shopping` non array → fallback", JSON.stringify(J(SL.spesaCategories({ shopping: "boh" }))) === JSON.stringify(fb));
+    // Con `shopping` nel piano: quelle categorie, id dell'item come chiave.
+    const plan = { shopping: [
+      { id: "cat-a", title: "Frutta", color: "#30D158", icon: "leaf", items: [{ id: "uuid-1", name: "Mele", qty1: "1 kg", qty2: "500 g", note: "bio" }, { id: "uuid-2", name: "Pere", qty1: "2", qty2: "1", note: null }] },
+      { id: "cat-b", title: "Vuota", color: "#FF453A", items: [] },
+    ] };
+    const pc = J(SL.spesaCategories(plan));
+    ok("con `shopping` → mostra le categorie del piano (non CATEGORIES)", pc.length === 2 && pc[0].id === "cat-a" && pc[0].title === "Frutta" && pc[0].color === "#30D158" && pc[0].icon === "leaf");
+    ok("con `shopping` → la chiave di spunta è item.id", pc[0].items.map((it) => it.id).join() === "uuid-1,uuid-2" && pc[0].items[0].name === "Mele" && pc[0].items[0].qty2 === "500 g" && pc[0].items[0].note === "bio" && pc[0].items[1].note === null);
+    ok("categoria senza icona → icona di riserva; senza voci → items []", pc[1].icon === "spark" && pc[1].items.length === 0);
+    ok("`shopping: []` (lista svuotata di proposito) → lista vuota, NON il fallback", J(SL.spesaCategories({ shopping: [] })).length === 0);
+
+    // Migrazione: shoppingFromCategories(CATEGORIES) → item proteine-0…, stessi testi, `note` assente → null.
+    const mig = J(SL.shoppingFromCategories(w.SPESA_CATEGORIES));
+    ok("migrazione: item proteine-0… con gli stessi testi di CATEGORIES, note assente → null",
+      mig[0].id === "proteine" && mig[0].items[0].id === "proteine-0" && mig[0].items[0].name === CAT[0].items[0].name && mig[0].items[0].qty1 === CAT[0].items[0].qty1 &&
+      mig[0].items[0].note === null && mig[0].items[1].note === CAT[0].items[1].note && mig[0].icon === "flame" && mig[0].items.every((it, i) => it.id === `proteine-${i}`));
+    ok("migrazione: stesse chiavi di spunta del fallback (le spunte esistenti restano valide)", JSON.stringify(mig) === JSON.stringify(fb));
+    ok("migrazione: ogni voce ha id univoco, qty1 e qty2", (() => { const ids = mig.flatMap((c) => c.items.map((it) => it.id)); return new Set(ids).size === ids.length && mig.every((c) => c.items.every((it) => typeof it.qty1 === "string" && typeof it.qty2 === "string")); })());
+
+    // planconv: `shopping` non cambia ciò che le schermate leggono dal piano (toLegacyDieta) e il piano si copia intero.
+    const dietaTxt = readFileSync(join(ROOT, "dieta.txt"), "utf8");
+    const dp = J(w.PlanConv.dietPlanFromText(dietaTxt, { id: "diet-x", name: "x", validFrom: "2026-11-03" }));
+    const withShop = { ...dp.data, shopping: mig };
+    ok("toLegacyDieta ignora `shopping` (stessa forma di parseDieta, nessuna chiave in più)",
+      JSON.stringify(J(w.PlanConv.toLegacyDieta(withShop))) === JSON.stringify(J(w.PlanConv.toLegacyDieta(dp.data))) && !("shopping" in J(w.PlanConv.toLegacyDieta(withShop))));
+    ok("planToText non si altera con `shopping`", w.PlanConv.planToText(null, withShop) === w.PlanConv.planToText(null, dp.data));
+    ok("activePlan conserva `shopping` nel data del piano", (() => { const a = J(w.PlanConv.activePlan([{ collection: "dietPlan", id: "diet-x", updatedAt: 1, data: withShop }], "dietPlan")); return JSON.stringify(a.data.shopping) === JSON.stringify(mig); })());
+  }
+  // Sorgente: la schermata usa item.id (non ricostruisce più la chiave dall'indice) e legge plan_diet.
+  const spesaSrc = readFileSync(join(ROOT, "screens", "spesa.jsx"), "utf8");
+  const comp = spesaSrc.slice(spesaSrc.indexOf("const SpesaItem"));
+  ok("spesa.jsx: spunte per item.id, mai `${cat.id}-${i}` nei componenti", /checked\[it\.id\]/.test(comp) && /onToggle\(it\.id\)/.test(comp) && !/\$\{cat\.id\}-\$\{i\}/.test(comp));
+  ok("spesa.jsx: legge plan_diet (e si aggiorna col sync) e non itera più CATEGORIES nei componenti", /get\("plan_diet"/.test(comp) && /"plan_diet"\]/.test(comp) && !/CATEGORIES/.test(comp));
+}
 
 // ---- Suite bundle: app.compiled.js allineato ai sorgenti (no drift) ----
 // Il browser carica SOLO app.compiled.js: se un .jsx viene modificato senza

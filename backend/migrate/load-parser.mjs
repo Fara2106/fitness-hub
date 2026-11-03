@@ -15,7 +15,8 @@ function loadJsx(files) {
   const sandbox = { window: {}, console };
   vm.createContext(sandbox);
   for (const f of files) {
-    const code = babel.transformFileSync(join(REPO_ROOT, f), { presets: ["@babel/preset-react"] }).code;
+    // runtime "classic" (come il bundle): il default di Babel 8 emette `import`, che in vm non esiste.
+    const code = babel.transformFileSync(join(REPO_ROOT, f), { presets: [["@babel/preset-react", { runtime: "classic", development: false }]] }).code;
     vm.runInContext(code, sandbox, { filename: f });
   }
   return sandbox.window;
@@ -29,6 +30,19 @@ export function loadPlanConv() {
   return {
     workoutPlanFromText: plain(PlanConv.workoutPlanFromText),
     dietPlanFromText: plain(PlanConv.dietPlanFromText),
+  };
+}
+
+// planconv.jsx (activePlan) + la lista della spesa scritta nel codice di screens/spesa.jsx
+// (window.SPESA_CATEGORIES) con il suo convertitore (window.SpesaLogic.shoppingFromCategories).
+// spesa.jsx definisce solo costanti e componenti: niente React/DOM serve per caricarlo.
+export function loadShoppingTools() {
+  const w = loadJsx(["parser.jsx", "planconv.jsx", "screens/spesa.jsx"]);
+  const plain = (x) => JSON.parse(JSON.stringify(x));
+  return {
+    shoppingFromCategories: (cats) => plain(w.SpesaLogic.shoppingFromCategories(cats)),
+    categories: plain(w.SPESA_CATEGORIES),
+    activePlan: (records, collection) => plain(w.PlanConv.activePlan(records, collection)),
   };
 }
 

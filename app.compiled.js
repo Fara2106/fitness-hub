@@ -13352,6 +13352,43 @@ const CATEGORIES = [{
     note: "⏳ se esaurito"
   }]
 }];
+function shoppingFromCategories(cats) {
+  return (cats || []).map(c => ({
+    id: c.id,
+    title: c.title,
+    color: c.color,
+    icon: c.icon,
+    items: c.items.map((it, i) => ({
+      id: `${c.id}-${i}`,
+      name: it.name,
+      qty1: it.qty1,
+      qty2: it.qty2,
+      note: it.note == null ? null : it.note
+    }))
+  }));
+}
+function spesaCategories(planData) {
+  const sh = planData && planData.shopping;
+  if (!Array.isArray(sh)) return shoppingFromCategories(CATEGORIES);
+  return sh.map(c => ({
+    id: c.id,
+    title: c.title,
+    color: c.color || "var(--accent)",
+    icon: c.icon || "spark",
+    items: (c.items || []).map(it => ({
+      id: it.id,
+      name: it.name,
+      qty1: it.qty1,
+      qty2: it.qty2,
+      note: it.note == null ? null : it.note
+    }))
+  }));
+}
+window.SPESA_CATEGORIES = CATEGORIES;
+window.SpesaLogic = {
+  shoppingFromCategories,
+  spesaCategories
+};
 const SpesaItem = ({
   item,
   checked,
@@ -13431,7 +13468,7 @@ const CategorySection = ({
 }) => {
   const t = useT();
   const total = cat.items.length;
-  const done = cat.items.filter((_, i) => checked[`${cat.id}-${i}`]).length;
+  const done = cat.items.filter(it => checked[it.id]).length;
   return React.createElement("div", {
     className: "card lift",
     style: {
@@ -13486,17 +13523,17 @@ const CategorySection = ({
     }
   }, React.createElement("div", {
     style: {
-      width: `${done / total * 100}%`,
+      width: `${total ? done / total * 100 : 0}%`,
       height: "100%",
       background: cat.color,
       transition: "width 0.3s"
     }
   }))), cat.items.map((it, i) => React.createElement(SpesaItem, {
-    key: i,
+    key: it.id,
     item: it,
     freq: freq,
-    checked: !!checked[`${cat.id}-${i}`],
-    onToggle: () => onToggle(`${cat.id}-${i}`)
+    checked: !!checked[it.id],
+    onToggle: () => onToggle(it.id)
   })));
 };
 const Spesa = ({
@@ -13541,9 +13578,12 @@ const Spesa = ({
     setExtra(next);
     if (window.storage) window.storage.set("spesaExtra", next);
   };
-  useSyncedData(["spesaExtra", "spesaChecked", "spesaFreq"], keys => {
+  const [plan, setPlan] = React.useState(() => window.storage ? window.storage.get("plan_diet", null) : null);
+  const categories = React.useMemo(() => spesaCategories(plan && plan.data), [plan]);
+  useSyncedData(["spesaExtra", "spesaChecked", "spesaFreq", "plan_diet"], keys => {
     const st = window.storage;
     if (!st) return;
+    if (keys.indexOf("plan_diet") !== -1) setPlan(st.get("plan_diet", null));
     if (keys.indexOf("spesaExtra") !== -1) setExtra(st.get("spesaExtra", []) || []);
     if (keys.indexOf("spesaChecked") !== -1) _setLocalChecked(st.get("spesaChecked", {}) || {});
     if (keys.indexOf("spesaFreq") !== -1) _setLocalFreq(st.get("spesaFreq", 1) || 1);
@@ -13575,7 +13615,7 @@ const Spesa = ({
   const reset = () => {
     setChecked({});
   };
-  const totalItems = CATEGORIES.reduce((n, c) => n + c.items.length, 0) + extra.length;
+  const totalItems = categories.reduce((n, c) => n + c.items.length, 0) + extra.length;
   const totalDone = Object.values(checked).filter(Boolean).length;
   return React.createElement("div", {
     className: "fade-up",
@@ -13735,7 +13775,7 @@ const Spesa = ({
       gridTemplateColumns: isDesktop ? "1fr 1fr" : "1fr",
       gap: isDesktop ? 16 : 12
     }
-  }, CATEGORIES.map(cat => React.createElement(CategorySection, {
+  }, categories.map(cat => React.createElement(CategorySection, {
     key: cat.id,
     cat: cat,
     checked: checked,
@@ -16341,6 +16381,9 @@ function _importPlanChanges(kind, text, fileName, now) {
     name,
     validFrom: today
   });
+  if (cfg.collection === "dietPlan" && prev && prev.data && Array.isArray(prev.data.shopping) && plan.data.shopping === undefined) {
+    plan.data.shopping = JSON.parse(JSON.stringify(prev.data.shopping));
+  }
   if (prev && prev.data && JSON.stringify(PC[cfg.legacy](prev.data)) === JSON.stringify(PC[cfg.legacy](plan.data))) {
     return {
       identical: true,
