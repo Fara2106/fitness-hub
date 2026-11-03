@@ -85,7 +85,9 @@ e appartiene a un **account**: l'id dell'account È l'`ownerId` dei record (l'ac
 
 - `POST /v1/auth/login` `{ email, password, deviceName }` → `200 { session, ownerId, email, expiresAt }`.
   `401 { error: "credenziali non valide" }` per email inesistente, password sbagliata o account disattivato (stesso
-  messaggio). `429` (con `Retry-After`) dopo 5 errori in 15 minuti per la stessa email o lo stesso IP. `400` input mancante.
+  messaggio). `429` (con `Retry-After`) oltre 20 tentativi in 15 minuti per la stessa email o 5 per lo stesso IP
+  (un login riuscito azzera entrambi). `400` input mancante. **`5xx` (o errore Cloudflare 1102) = "riprova più tardi"**:
+  il client non deve mai mostrarlo come password sbagliata (solo `401` lo è).
 - `session`: token opaco (32 byte casuali, base64url, 43 caratteri). Il server ne salva solo lo SHA-256. Scadenza
   **scorrevole di 180 giorni** dall'ultimo uso (`expiresAt` della risposta è solo indicativo). Il client lo tiene nel
   Keychain (app) o nello storage device-local (PWA), mai nei log, nei backup o nella diagnostica.

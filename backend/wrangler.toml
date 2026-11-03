@@ -20,3 +20,5 @@ REGISTRATION_OPEN = "false"
 # Accedi con Apple: costruito ma spento finché non c'è il programma sviluppatori a pagamento.
 APPLE_SIGNIN_ENABLED = "false"
 APPLE_BUNDLE_ID = "it.faraoni.fitnesshub"
+# Secret (non qui): SYNC_TOKEN (solo durante il passaggio) e PASSWORD_PEPPER (pepper delle password, creato con
+# `node admin/account.mjs init-pepper` e caricato con `npx wrangler secret put PASSWORD_PEPPER < ~/.config/fitness-hub/pepper`).

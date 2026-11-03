@@ -4,8 +4,8 @@ import { applyChanges, pullSince, currentRecords, readMeta } from "./store.mjs";
 import { validateSyncBody, PULL_LIMIT } from "./validate.mjs";
 import {
   lookupSession, createSession, revokeSession, findAccountByEmail, verifyPassword, hashPassword, passwordProblem,
-  normalizeEmail, isValidEmail, attemptKeys, isRateLimited, recordFailure, clearFailures, verifyAppleToken,
-  LOGIN_WINDOW_MS,
+  normalizeEmail, isValidEmail, emailKey, ipKey, chargeAttempt, clearAttempts, verifyAppleToken, pepperBytes,
+  rehashIfNeeded, ConfigError, LOGIN_WINDOW_MS,
 } from "./auth.mjs";
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -58,7 +58,6 @@ export async function resolveOwner(request, env) {
   return a ? a.owner : null;
 }
 
-class ConfigError extends Error {}
 
 const tooLarge = (cors) => json({ error: "richiesta troppo grande (massimo 2 MB)" }, 413, cors);
 
@@ -115,6 +114,11 @@ async function readAuthBody(request, cors) {
 }
 
 const BAD_CREDENTIALS = { error: "credenziali non valide" };
+// Senza PASSWORD_PEPPER (o malformato) le rotte con password falliscono chiuse: 500 "configurazione mancante".
+const requirePepper = (env) => {
+  pepperBytes(env.PASSWORD_PEPPER);
+  return env.PASSWORD_PEPPER;
+};
 const clientIp = (request) => request.headers.get("CF-Connecting-IP");
 const deviceNameOf = (v) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 100) : null);
 const tooMany = (cors) => new Response(JSON.stringify({ error: "troppi tentativi, riprova più tardi" }), {
@@ -131,8 +135,8 @@ async function issueSession(env, cors, account, deviceName, now) {
 }
 
 // POST /v1/auth/login {email, password, deviceName}. Stesso 401 per email inesistente, password sbagliata,
-// account disattivato o senza password (sempre un PBKDF2: tempi uguali). 429 dopo 5 errori in 15 minuti
-// per email o per IP; il successo azzera il contatore dell'email.
+// account disattivato o senza password (sempre PBKDF2 + HMAC: tempi uguali). Ogni tentativo si addebita prima
+// di verificare: oltre 20 in 15 minuti per email o 5 per IP → 429. Il successo azzera email e IP.
 async function handleLogin(request, env, cors) {
   const body = await readAuthBody(request, cors);
   if (body instanceof Response) return body;
@@ -140,16 +144,16 @@ async function handleLogin(request, env, cors) {
   if (typeof email !== "string" || typeof password !== "string" || email.length > 254 || password.length > 1024) {
     return json({ error: "email e password obbligatorie" }, 400, cors);
   }
+  const pepper = requirePepper(env);
   const now = Date.now();
-  const keys = attemptKeys(email, clientIp(request));
-  if (await isRateLimited(env.DB, keys, now)) return tooMany(cors);
+  const keys = [emailKey(email), ipKey(clientIp(request))];
+  // il tentativo si addebita PRIMA di verificare (atomico): oltre il limite niente PBKDF2
+  if ((await chargeAttempt(env.DB, keys, now)).limited) return tooMany(cors);
   const account = await findAccountByEmail(env.DB, email);
-  const ok = await verifyPassword(password, account);
-  if (!ok || !account || account.disabled) {
-    await recordFailure(env.DB, keys, now);
-    return json(BAD_CREDENTIALS, 401, cors);
-  }
-  await clearFailures(env.DB, keys[0]);
+  const ok = await verifyPassword(password, account, pepper);
+  if (!ok || !account || account.disabled) return json(BAD_CREDENTIALS, 401, cors);
+  await clearAttempts(env.DB, keys);
+  await rehashIfNeeded(env.DB, account, password, pepper);
   return issueSession(env, cors, account, deviceNameOf(body.deviceName), now);
 }
 
@@ -162,18 +166,17 @@ async function handleRegister(request, env, cors) {
   if (!isValidEmail(email)) return json({ error: "email non valida" }, 400, cors);
   const problem = passwordProblem(body.password);
   if (problem) return json({ error: problem }, 400, cors);
+  const pepper = requirePepper(env);
   const now = Date.now();
-  const keys = [attemptKeys(email, clientIp(request))[1]];
-  if (await isRateLimited(env.DB, keys, now)) return tooMany(cors);
-  if (await findAccountByEmail(env.DB, email)) {
-    await recordFailure(env.DB, keys, now);
-    return json({ error: "email già registrata" }, 409, cors);
-  }
-  const h = await hashPassword(body.password);
+  const keys = [ipKey(clientIp(request))];
+  if ((await chargeAttempt(env.DB, keys, now)).limited) return tooMany(cors);
+  if (await findAccountByEmail(env.DB, email)) return json({ error: "email già registrata" }, 409, cors);
+  const h = await hashPassword(body.password, pepper);
   const account = { id: crypto.randomUUID(), email };
   await env.DB.prepare(
-    "INSERT INTO accounts (id, email, pw_hash, pw_salt, pw_iter, created_at, disabled) VALUES (?, ?, ?, ?, ?, ?, 0)"
-  ).bind(account.id, email, h.hash, h.salt, h.iter, now).run();
+    "INSERT INTO accounts (id, email, pw_hash, pw_salt, pw_iter, pw_ver, created_at, disabled) VALUES (?, ?, ?, ?, ?, ?, ?, 0)"
+  ).bind(account.id, email, h.hash, h.salt, h.iter, h.ver, now).run();
+  await clearAttempts(env.DB, keys);
   return issueSession(env, cors, account, deviceNameOf(body.deviceName), now);
 }
 
@@ -201,20 +204,18 @@ async function handlePassword(request, env, cors) {
   if (typeof body.current !== "string") return json({ error: "password attuale obbligatoria" }, 400, cors);
   const problem = passwordProblem(body.next);
   if (problem) return json({ error: problem }, 400, cors);
+  const pepper = requirePepper(env);
   const now = Date.now();
   const account = await env.DB.prepare("SELECT * FROM accounts WHERE id = ?").bind(a.owner).first();
-  const keys = attemptKeys(account ? account.email || account.id : a.owner, clientIp(request));
-  if (await isRateLimited(env.DB, keys, now)) return tooMany(cors);
-  if (!(await verifyPassword(body.current, account))) {
-    await recordFailure(env.DB, keys, now);
-    return json(BAD_CREDENTIALS, 401, cors);
-  }
-  const h = await hashPassword(body.next);
+  const keys = [emailKey(account && account.email ? account.email : a.owner), ipKey(clientIp(request))];
+  if ((await chargeAttempt(env.DB, keys, now)).limited) return tooMany(cors);
+  if (!(await verifyPassword(body.current, account, pepper))) return json(BAD_CREDENTIALS, 401, cors);
+  const h = await hashPassword(body.next, pepper);
   await env.DB.batch([
-    env.DB.prepare("UPDATE accounts SET pw_hash = ?, pw_salt = ?, pw_iter = ? WHERE id = ?").bind(h.hash, h.salt, h.iter, a.owner),
+    env.DB.prepare("UPDATE accounts SET pw_hash = ?, pw_salt = ?, pw_iter = ?, pw_ver = ? WHERE id = ?").bind(h.hash, h.salt, h.iter, h.ver, a.owner),
     env.DB.prepare("UPDATE sessions SET revoked = 1 WHERE account_id = ? AND id != ?").bind(a.owner, a.sessionId),
   ]);
-  await clearFailures(env.DB, keys[0]);
+  await clearAttempts(env.DB, keys);
   return json({ ok: true }, 200, cors);
 }
 
@@ -223,12 +224,9 @@ async function appleClaims(request, env, cors, body, keys, now) {
   if (typeof body.identityToken !== "string" || typeof body.nonce !== "string" || !body.nonce) {
     return json({ error: "identityToken e nonce obbligatori" }, 400, cors);
   }
-  if (await isRateLimited(env.DB, keys, now)) return tooMany(cors);
+  if ((await chargeAttempt(env.DB, keys, now)).limited) return tooMany(cors);
   const claims = await verifyAppleToken(body.identityToken, { bundleId: env.APPLE_BUNDLE_ID, nonce: body.nonce, now });
-  if (!claims) {
-    await recordFailure(env.DB, keys, now);
-    return json({ error: "token Apple non valido" }, 401, cors);
-  }
+  if (!claims) return json({ error: "token Apple non valido" }, 401, cors);
   return claims;
 }
 
@@ -238,7 +236,7 @@ async function handleApple(request, env, cors) {
   const body = await readAuthBody(request, cors);
   if (body instanceof Response) return body;
   const now = Date.now();
-  const keys = [attemptKeys("", clientIp(request))[1]];
+  const keys = [ipKey(clientIp(request))];
   const claims = await appleClaims(request, env, cors, body, keys, now);
   if (claims instanceof Response) return claims;
   let account = await env.DB.prepare("SELECT * FROM accounts WHERE apple_sub = ?").bind(claims.sub).first();
@@ -251,6 +249,7 @@ async function handleApple(request, env, cors) {
     await env.DB.prepare("INSERT INTO accounts (id, email, apple_sub, created_at, disabled) VALUES (?, ?, ?, ?, 0)")
       .bind(account.id, email, claims.sub, now).run();
   }
+  await clearAttempts(env.DB, keys);
   return issueSession(env, cors, account, deviceNameOf(body.deviceName), now);
 }
 
@@ -261,12 +260,13 @@ async function handleAppleLink(request, env, cors) {
   const body = await readAuthBody(request, cors);
   if (body instanceof Response) return body;
   const now = Date.now();
-  const keys = [attemptKeys("", clientIp(request))[1]];
+  const keys = [ipKey(clientIp(request))];
   const claims = await appleClaims(request, env, cors, body, keys, now);
   if (claims instanceof Response) return claims;
   const other = await env.DB.prepare("SELECT id FROM accounts WHERE apple_sub = ?").bind(claims.sub).first();
   if (other && other.id !== a.owner) return json({ error: "Apple ID già collegato a un altro account" }, 409, cors);
   await env.DB.prepare("UPDATE accounts SET apple_sub = ? WHERE id = ?").bind(claims.sub, a.owner).run();
+  await clearAttempts(env.DB, keys);
   return json({ ok: true }, 200, cors);
 }
 

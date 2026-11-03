@@ -6,6 +6,8 @@
 // applicati all'avvio come device "seed". --token = token legacy (LEGACY_TOKEN_ENABLED acceso) verso --owner.
 // --account = crea all'avvio un account DI TEST con id = --owner (password in chiaro sulla riga di comando:
 // SOLO per test locali, mai con credenziali vere né contro la produzione). Serve almeno uno fra --token e --account.
+// --pepper-file = file col pepper delle password (hex ≥ 32 byte); di default un pepper di TEST fisso e pubblico
+// (va bene solo qui: in produzione il pepper è il secret PASSWORD_PEPPER).
 // Stampa su stdout `ready http://127.0.0.1:<porta>` e mai il token né la password.
 import http from "node:http";
 import { readFileSync } from "node:fs";
@@ -22,6 +24,7 @@ const { values } = parseArgs({
     seed: { type: "string" },
     owner: { type: "string", default: "local-owner" },
     account: { type: "string" },
+    "pepper-file": { type: "string" },
   },
 });
 if (!values.token && !values.account) {
@@ -36,7 +39,11 @@ if (!Number.isInteger(port) || port < 0 || port > 65535) {
 
 const DB = createD1(values.db || ":memory:");
 await DB.exec(readFileSync(new URL("../schema.sql", import.meta.url), "utf8"));
+// Pepper di test, pubblico: SOLO per il server locale.
+const LOCAL_TEST_PEPPER = "7e57".repeat(16);
+const pepper = values["pepper-file"] ? readFileSync(values["pepper-file"], "utf8").trim() : LOCAL_TEST_PEPPER;
 const env = {
+  PASSWORD_PEPPER: pepper,
   DB, SYNC_TOKEN: values.token, PRIMARY_OWNER: values.owner, LEGACY_TOKEN_ENABLED: values.token ? "true" : "false",
   REGISTRATION_OPEN: "false", APPLE_SIGNIN_ENABLED: "false", APPLE_BUNDLE_ID: "it.faraoni.fitnesshub",
 };
@@ -50,7 +57,7 @@ if (values.account) {
   const exists = await DB.prepare("SELECT 1 FROM accounts WHERE email = ? COLLATE NOCASE OR id = ?").bind(email.trim().toLowerCase(), values.owner).first();
   if (!exists) {
     try {
-      await createAccount(DB, { id: values.owner, email, password: values.account.slice(sep + 1), now: Date.now() });
+      await createAccount(DB, { id: values.owner, email, password: values.account.slice(sep + 1), pepper, now: Date.now() });
     } catch (e) {
       console.error(`--account non valido: ${e.message}`);
       process.exit(2);

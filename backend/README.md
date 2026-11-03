@@ -63,16 +63,25 @@ l'epoch (vedi "Backup del database").
 
 Tabelle (`migrations/0003_accounts.sql`, incluse anche in `schema.sql`):
 
-- `accounts(id = ownerId, email UNIQUE NOCASE, pw_hash, pw_salt, pw_iter, apple_sub UNIQUE, created_at, disabled)`.
-  Password: PBKDF2-SHA256 con WebCrypto, **100.000 iterazioni** (il massimo che il runtime dei Worker accetta), salt
-  casuale da 16 byte, confronto a tempo costante, minimo 10 caratteri. `pw_iter` è per riga: si può alzare in futuro
-  (le righe vecchie si verificano col loro valore).
+- `accounts(id = ownerId, email UNIQUE NOCASE, pw_hash, pw_salt, pw_iter, pw_ver, apple_sub UNIQUE, created_at, disabled)`.
+  Password (`pw_ver = 1`): `pw_hash = HMAC-SHA256(PEPPER, PBKDF2-SHA256(password, salt, 25.000))` con WebCrypto, salt
+  casuale da 16 byte, confronto a tempo costante, minimo 10 caratteri. 25.000 iterazioni stanno nei 10 ms di CPU del
+  piano Workers gratuito (~3 ms per verifica); il **pepper** (secret `PASSWORD_PEPPER`, ≥ 32 byte hex, mai nel DB né nel
+  repo) fa sì che un dump del DB da solo non basti per provare password offline. Senza pepper le rotte con password
+  rispondono 500 "configurazione mancante" (mai un hash senza). `pw_ver`/`pw_iter` sono per riga: un login riuscito
+  con valori diversi da quelli attuali rifà l'hash (`rehashIfNeeded`); per uno schema nuovo si aggiunge un `pw_ver`.
 - `sessions(id = SHA-256 hex del token, account_id, device_name, created_at, last_used_at, expires_at, revoked)`.
   Il token (32 byte casuali, base64url) si restituisce una volta sola e non si salva mai in chiaro. Scadenza scorrevole
   180 giorni, aggiornata al massimo una volta all'ora per sessione.
-- `login_attempts(key, at)`: un errore di accesso aggiunge `email:<minuscola>` e `ip:<CF-Connecting-IP>`; 5 errori in
-  15 minuti su una delle due chiavi → `429`. Il successo cancella la chiave dell'email; le righe vecchie si potano a ogni errore.
+- `login_attempts(key, at)`: ogni tentativo (login, cambio password, Apple, registrazione) si **addebita prima di
+  verificare**, in un unico lotto atomico (pota le righe oltre 15 minuti, inserisce `email:<minuscola>` e
+  `ip:<CF-Connecting-IP>`, conta): oltre **20 per email** o **5 per IP** in 15 minuti → `429` senza verificare nulla
+  (e la riga appena inserita si toglie, così martellare non allunga il blocco). Le richieste concorrenti sono
+  serializzate dal lotto: non aggirano il limite. Il successo cancella le righe di quell'email e di quell'IP.
+- Un `5xx` (o l'errore Cloudflare 1102 "CPU superata") su `/v1/auth/*` vuol dire **"riprova"**, non "password
+  sbagliata": la password sbagliata è sempre e solo `401 credenziali non valide`.
 
+Secret: `PASSWORD_PEPPER` (vedi sotto, `init-pepper`) e, durante il passaggio, `SYNC_TOKEN`.
 Variabili (`[vars]` di `wrangler.toml`): `LEGACY_TOKEN_ENABLED` (`"true"` durante il passaggio: `SYNC_TOKEN` →
 `PRIMARY_OWNER`), `REGISTRATION_OPEN` (`"false"`: `/v1/auth/register` → 403), `APPLE_SIGNIN_ENABLED` (`"false"`:
 `/v1/auth/apple*` → 404), `APPLE_BUNDLE_ID` (`aud` atteso nel JWT di Apple). Con Apple acceso il Worker scarica le
@@ -82,10 +91,13 @@ una volta al minuto) e verifica RS256, `iss`, `aud`, `exp`, `iat`, `sub` e `nonc
 ### CLI `admin/account.mjs`
 
 La password si digita **nel terminale, senza eco** (due volte per `create`/`reset-password`, devono coincidere, almeno
-10 caratteri). Non si accetta come argomento (`--password` → errore) né da variabili d'ambiente, e con uno stdin che non
-è un terminale la CLI si rifiuta. Non stampa mai password, hash o SQL.
+10 caratteri; Tab, Esc/frecce e altri caratteri di controllo sono rifiutati con un messaggio). Non si accetta come
+argomento (`--password` → errore) né da variabili d'ambiente, e con uno stdin che non è un terminale la CLI si rifiuta.
+L'hash si calcola sul Mac col pepper letto da `~/.config/fitness-hub/pepper` (permessi 600 obbligatori, altrimenti
+rifiuta; `--pepper-file` per un altro file). Non stampa mai password, pepper, hash o SQL.
 
 ```bash
+node backend/admin/account.mjs init-pepper                              # crea il pepper (se manca) e dice come caricarlo
 node backend/admin/account.mjs create         --email <e> --owner <PRIMARY_OWNER> --remote
 node backend/admin/account.mjs reset-password --email <e> --remote      # revoca anche tutte le sessioni
 node backend/admin/account.mjs sessions       --email <e> --remote      # elenco (id abbreviato a 8 caratteri)
@@ -93,21 +105,29 @@ node backend/admin/account.mjs revoke         --email <e> [--session <prefisso>]
 node backend/admin/account.mjs login          --email <e> --api https://fitness-hub-api.lorefara97.workers.dev
 ```
 
-`--remote` esegue `npx wrangler d1 execute fitness-hub-db --remote --json --yes --command "<sql>"` (dalla cartella
-`backend/`, senza shell) con valori già hashati; `--local <file.sqlite>` lavora su un DB locale (test e sviluppo).
+`--remote` usa `npx wrangler d1 execute fitness-hub-db --remote --json --yes` (dalla cartella `backend/`, senza shell):
+gli statement con hash e salt passano come `--file` (file 600 in una cartella temporanea 700, cancellata subito dopo),
+mai negli argomenti; le sole letture e revoche senza segreti usano `--command`. `--local <file.sqlite>` lavora su un DB
+locale (test e sviluppo).
 `login` chiede la password, chiama `POST /v1/auth/login` e salva la sessione in `~/.config/fitness-hub/session`
 (permessi 600; `--out` per un altro file): serve agli strumenti di sola lettura dal Mac.
 
-### Migrazione `0003_accounts.sql`
+### Messa in produzione (ordine obbligato) e migrazione `0003_accounts.sql`
 
-Solo tabelle e indici nuovi (`IF NOT EXISTS`, idempotente): `records` e `meta` non cambiano.
+La migrazione aggiunge solo tabelle e indici (`IF NOT EXISTS`, idempotente): `records` e `meta` non cambiano.
+Il pepper deve esistere nel Worker PRIMA del deploy (senza, login → 500) e sul Mac PRIMA di creare l'account.
 
 ```bash
 cd backend
-npx wrangler d1 time-travel info fitness-hub-db        # annota il bookmark
-npx wrangler d1 execute fitness-hub-db --remote --file=migrations/0003_accounts.sql
-npx wrangler deploy                                    # LEGACY_TOKEN_ENABLED = "true": la PWA col token continua
+node admin/account.mjs init-pepper                     # 1. ~/.config/fitness-hub/pepper (600), mai stampato
+npx wrangler secret put PASSWORD_PEPPER < ~/.config/fitness-hub/pepper   # 2. secret del Worker (da file, niente eco)
+npx wrangler d1 time-travel info fitness-hub-db        # 3. annota il bookmark
+npx wrangler d1 execute fitness-hub-db --remote --file=migrations/0003_accounts.sql   # 4.
+npx wrangler deploy                                    # 5. LEGACY_TOKEN_ENABLED = "true": la PWA col token continua
 ```
+
+Il pepper non si cambia: cambiarlo invalida tutte le password (servirebbe `reset-password`). Se si perde il file sul Mac
+ma il secret è nel Worker, il login continua a funzionare; per creare o resettare account serve di nuovo lo stesso valore.
 
 ## Server locale per i test (`dev/local-server.mjs`)
 
@@ -119,7 +139,8 @@ node backend/dev/local-server.mjs --port 8787 [--token <token-di-test>] [--accou
   [--db <file>] [--seed <records.json>] [--owner <id>]
 ```
 
-`--token` accende il token legacy (`LEGACY_TOKEN_ENABLED`) verso `--owner`. `--account` crea all'avvio un **account di
+`--token` accende il token legacy (`LEGACY_TOKEN_ENABLED`) verso `--owner`. Il pepper è uno fisso e pubblico di test
+(`--pepper-file` per sceglierne un altro). `--account` crea all'avvio un **account di
 test** con id = `--owner` (se non esiste già nel `--db`): la password sta sulla riga di comando, quindi **solo per test
 locali, mai con credenziali vere né contro la produzione**. Serve almeno uno dei due.
 

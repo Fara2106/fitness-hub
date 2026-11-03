@@ -4,15 +4,21 @@
 const encoder = new TextEncoder();
 const subtle = () => globalThis.crypto.subtle;
 
-// Il runtime dei Worker rifiuta PBKDF2 oltre 100.000 iterazioni: si usa esattamente il massimo.
-// Ogni riga salva le sue iterazioni (pw_iter), così il valore si può alzare in futuro senza rompere gli hash vecchi.
-export const PBKDF2_ITERATIONS = 100000;
+// Schema delle password (pw_ver = 1): pw_hash = HMAC-SHA256(PEPPER, PBKDF2-SHA256(password, salt, 25.000)).
+// 25.000 iterazioni stanno nel budget CPU dei Worker gratuiti (10 ms/richiesta); il pepper (secret del Worker
+// PASSWORD_PEPPER, mai nel DB) fa sì che un DB rubato da solo non basti per provare le password offline.
+// Ogni riga salva pw_ver e pw_iter: un login riuscito con valori diversi da quelli attuali rifà l'hash (rehashIfNeeded).
+// Per uno schema futuro (pw_ver = 2): aggiungerlo in derive(), alzare PW_VER; i login riusciti migrano le righe da soli.
+export const PW_VER = 1;
+export const PBKDF2_ITERATIONS = 25000;
+export const PBKDF2_MAX_ITERATIONS = 100000;                 // limite del runtime dei Worker
 export const MIN_PASSWORD = 10;
 export const MAX_PASSWORD = 1024;
 export const SESSION_TTL_MS = 180 * 24 * 3600 * 1000;       // scadenza scorrevole: 180 giorni
 export const SESSION_REFRESH_MS = 3600 * 1000;               // al massimo una scrittura all'ora per sessione
 export const LOGIN_WINDOW_MS = 15 * 60 * 1000;
-export const LOGIN_MAX_FAILURES = 5;
+export const LOGIN_MAX_EMAIL = 20;                           // errori per email in 15 minuti (l'email è pubblica: lockout più largo)
+export const LOGIN_MAX_IP = 5;                               // errori per IP in 15 minuti
 export const APPLE_ISSUER = "https://appleid.apple.com";
 export const APPLE_KEYS_URL = "https://appleid.apple.com/auth/keys";
 const APPLE_KEYS_TTL_MS = 3600 * 1000;
@@ -55,26 +61,55 @@ const timingSafeEqualText = (a, b) => timingSafeEqual(encoder.encode(String(a)),
 
 // --- password --------------------------------------------------------------------------------------
 
+export class ConfigError extends Error {}
+
+// Pepper: almeno 32 byte in hex (secret PASSWORD_PEPPER). Mancante o malformato → ConfigError: mai un hash senza.
+export function pepperBytes(pepper) {
+  const hex = typeof pepper === "string" ? pepper.trim() : "";
+  const bytes = hex.length >= 64 ? fromHex(hex) : null;
+  if (!bytes) throw new ConfigError("configurazione mancante");
+  return bytes;
+}
+
 async function pbkdf2(password, salt, iterations) {
   const key = await subtle().importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
   return new Uint8Array(await subtle().deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, key, 256));
 }
-
-// → { hash, salt, iter } (hex). `iter` diverso dal default solo nei test o per alzarlo in futuro.
-export async function hashPassword(password, { iter = PBKDF2_ITERATIONS, salt } = {}) {
-  const s = salt || randomBytes(16);
-  return { hash: toHex(await pbkdf2(password, s, iter)), salt: toHex(s), iter };
+async function hmac(keyBytes, data) {
+  const key = await subtle().importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await subtle().sign("HMAC", key, data));
+}
+// pw_ver 1: HMAC(pepper, PBKDF2(password, salt, iter)).
+async function derive(password, salt, iter, pepper) {
+  return hmac(pepper, await pbkdf2(password, salt, iter));
 }
 
-// Verifica contro una riga di `accounts`. Una riga senza password (account solo Apple) o malformata
-// costa comunque un PBKDF2 (salt fittizio): stesso tempo di una password sbagliata.
-export async function verifyPassword(password, row) {
+// → { hash, salt, iter, ver } (hex). `iter` diverso dal default solo nei test o per cambiarlo in futuro.
+export async function hashPassword(password, pepper, { iter = PBKDF2_ITERATIONS, salt } = {}) {
+  const key = pepperBytes(pepper);
+  const s = salt || randomBytes(16);
+  return { hash: toHex(await derive(password, s, iter, key)), salt: toHex(s), iter, ver: PW_VER };
+}
+
+// Verifica contro una riga di `accounts`. Una riga senza password (account solo Apple), assente o malformata
+// costa comunque lo stesso lavoro (PBKDF2 alle iterazioni attuali + HMAC, salt fittizio): tempi uguali.
+export async function verifyPassword(password, row, pepper) {
+  const key = pepperBytes(pepper);
   const salt = row && fromHex(row.pw_salt);
   const expected = row && fromHex(row.pw_hash);
-  const iter = row && Number.isInteger(row.pw_iter) && row.pw_iter > 0 && row.pw_iter <= PBKDF2_ITERATIONS ? row.pw_iter : null;
-  const usable = !!(salt && salt.length === 16 && expected && expected.length === 32 && iter);
-  const got = await pbkdf2(typeof password === "string" ? password : "", usable ? salt : new Uint8Array(16), usable ? iter : PBKDF2_ITERATIONS);
+  const iter = row && Number.isInteger(row.pw_iter) && row.pw_iter > 0 && row.pw_iter <= PBKDF2_MAX_ITERATIONS ? row.pw_iter : null;
+  const usable = !!(row && row.pw_ver === PW_VER && salt && salt.length === 16 && expected && expected.length === 32 && iter);
+  const got = await derive(typeof password === "string" ? password : "", usable ? salt : new Uint8Array(16), usable ? iter : PBKDF2_ITERATIONS, key);
   return timingSafeEqual(got, usable ? expected : new Uint8Array(32)) && usable;
+}
+
+// Dopo un login riuscito: se la riga usa uno schema o un numero di iterazioni diverso da quello attuale, rifà l'hash.
+export async function rehashIfNeeded(db, row, password, pepper) {
+  if (row.pw_ver === PW_VER && row.pw_iter === PBKDF2_ITERATIONS) return false;
+  const h = await hashPassword(password, pepper);
+  await db.prepare("UPDATE accounts SET pw_hash = ?, pw_salt = ?, pw_iter = ?, pw_ver = ? WHERE id = ?")
+    .bind(h.hash, h.salt, h.iter, h.ver, row.id).run();
+  return true;
 }
 
 export const normalizeEmail = (e) => (typeof e === "string" ? e.trim().toLowerCase() : "");
@@ -87,15 +122,15 @@ export function passwordProblem(p) {
 }
 
 // Crea un account (test, local-server, CLI --local). L'id È l'ownerId dei record.
-export async function createAccount(db, { id, email, password, now, appleSub = null }) {
+export async function createAccount(db, { id, email, password, pepper, now, appleSub = null }) {
   const problem = passwordProblem(password);
   if (problem) throw new Error(problem);
   const e = normalizeEmail(email);
   if (!isValidEmail(e)) throw new Error("email non valida");
-  const h = await hashPassword(password);
+  const h = await hashPassword(password, pepper);
   await db.prepare(
-    "INSERT INTO accounts (id, email, pw_hash, pw_salt, pw_iter, apple_sub, created_at, disabled) VALUES (?, ?, ?, ?, ?, ?, ?, 0)"
-  ).bind(id, e, h.hash, h.salt, h.iter, appleSub, now).run();
+    "INSERT INTO accounts (id, email, pw_hash, pw_salt, pw_iter, pw_ver, apple_sub, created_at, disabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)"
+  ).bind(id, e, h.hash, h.salt, h.iter, h.ver, appleSub, now).run();
   return { id, email: e };
 }
 
@@ -137,28 +172,34 @@ export const revokeSession = (db, sessionId) =>
 
 // --- limite ai tentativi ------------------------------------------------------------------------------
 
-export const attemptKeys = (email, ip) => [`email:${normalizeEmail(email)}`, `ip:${ip || "unknown"}`];
+export const emailKey = (email) => `email:${normalizeEmail(email)}`;
+export const ipKey = (ip) => `ip:${ip || "unknown"}`;
+const limitOf = (key) => (key.startsWith("email:") ? LOGIN_MAX_EMAIL : LOGIN_MAX_IP);
 
-// true se una delle chiavi ha già LOGIN_MAX_FAILURES errori negli ultimi 15 minuti.
-export async function isRateLimited(db, keys, now) {
+// Addebita il tentativo PRIMA di verificare, in un unico lotto atomico: pota le righe vecchie, inserisce una riga
+// per chiave e conta le righe nella finestra (inclusa questa). Le richieste concorrenti sono serializzate dal lotto,
+// quindi al massimo `limite` tentativi per chiave arrivano alla verifica. Oltre il limite → { limited: true }:
+// le righe di QUESTA richiesta si tolgono (martellare a vuoto non allunga il blocco) e non si verifica nulla.
+// → { limited, rowids } (rowids = righe di questa richiesta).
+export async function chargeAttempt(db, keys, now) {
   const since = now - LOGIN_WINDOW_MS;
-  for (const key of keys) {
-    const n = await db.prepare("SELECT COUNT(*) AS n FROM login_attempts WHERE key = ? AND at > ?").bind(key, since).first("n");
-    if (n >= LOGIN_MAX_FAILURES) return true;
-  }
-  return false;
-}
-
-// Registra un errore per ogni chiave e pota le righe fuori finestra (in un unico lotto).
-export async function recordFailure(db, keys, now) {
-  const ins = db.prepare("INSERT INTO login_attempts (key, at) VALUES (?, ?)");
-  await db.batch([
-    db.prepare("DELETE FROM login_attempts WHERE at <= ?").bind(now - LOGIN_WINDOW_MS),
-    ...keys.map((k) => ins.bind(k, now)),
+  const out = await db.batch([
+    db.prepare("DELETE FROM login_attempts WHERE at <= ?").bind(since),
+    ...keys.map((k) => db.prepare("INSERT INTO login_attempts (key, at) VALUES (?, ?) RETURNING rowid AS rid").bind(k, now)),
+    ...keys.map((k) => db.prepare("SELECT COUNT(*) AS n FROM login_attempts WHERE key = ? AND at > ?").bind(k, since)),
   ]);
+  const rowids = out.slice(1, 1 + keys.length).map((r) => r.results[0].rid);
+  const counts = out.slice(1 + keys.length).map((r) => r.results[0].n);
+  const limited = counts.some((n, i) => n > limitOf(keys[i]));
+  if (limited) await dropRows(db, rowids);
+  return { limited, rowids };
 }
 
-export const clearFailures = (db, key) => db.prepare("DELETE FROM login_attempts WHERE key = ?").bind(key).run();
+const dropRows = (db, rowids) => db.batch(rowids.map((id) => db.prepare("DELETE FROM login_attempts WHERE rowid = ?").bind(id)));
+
+// Successo: si cancellano tutte le righe delle chiavi della richiesta (email e IP).
+export const clearAttempts = (db, keys) =>
+  db.batch(keys.map((k) => db.prepare("DELETE FROM login_attempts WHERE key = ?").bind(k)));
 
 // --- Accedi con Apple ---------------------------------------------------------------------------------
 

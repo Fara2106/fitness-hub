@@ -2,7 +2,7 @@
 // migrazione 0003 e CLI admin/account.mjs. D1 simulato su node:sqlite; mai il backend di produzione.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, mkdtempSync, rmSync, statSync, existsSync } from "node:fs";
+import { readFileSync, mkdtempSync, rmSync, statSync, existsSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { PassThrough, Writable } from "node:stream";
@@ -12,9 +12,9 @@ import { createHash } from "node:crypto";
 import { createD1 } from "./d1-sqlite.mjs";
 import worker, { resolveOwner } from "../src/worker.mjs";
 import {
-  PBKDF2_ITERATIONS, SESSION_TTL_MS, hashPassword, verifyPassword, createAccount, setAppleFetch,
+  PBKDF2_ITERATIONS, SESSION_TTL_MS, PW_VER, hashPassword, verifyPassword, createAccount, setAppleFetch,
 } from "../src/auth.mjs";
-import { main as cli } from "../admin/account.mjs";
+import { main as cli, feedSecret, remoteArgs, withSqlFile } from "../admin/account.mjs";
 
 const schema = readFileSync(new URL("../schema.sql", import.meta.url), "utf8");
 const m0003 = readFileSync(new URL("../migrations/0003_accounts.sql", import.meta.url), "utf8");
@@ -26,13 +26,14 @@ const PASSWORD = "una-password-lunga";
 const LEGACY = "L".repeat(64);
 const BUNDLE = "it.faraoni.fitnesshub";
 const PWA = "https://fara2106.github.io";
+const PEPPER = "9e".repeat(32);           // pepper di test (32 byte hex), mai quello vero
 const sha256Hex = (s) => createHash("sha256").update(s).digest("hex");
 
 async function newEnv(extra = {}) {
   const DB = createD1();
   await DB.exec(schema);
-  await createAccount(DB, { id: OWNER, email: EMAIL, password: PASSWORD, now: Date.now() });
-  return { DB, SYNC_TOKEN: LEGACY, PRIMARY_OWNER: OWNER, REGISTRATION_OPEN: "false", APPLE_SIGNIN_ENABLED: "false", APPLE_BUNDLE_ID: BUNDLE, ...extra };
+  await createAccount(DB, { id: OWNER, email: EMAIL, password: PASSWORD, pepper: PEPPER, now: Date.now() });
+  return { DB, PASSWORD_PEPPER: PEPPER, SYNC_TOKEN: LEGACY, PRIMARY_OWNER: OWNER, REGISTRATION_OPEN: "false", APPLE_SIGNIN_ENABLED: "false", APPLE_BUNDLE_ID: BUNDLE, ...extra };
 }
 function req(path, { method = "POST", token, body, ip = "203.0.113.1", origin } = {}) {
   const headers = {};
@@ -53,21 +54,62 @@ const sync = (env, token, changes = []) => call(env, "/v1/sync", { token, body: 
 
 // --- password ---------------------------------------------------------------------------------
 
-test("password: PBKDF2-SHA256 a 100.000 iterazioni, salt da 16 byte, iterazioni salvate per riga", async () => {
-  assert.equal(PBKDF2_ITERATIONS, 100000);
-  const h = await hashPassword(PASSWORD);
-  assert.equal(h.iter, 100000);
+test("password: HMAC(pepper, PBKDF2-SHA256 a 25.000 iterazioni), salt da 16 byte, pw_ver/pw_iter per riga", async () => {
+  assert.equal(PBKDF2_ITERATIONS, 25000);
+  assert.equal(PW_VER, 1);
+  const h = await hashPassword(PASSWORD, PEPPER);
+  assert.deepEqual([h.iter, h.ver], [25000, 1]);
   assert.match(h.salt, /^[0-9a-f]{32}$/);
   assert.match(h.hash, /^[0-9a-f]{64}$/);
-  assert.notEqual((await hashPassword(PASSWORD)).salt, h.salt, "salt casuale");
-  const row = { pw_hash: h.hash, pw_salt: h.salt, pw_iter: h.iter };
-  assert.equal(await verifyPassword(PASSWORD, row), true);
-  assert.equal(await verifyPassword(PASSWORD + "x", row), false);
-  // una riga con un altro numero di iterazioni (alzato in futuro) si verifica col suo pw_iter
-  const h2 = await hashPassword(PASSWORD, { iter: 1000 });
-  assert.equal(await verifyPassword(PASSWORD, { pw_hash: h2.hash, pw_salt: h2.salt, pw_iter: 1000 }), true);
-  assert.equal(await verifyPassword(PASSWORD, { pw_hash: null, pw_salt: null, pw_iter: null }), false);
-  await assert.rejects(createAccount(createD1(), { id: "x", email: "a@b.c", password: "corta", now: 1 }), /10 caratteri/);
+  assert.notEqual((await hashPassword(PASSWORD, PEPPER)).salt, h.salt, "salt casuale");
+  const row = { pw_hash: h.hash, pw_salt: h.salt, pw_iter: h.iter, pw_ver: h.ver };
+  assert.equal(await verifyPassword(PASSWORD, row, PEPPER), true);
+  assert.equal(await verifyPassword(PASSWORD + "x", row, PEPPER), false);
+  assert.equal(await verifyPassword(PASSWORD, row, "ab".repeat(32)), false, "pepper diverso → no");
+  assert.equal(await verifyPassword(PASSWORD, { ...row, pw_ver: 2 }, PEPPER), false, "schema sconosciuto → no");
+  // senza pepper (o troppo corto) non si calcola nessun hash
+  for (const bad of [undefined, "", "ab".repeat(31), "zz".repeat(32)]) {
+    await assert.rejects(hashPassword(PASSWORD, bad), /configurazione mancante/);
+    await assert.rejects(verifyPassword(PASSWORD, row, bad), /configurazione mancante/);
+  }
+  // una riga con un altro numero di iterazioni si verifica col suo pw_iter
+  const h2 = await hashPassword(PASSWORD, PEPPER, { iter: 1000 });
+  assert.equal(await verifyPassword(PASSWORD, { pw_hash: h2.hash, pw_salt: h2.salt, pw_iter: 1000, pw_ver: 1 }, PEPPER), true);
+  assert.equal(await verifyPassword(PASSWORD, { pw_hash: null, pw_salt: null, pw_iter: null, pw_ver: null }, PEPPER), false);
+  assert.equal(await verifyPassword(PASSWORD, null, PEPPER), false);
+  await assert.rejects(createAccount(createD1(), { id: "x", email: "a@b.c", password: "corta", pepper: PEPPER, now: 1 }), /10 caratteri/);
+  // micro-benchmark (solo informativo): una verifica completa
+  const t0 = performance.now();
+  for (let i = 0; i < 5; i++) await verifyPassword(PASSWORD, row, PEPPER);
+  console.log(`# verifyPassword (25k iterazioni + HMAC): ${((performance.now() - t0) / 5).toFixed(2)} ms`);
+});
+
+test("login: senza PASSWORD_PEPPER le rotte con password falliscono chiuse (500), nessun hash", async () => {
+  for (const PASSWORD_PEPPER of [undefined, "", "corto"]) {
+    const env = await newEnv({ PASSWORD_PEPPER, REGISTRATION_OPEN: "true" });
+    const r = await login(env);
+    assert.equal(r.status, 500);
+    assert.deepEqual(r.body, { error: "configurazione mancante" });
+    assert.equal((await call(env, "/v1/auth/register", { body: { email: "n@example.test", password: PASSWORD } })).status, 500);
+    assert.equal(await env.DB.prepare("SELECT COUNT(*) AS n FROM accounts").first("n"), 1);
+    assert.equal(await env.DB.prepare("SELECT COUNT(*) AS n FROM sessions").first("n"), 0);
+  }
+  const env = await newEnv();
+  const tok = (await login(env)).body.session;
+  delete env.PASSWORD_PEPPER;
+  assert.equal((await call(env, "/v1/auth/password", { token: tok, body: { current: PASSWORD, next: "nuova-password-ok" } })).status, 500);
+  assert.equal((await me(env, tok)).status, 200, "le sessioni non dipendono dal pepper");
+});
+
+test("login riuscito con iterazioni vecchie → hash rifatto con lo schema attuale", async () => {
+  const env = await newEnv();
+  const old = await hashPassword(PASSWORD, PEPPER, { iter: 1000 });
+  await env.DB.prepare("UPDATE accounts SET pw_hash = ?, pw_salt = ?, pw_iter = 1000").bind(old.hash, old.salt).run();
+  assert.equal((await login(env)).status, 200);
+  const row = await env.DB.prepare("SELECT pw_iter, pw_ver, pw_salt FROM accounts").first();
+  assert.deepEqual([row.pw_iter, row.pw_ver], [25000, 1]);
+  assert.notEqual(row.pw_salt, old.salt);
+  assert.equal((await login(env)).status, 200);
 });
 
 // --- login e sessioni -------------------------------------------------------------------------
@@ -113,31 +155,50 @@ test("password sbagliata ed email inesistente → stesso 401; input non valido �
   assert.deepEqual((await login(env, EMAIL, PASSWORD, "198.51.100.3")).body, { error: "credenziali non valide" });
 });
 
-test("limite tentativi: 5 errori in 15 minuti per email o per IP → il 6° è 429 (anche con la password giusta)", async () => {
+test("limite tentativi: 20 per email (da IP diversi) e 5 per IP in 15 minuti → poi 429 anche con la password giusta", async () => {
   const env = await newEnv();
   // per email, da IP diversi
-  for (let i = 0; i < 5; i++) assert.equal((await login(env, EMAIL, "sbagliata-" + i, `10.0.0.${i}`)).status, 401);
+  for (let i = 0; i < 20; i++) assert.equal((await login(env, EMAIL, "sbagliata-" + i, `10.0.0.${i}`)).status, 401);
   const blocked = await login(env, EMAIL, PASSWORD, "10.0.1.1");
   assert.equal(blocked.status, 429);
   assert.ok(Number(blocked.headers.get("Retry-After")) > 0);
+  // martellare oltre il limite non aggiunge righe (il blocco non si allunga)
+  assert.equal(await env.DB.prepare("SELECT COUNT(*) AS n FROM login_attempts WHERE key LIKE 'email:%'").first("n"), 20);
   // dopo 15 minuti si riprova: si invecchiano i tentativi
   await env.DB.prepare("UPDATE login_attempts SET at = at - ?").bind(15 * 60 * 1000 + 1).run();
   assert.equal((await login(env, EMAIL, PASSWORD, "10.0.1.1")).status, 200);
-  // il successo azzera il contatore dell'email: 4 + successo + 4 errori → ancora ammesso
+  // il successo azzera email E IP: 4 errori dallo stesso IP + successo + 4 errori → ancora ammesso
   const env2 = await newEnv();
-  for (let i = 0; i < 4; i++) await login(env2, EMAIL, "x".repeat(12), `10.1.0.${i}`);
-  assert.equal((await login(env2, EMAIL, PASSWORD, "10.1.1.1")).status, 200);
-  for (let i = 0; i < 4; i++) await login(env2, EMAIL, "x".repeat(12), `10.2.0.${i}`);
-  assert.equal((await login(env2, EMAIL, PASSWORD, "10.1.1.2")).status, 200);
+  for (let i = 0; i < 4; i++) assert.equal((await login(env2, EMAIL, "x".repeat(12), "10.1.0.1")).status, 401);
+  assert.equal((await login(env2, EMAIL, PASSWORD, "10.1.0.1")).status, 200);
+  assert.equal(await env2.DB.prepare("SELECT COUNT(*) AS n FROM login_attempts").first("n"), 0);
+  for (let i = 0; i < 4; i++) assert.equal((await login(env2, EMAIL, "x".repeat(12), "10.1.0.1")).status, 401);
+  assert.equal((await login(env2, EMAIL, PASSWORD, "10.1.0.1")).status, 200);
   // per IP, con email diverse
   const env3 = await newEnv();
   for (let i = 0; i < 5; i++) assert.equal((await login(env3, `u${i}@example.test`, PASSWORD, "192.0.2.9")).status, 401);
   assert.equal((await login(env3, EMAIL, PASSWORD, "192.0.2.9")).status, 429);
   assert.equal((await login(env3, EMAIL, PASSWORD, "192.0.2.10")).status, 200);
-  // le righe vecchie vengono potate a ogni errore
+  // le righe vecchie vengono potate a ogni tentativo
   await env3.DB.prepare("UPDATE login_attempts SET at = 1").run();
   await login(env3, "altro@example.test", PASSWORD, "192.0.2.11");
   assert.equal(await env3.DB.prepare("SELECT COUNT(*) AS n FROM login_attempts WHERE at = 1").first("n"), 0);
+});
+
+test("limite tentativi atomico: richieste concorrenti non lo aggirano", async () => {
+  // 20 login sbagliati in parallelo dallo stesso IP: al massimo 5 arrivano alla verifica (401), gli altri 429
+  const env = await newEnv();
+  const same = await Promise.all(Array.from({ length: 20 }, (_, i) => login(env, EMAIL, "sbagliata-" + i, "198.18.0.1")));
+  const n401 = same.filter((r) => r.status === 401).length;
+  assert.equal(n401, 5);
+  assert.equal(same.filter((r) => r.status === 429).length, 15);
+  // 30 in parallelo da IP diversi sulla stessa email: al massimo 20
+  const env2 = await newEnv();
+  const spread = await Promise.all(Array.from({ length: 30 }, (_, i) => login(env2, EMAIL, "sbagliata-" + i, `198.18.1.${i}`)));
+  assert.equal(spread.filter((r) => r.status === 401).length, 20);
+  assert.equal(spread.filter((r) => r.status === 429).length, 10);
+  // e la password giusta, in parallelo dopo, resta bloccata
+  assert.equal((await login(env2, EMAIL, PASSWORD, "198.18.2.1")).status, 429);
 });
 
 test("logout → la sessione dà 401; le altre sessioni restano valide", async () => {
@@ -337,7 +398,7 @@ test("Apple: /apple/link collega l'Apple ID all'account della sessione; già col
   assert.equal(await env.DB.prepare("SELECT apple_sub FROM accounts WHERE id = ?").bind(OWNER).first("apple_sub"), "sub-x");
   const viaApple = await call(env, "/v1/auth/apple", { body: { identityToken: await kit.sign({ nonce: nonceHash, sub: "sub-x" }), nonce: NONCE } });
   assert.equal(viaApple.body.ownerId, OWNER);
-  await createAccount(env.DB, { id: "altro-owner", email: "b@example.test", password: PASSWORD, now: Date.now() });
+  await createAccount(env.DB, { id: "altro-owner", email: "b@example.test", password: PASSWORD, pepper: PEPPER, now: Date.now() });
   const tb = (await login(env, "b@example.test")).body.session;
   const dup = await call(env, "/v1/auth/apple/link", { token: tb, body: { identityToken: await kit.sign({ nonce: nonceHash, sub: "sub-x" }), nonce: NONCE } });
   assert.equal(dup.status, 409);
@@ -365,13 +426,14 @@ test("migrazione 0003_accounts.sql: idempotente, non tocca records né meta", as
   assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM records").first("n"), 1);
   assert.equal(await db.prepare("SELECT value FROM meta WHERE key = 'epoch'").first("value"), 42);
   // l'account di Lorenzo nasce col suo ownerId di oggi: i record restano suoi
-  await createAccount(db, { id: OWNER, email: EMAIL, password: PASSWORD, now: Date.now() });
-  const env = { DB: db, REGISTRATION_OPEN: "false", APPLE_SIGNIN_ENABLED: "false" };
+  await createAccount(db, { id: OWNER, email: EMAIL, password: PASSWORD, pepper: PEPPER, now: Date.now() });
+  const env = { DB: db, PASSWORD_PEPPER: PEPPER, REGISTRATION_OPEN: "false", APPLE_SIGNIN_ENABLED: "false" };
+  assert.ok((await db.prepare("SELECT pw_ver FROM accounts").first("pw_ver")) === 1);
   const tok = (await login(env)).body.session;
   const s = await sync(env, tok);
   assert.deepEqual(s.body.changes.map((r) => r.id), ["lang"]);
   // email unica senza distinzione di maiuscole
-  await assert.rejects(createAccount(db, { id: "x2", email: "LORENZO@example.test", password: PASSWORD, now: 1 }));
+  await assert.rejects(createAccount(db, { id: "x2", email: "LORENZO@example.test", password: PASSWORD, pepper: PEPPER, now: 1 }));
 });
 
 // --- CLI admin/account.mjs --------------------------------------------------------------------------
@@ -391,7 +453,7 @@ function fakeStdin(lines) {
 async function runCli(args, lines = [], extra = {}) {
   const stdout = sink();
   const stderr = sink();
-  const code = await cli(args, { stdin: fakeStdin(lines), stdout, stderr, allowNonTty: true, ...extra });
+  const code = await cli(args, { stdin: fakeStdin(lines), stdout, stderr, allowNonTty: true, pepper: PEPPER, ...extra });
   return { code, out: stdout.text(), err: stderr.text() };
 }
 
@@ -427,14 +489,14 @@ test("CLI --local: create (due volte, ≥10), login funzionante, reset-password,
     const acc = sqlite.prepare("SELECT * FROM accounts").get();
     sqlite.close();
     assert.equal(acc.id, OWNER);
-    assert.equal(acc.pw_iter, 100000);
+    assert.deepEqual([acc.pw_iter, acc.pw_ver], [25000, 1]);
     for (const t of [r.out, r.err]) {
       assert.ok(!t.includes(PASSWORD) && !t.includes(acc.pw_hash) && !t.includes(acc.pw_salt), "password o hash stampati");
     }
     // stesso account due volte → errore
     assert.notEqual((await runCli(["create", ...base, "--owner", "altro-owner"], [PASSWORD, PASSWORD])).code, 0);
     // il DB creato dalla CLI funziona col Worker
-    const env = { DB: createD1(file), REGISTRATION_OPEN: "false" };
+    const env = { DB: createD1(file), PASSWORD_PEPPER: PEPPER, REGISTRATION_OPEN: "false" };
     const tok = (await login(env)).body.session;
     assert.equal((await me(env, tok)).body.ownerId, OWNER);
     r = await runCli(["sessions", ...base]);
@@ -459,26 +521,94 @@ test("CLI --local: create (due volte, ≥10), login funzionante, reset-password,
   }
 });
 
-test("CLI --remote: SQL con valori già hashati verso wrangler d1 execute --remote, mai stampato", async () => {
+test("CLI --remote: hash/salt solo via file (mai negli argomenti), SQL mai stampato", async () => {
   const seen = [];
-  const runRemote = async (sql) => { seen.push(sql); return { ok: true, results: [], changes: 1 }; };
+  const runRemote = async (sql, opts) => { seen.push({ sql, secret: !!(opts && opts.secret) }); return { ok: true, results: [], changes: 1 }; };
   const r = await runCli(["create", "--email", EMAIL, "--owner", OWNER, "--remote"], [PASSWORD, PASSWORD], { runRemote });
   assert.equal(r.code, 0, r.err);
-  const inserts = seen.filter((q) => /^INSERT INTO accounts/.test(q));
+  const inserts = seen.filter((q) => /^INSERT INTO accounts/.test(q.sql));
   assert.equal(inserts.length, 1);
-  assert.ok(seen.every((q) => !q.includes(PASSWORD)), "password in chiaro nell'SQL");
-  for (const t of [r.out, r.err]) assert.ok(!t.includes(inserts[0]) && !/INSERT|pw_hash/i.test(t), "SQL stampato");
+  assert.equal(inserts[0].secret, true, "l'INSERT con hash va via file");
+  for (const q of seen) {
+    assert.ok(!q.sql.includes(PASSWORD), "password in chiaro nell'SQL");
+    if (!q.secret) assert.ok(!/[0-9a-f]{32,}/i.test(q.sql), "segreti in un --command");
+  }
+  for (const t of [r.out, r.err]) assert.ok(!t.includes(inserts[0].sql) && !/INSERT|pw_hash/i.test(t), "SQL stampato");
   // lo stesso SQL applicato a un DB locale dà un account che accede
   const db = createD1();
   await db.exec(schema);
-  await db.exec(inserts[0]);
-  assert.equal((await login({ DB: db })).status, 200);
-  // il runner vero chiama wrangler con l'argomento --command (nessuna shell)
-  const { remoteArgs } = await import("../admin/account.mjs");
-  assert.deepEqual(remoteArgs("SELECT 1").slice(0, 6), ["wrangler", "d1", "execute", "fitness-hub-db", "--remote", "--json"]);
-  assert.deepEqual(remoteArgs("SELECT 1").slice(-2), ["--command", "SELECT 1"]);
+  await db.exec(inserts[0].sql);
+  assert.equal((await login({ DB: db, PASSWORD_PEPPER: PEPPER })).status, 200);
+  // reset-password: l'UPDATE con hash via file, la revoca delle sessioni senza segreti
+  seen.length = 0;
+  const runRemote2 = async (sql, opts) => {
+    seen.push({ sql, secret: !!(opts && opts.secret) });
+    return { ok: true, results: /^SELECT/.test(sql) ? [{ id: OWNER, email: EMAIL.toLowerCase(), disabled: 0 }] : [], changes: 2 };
+  };
+  const rr = await runCli(["reset-password", "--email", EMAIL, "--remote"], ["nuova-password-x", "nuova-password-x"], { runRemote: runRemote2 });
+  assert.equal(rr.code, 0, rr.err);
+  assert.deepEqual(seen.map((q) => [q.sql.split(" ").slice(0, 2).join(" "), q.secret]), [["SELECT id,", false], ["UPDATE accounts", true], ["UPDATE sessions", false]]);
+  // argomenti di wrangler: --file per i segreti, --command per il resto (nessuna shell)
+  assert.deepEqual(remoteArgs({ file: "/tmp/x/q.sql" }), ["wrangler", "d1", "execute", "fitness-hub-db", "--remote", "--json", "--yes", "--file", "/tmp/x/q.sql"]);
+  assert.deepEqual(remoteArgs({ command: "SELECT 1" }).slice(-2), ["--command", "SELECT 1"]);
+  // il file temporaneo: 600, in una cartella 700, cancellato dopo (anche in caso d'errore)
+  let seenPath;
+  await withSqlFile("SELECT 'x'", async (f) => {
+    seenPath = f;
+    assert.equal(statSync(f).mode & 0o777, 0o600);
+    assert.equal(statSync(f.slice(0, f.lastIndexOf("/"))).mode & 0o777, 0o700);
+    assert.equal(readFileSync(f, "utf8"), "SELECT 'x'");
+  });
+  assert.ok(!existsSync(seenPath) && !existsSync(seenPath.slice(0, seenPath.lastIndexOf("/"))));
+  await assert.rejects(withSqlFile("x", async (f) => { seenPath = f; throw new Error("boom"); }));
+  assert.ok(!existsSync(seenPath));
   // né --local né --remote → errore
   assert.notEqual((await runCli(["create", "--email", EMAIL, "--owner", OWNER], [PASSWORD, PASSWORD])).code, 0);
+});
+
+test("CLI init-pepper: crea il pepper 600 senza stamparlo; create rifiuta un pepper con permessi larghi", async () => {
+  const dir = mkdtempSync(`${tmpdir()}/lfh-pep-`);
+  const file = `${dir}/cfg/pepper`;
+  try {
+    let r = await runCli(["init-pepper", "--pepper-file", file], [], { pepper: undefined });
+    assert.equal(r.code, 0, r.err);
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+    const value = readFileSync(file, "utf8").trim();
+    assert.match(value, /^[0-9a-f]{64}$/);
+    assert.ok(!r.out.includes(value) && !r.err.includes(value), "pepper stampato");
+    assert.match(r.out, /npx wrangler secret put PASSWORD_PEPPER < /);
+    // di nuovo: non lo sovrascrive
+    r = await runCli(["init-pepper", "--pepper-file", file], [], { pepper: undefined });
+    assert.equal(r.code, 0, r.err);
+    assert.equal(readFileSync(file, "utf8").trim(), value);
+    // create col pepper del file: l'hash si verifica con quel pepper
+    const db = `${dir}/db.sqlite`;
+    r = await runCli(["create", "--email", EMAIL, "--owner", OWNER, "--local", db, "--pepper-file", file], [PASSWORD, PASSWORD], { pepper: undefined });
+    assert.equal(r.code, 0, r.err);
+    assert.equal((await login({ DB: createD1(db), PASSWORD_PEPPER: value })).status, 200);
+    assert.equal((await login({ DB: createD1(db), PASSWORD_PEPPER: PEPPER }, EMAIL, PASSWORD, "10.8.0.1")).status, 401);
+    // permessi larghi o file assente → rifiuto
+    chmodSync(file, 0o644);
+    r = await runCli(["reset-password", "--email", EMAIL, "--local", db, "--pepper-file", file], [PASSWORD, PASSWORD], { pepper: undefined });
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /600/);
+    r = await runCli(["reset-password", "--email", EMAIL, "--local", db, "--pepper-file", `${dir}/nessuno`], [PASSWORD, PASSWORD], { pepper: undefined });
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /init-pepper/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: il lettore della password rifiuta i caratteri di controllo invece di scartarli", () => {
+  assert.deepEqual(feedSecret("", "abc\r"), { buf: "abc", done: true });
+  assert.deepEqual(feedSecret("ab", "c\u007fd"), { buf: "abd" });
+  assert.match(feedSecret("ab", "\t").error, /Tab/);
+  assert.match(feedSecret("ab", "\u001b[A").error, /Esc|freccia/);
+  assert.match(feedSecret("", "x\u0001").error, /controllo/);
+  assert.equal(feedSecret("ab", "\u0003").error, "annullato");
+  assert.equal(feedSecret("", "\u0004").error, "annullato");
+  assert.deepEqual(feedSecret("pàss", "wörd"), { buf: "pàsswörd" });
 });
 
 // --- local-server --account e CLI login ---------------------------------------------------------

@@ -5,9 +5,10 @@
 CREATE TABLE IF NOT EXISTS accounts (
   id TEXT PRIMARY KEY,                      -- = ownerId dei record
   email TEXT UNIQUE COLLATE NOCASE,         -- minuscola; NULL per un account solo Apple
-  pw_hash TEXT,                             -- PBKDF2-SHA256, hex (32 byte); NULL = nessuna password
+  pw_hash TEXT,                             -- hex (32 byte); NULL = nessuna password. pw_ver 1: HMAC-SHA256(pepper, PBKDF2-SHA256)
   pw_salt TEXT,                             -- 16 byte casuali, hex
-  pw_iter INTEGER,                          -- iterazioni usate per QUESTA riga (oggi 100000)
+  pw_iter INTEGER,                          -- iterazioni PBKDF2 usate per QUESTA riga (oggi 25000)
+  pw_ver INTEGER,                           -- schema dell'hash (1 = PBKDF2 + pepper); un login riuscito rifà gli hash vecchi
   apple_sub TEXT UNIQUE,                    -- `sub` di Accedi con Apple, se collegato
   created_at INTEGER,
   disabled INTEGER DEFAULT 0
@@ -24,7 +25,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_account ON sessions (account_id);
 CREATE TABLE IF NOT EXISTS login_attempts (
   key TEXT,                                 -- `email:<minuscola>` oppure `ip:<CF-Connecting-IP>`
-  at INTEGER                                -- ms dell'errore; righe oltre 15 minuti potate a ogni errore
+  at INTEGER                                -- ms del tentativo (addebitato prima di verificare); potate oltre 15 minuti
 );
 CREATE INDEX IF NOT EXISTS idx_login_attempts_key_at ON login_attempts (key, at);
 CREATE INDEX IF NOT EXISTS idx_login_attempts_at ON login_attempts (at);
