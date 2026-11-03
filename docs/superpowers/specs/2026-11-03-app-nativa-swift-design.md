@@ -134,6 +134,11 @@ adatto a dati strutturati.
   esercizio), volume, misure corporee, registro sessioni, check-in.
 - **Impostazioni**: tema (sistema/chiaro/scuro), lingua IT/EN, alimenti esclusi,
   esporta/ripristina backup su file, diagnostica, stato sync.
+- **Feedback** (Lorenzo, 2026-11-03): "Segnala un problema o un miglioramento" dalle
+  Impostazioni; arriva per email a lorefara97@gmail.com (foglio Mail di iOS); avviso di
+  descrivere solo difetti/idee e di non inserire dati sensibili; info tecniche (versione,
+  iOS, modello) solo se l'utente le allega; mai credenziali o dati personali. In fase 5
+  invio dal server senza esporre l'indirizzo.
 
 ### 5.3 Esperienza nativa (v1)
 
