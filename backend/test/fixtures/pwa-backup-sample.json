@@ -1,0 +1,76 @@
+{
+  "_lfhBackup": 1,
+  "exportedAt": "2026-11-03T09:00:00.000Z",
+  "data": {
+    "checkIn_2026-10-27": { "sleep": 4, "energy": 5, "ailments": "" },
+    "hydration_2026-10-27": 6,
+    "notes_2026-10-27": "Buona sessione",
+    "checkIn_2026-10-29": { "sleep": 3, "energy": 3, "ailments": "schiena" },
+    "weightLog": [
+      { "date": "2026-10-27", "weight": 78.2 },
+      { "date": "2026-10-29", "weight": 77.9 }
+    ],
+    "weightGoal": 75,
+    "spesaFreq": 1,
+    "lang": "it",
+    "theme": "system",
+    "exNotes": { "band lateral raise": "Gomiti leggermente flessi", "plank": "  " },
+    "prMap": {
+      "Band chest press": { "peso": 25, "date": "2026-10-27" },
+      "Band squat": { "peso": 30, "date": "2026-10-27" }
+    },
+    "spesaChecked": { "proteine-0": true, "verdura-2": false, "extra-1761000000000": true },
+    "spesaExtra": [ { "id": 1761000000000, "name": "Caffè" } ],
+    "bodyMeasures": [
+      { "date": "2026-10-20", "vita": 84, "petto": 101.5 },
+      { "date": "2026-10-27", "vita": 83.5, "petto": 101.5, "braccio": 35 }
+    ],
+    "coachChat_2026-10-27": [
+      { "role": "assistant", "text": "Ciao Lorenzo!" },
+      { "role": "user", "text": "Cosa mangio dopo l'allenamento?" },
+      { "role": "assistant", "text": "Un pasto proteico." }
+    ],
+    "dietaCheck_2026-10-27": {
+      "08:00|Colazione": true,
+      "13:00|Pranzo": true,
+      "10:30|Spuntino": false,
+      "04:00|Pasto fantasma": true
+    },
+    "integ_2026-10-27": { "vitac": true, "omega1": true, "ps": false, "inesistente": true },
+    "schedaProg_2026-10-27": {
+      "completion": {
+        "Giorno 1#0": [true, true, false],
+        "Giorno 1#1": [true, false, false],
+        "Giorno 1#2": [true],
+        "Giorno 2#9": [true]
+      },
+      "substitutions": { "Giorno 1#1": "Chest press con manubri" },
+      "pesos": {
+        "Giorno 1#0": ["", "", ""],
+        "Giorno 1#1": ["20", "", ""],
+        "Giorno 1#2": ["15"],
+        "Giorno 2#9": ["10"]
+      },
+      "names": {
+        "Giorno 1#0": "push-up (bodyweight)",
+        "Giorno 1#1": "band chest press",
+        "Giorno 1#2": "esercizio di una vecchia scheda"
+      },
+      "sig": "Giorno 1:push-up (bodyweight)/3"
+    },
+    "gym_2026-10-27": { "sets": [] },
+    "gymSaved_2026-10-27": 3,
+    "muscleSets_2026-10-27": { "Petto": 6 },
+    "groqApiKey": "gsk_FAKE",
+    "errorLog": [ { "msg": "x" } ],
+    "sheetsQueue": [],
+    "settingsPending": {},
+    "settingsEdits": {},
+    "groqModel": "openai/gpt-oss-120b",
+    "schedaData": "# PUSH - Giorno 1 ...",
+    "schedaData_src": "abc",
+    "schedaData_at": "2026-10-01",
+    "onboardingDone": true,
+    "bodyWeight": 78
+  }
+}

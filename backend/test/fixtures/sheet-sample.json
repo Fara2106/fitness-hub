@@ -1,0 +1,37 @@
+{
+  "checkIn": [
+    { "date": "2026-10-26", "sleep": 4, "energy": 3, "ailments": "" },
+    { "date": "2026-10-28", "sleep": 3, "energy": 3, "ailments": "spalla sx" },
+    { "date": "2026-10-28", "sleep": 5, "energy": 4, "ailments": "" },
+    { "date": "2026-10-29", "sleep": 0, "energy": 0, "ailments": "" }
+  ],
+  "pesoCorporeo": [
+    { "date": "2026-10-26", "weight": 78.4 },
+    { "date": "2026-10-28", "weight": 78 },
+    { "date": "2026-10-30", "weight": 77.6 }
+  ],
+  "pesi": {
+    "band chest press": [
+      { "date": "2026-10-26", "setN": 1, "peso": 20, "rip": 12, "rpe": 0, "sessione": "PUSH", "settimana": 1 },
+      { "date": "2026-10-26", "setN": 2, "peso": 22.5, "rip": 10, "rpe": 0, "sessione": "PUSH", "settimana": 1 }
+    ],
+    "push-up (bodyweight)": [
+      { "date": "2026-10-26", "setN": 1, "peso": 0, "rip": 10, "rpe": 0, "sessione": "PUSH", "settimana": 1 }
+    ],
+    "dumbbell curl": [
+      { "date": "2026-10-28", "setN": 1, "peso": 8, "rip": 12, "rpe": 0, "sessione": "PULL", "settimana": 1 }
+    ]
+  },
+  "settings": {
+    "weightGoal": "75",
+    "spesaFreq": 2,
+    "spesaChecked2": "{\"proteine-0\":true,\"carbo-1\":false,\"extra-1761000000000\":true}",
+    "spesaChecked": "{\"legacy-0\":true}",
+    "spesaExtra": "[{\"id\":1761000000000,\"name\":\"Caffè\"}]",
+    "exNotes": "{\"band chest press\":\"Ancorare la banda in alto\",\"band squat\":\"\"}",
+    "bodyWeight": "77.2",
+    "onboardingDone": "true",
+    "schedaData": "# PUSH - Giorno 1 ...",
+    "_test_sync": "x"
+  }
+}
