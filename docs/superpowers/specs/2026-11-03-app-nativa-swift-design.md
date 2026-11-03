@@ -189,7 +189,11 @@ record a sé → le modifiche su device diversi si sommano naturalmente.
 - **Conflitti**: last-writer-wins **per record** (non per oggetto intero);
   eliminazioni come tombstone. Grazie alla granularità (sezione 6) i casi reali
   (spunte diverse su iPhone e iPad) si sommano.
-- **Accesso**: utente unico. Token personale lungo, generato una volta,
+- **Accesso (aggiornato 2026-11-03, decisione di Lorenzo):** account con **email e
+  password** già in fase 3, su app e web, con sessioni lato server; **Accedi con Apple**
+  predisposto e acceso quando arriva il programma a pagamento; registrazione chiusa fino
+  alla fase 5. Il token qui sotto resta solo per il passaggio e poi viene rimosso.
+- **Accesso (originale)**: utente unico. Token personale lungo, generato una volta,
   conservato nel Keychain (app) / storage locale (web); il Worker lo verifica.
   Nessun segreto nel repo. CORS: origine della PWA + richieste dalle app native.
 - **Coach**: nessun ponte server — l'IA gira sul dispositivo (sezione 5.2). Il
