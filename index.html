@@ -7,12 +7,13 @@
      'unsafe-inline' (bootstrap in boot-theme.js/boot.js), e dal 2026-07-23
      NIENTE CDN — React/ReactDOM/GSAP/prop-types/Recharts sono vendorizzati in
      vendor/ (byte verificati contro gli SRI storici al momento del vendoring).
-     connect-src BLINDATO ai soli host legittimi (proxy Sheets, worker push,
-     Groq) → anche se venisse iniettato codice, non potrebbe esfiltrare dati.
+     connect-src BLINDATO ai soli host legittimi (API di sync fitness-hub-api,
+     proxy legacy solo per /groq, worker push, Groq) → anche se venisse iniettato
+     codice, non potrebbe esfiltrare dati.
      style-src tiene 'unsafe-inline' (stili inline React). object-src none,
      base-uri self bloccano vettori classici. NB: frame-ancestors/X-Frame non
      sono impostabili via <meta> su GitHub Pages. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://fitness-hub-proxy.lorefara97.workers.dev https://fitness-hub-push.lorefara97.workers.dev https://api.groq.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://fitness-hub-api.lorefara97.workers.dev https://fitness-hub-proxy.lorefara97.workers.dev https://fitness-hub-push.lorefara97.workers.dev https://api.groq.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'" />
 <!-- Zero leakage del referrer verso host esterni (le fetch CORS mandano
      comunque l'header Origin, che il Worker usa per l'allowlist). -->
 <meta name="referrer" content="no-referrer" />
@@ -34,9 +35,9 @@
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png" />
 <link rel="manifest" href="manifest.json" />
-<!-- Preconnect al proxy Sheets (primo sync) → prima richiesta più rapida a
+<!-- Preconnect all'API di sync (primo sync) → prima richiesta più rapida a
      freddo. Le librerie non arrivano più dalle CDN (vendor/, stesso origin). -->
-<link rel="preconnect" href="https://fitness-hub-proxy.lorefara97.workers.dev" crossorigin />
+<link rel="preconnect" href="https://fitness-hub-api.lorefara97.workers.dev" crossorigin />
 <link rel="stylesheet" href="styles.css?v=20261103112830" />
 <style>
   /* Banda nera in basso su iOS standalone — CAUSA RADICE MISURATA on-device (PWA):

@@ -1671,8 +1671,40 @@ window.buildDefaultNotifConfig = function () {
     });
     return rows.join("\n");
   }
-  function planToText(workoutData, dietData) {
+  function planToText(workoutData, dietData, opts) {
+    if (opts && opts.full) return [workoutFull(workoutData), dietFull(dietData)].filter(Boolean).join("\n\n");
     return [workoutText(workoutData), dietText(dietData)].filter(Boolean).map(clip).join("\n\n");
+  }
+  function workoutFull(data) {
+    if (!data || !Array.isArray(data.days)) return "";
+    const rows = [`SCHEDA ALLENAMENTO${data.name ? " – " + data.name : ""}`];
+    data.days.forEach((d, i) => {
+      const focus = (d.focus || []).length ? ` (${d.focus.join(", ")})` : "";
+      rows.push("", `Giorno ${i + 1} ${d.name}${focus}`);
+      (d.exercises || []).forEach(e => {
+        let line = `- ${e.name} ${e.sets}x${e.reps} rec ${e.restSec}s`;
+        if (e.notes) line += ` · ${e.notes}`;
+        if ((e.alternatives || []).length) line += ` · alternative: ${e.alternatives.join(" / ")}`;
+        rows.push(line);
+      });
+    });
+    return rows.join("\n");
+  }
+  function dietFull(data) {
+    if (!data || !Array.isArray(data.variants)) return "";
+    const rows = [`PIANO ALIMENTARE${data.name ? " – " + data.name : ""}`];
+    data.variants.forEach(v => {
+      rows.push("", `[${v.name}]`);
+      (v.meals || []).forEach(m => {
+        rows.push(`${m.name} ${m.time}`);
+        (m.options || []).forEach(o => rows.push(`- ${o.text}`));
+        (m.lines || []).forEach(l => rows.push(l.label == null ? `- ${(l.choices || []).join(" | ")}` : `- ${l.label}: ${(l.choices || []).join(" | ")}`));
+      });
+      if ((v.supplements || []).length) {
+        rows.push("Integratori: " + v.supplements.map(s => s.moment ? `${s.moment}: ${s.name}` : s.name).join(", "));
+      }
+    });
+    return rows.join("\n");
   }
   function activePlan(records, collection) {
     let best = null;
@@ -3386,6 +3418,20 @@ window.buildDefaultNotifConfig = function () {
     schedulePush();
     return out;
   }
+  function linkTokenFromHash(hash) {
+    const m = /^#sync=([0-9a-fA-F]{64})$/.exec(String(hash == null ? "" : hash));
+    return m ? m[1] : null;
+  }
+  function consumeLinkHash(loc, hist) {
+    const l = loc || (typeof location !== "undefined" ? location : null);
+    const h = hist || (typeof history !== "undefined" ? history : null);
+    const token = linkTokenFromHash(l && l.hash);
+    if (!token) return null;
+    try {
+      if (h && typeof h.replaceState === "function") h.replaceState(null, "", (l.pathname || "") + (l.search || ""));
+    } catch (_) {}
+    return setToken(token);
+  }
   function getRecord(collection, id) {
     return S ? effective(collection, String(id)) : null;
   }
@@ -3443,6 +3489,8 @@ window.buildDefaultNotifConfig = function () {
     init,
     setToken,
     hasToken,
+    linkTokenFromHash,
+    consumeLinkHash,
     syncNow,
     putRecords,
     getRecord,
@@ -4906,20 +4954,77 @@ const I18N_DICT = {
   "Nessun file importato": {
     en: "No file imported"
   },
-  "Importa scheda (.txt)": {
-    en: "Import workout plan (.txt)"
+  "Collega questo device": {
+    en: "Link this device"
   },
-  "Importa dieta (.txt)": {
-    en: "Import diet (.txt)"
+  "Collegato": {
+    en: "Linked"
+  },
+  "Scollega": {
+    en: "Unlink"
+  },
+  "Collega": {
+    en: "Link"
+  },
+  "Token di sincronizzazione": {
+    en: "Sync token"
+  },
+  "Incolla il token o il link": {
+    en: "Paste the token or link"
+  },
+  "Token non valido: servono 64 caratteri esadecimali": {
+    en: "Invalid token: 64 hexadecimal characters needed"
+  },
+  "Token rifiutato dal server": {
+    en: "Token rejected by the server"
+  },
+  "Collegato e sincronizzato": {
+    en: "Linked and synced"
+  },
+  "Token salvato, ma il server non è raggiungibile: riprova più tardi": {
+    en: "Token saved, but the server is unreachable: try again later"
+  },
+  "In alternativa apri una volta il link con #sync=<token>: il token viene salvato e tolto dall'indirizzo.": {
+    en: "Or open the link with #sync=<token> once: the token is saved and removed from the address."
+  },
+  "modifiche in coda": {
+    en: "changes queued"
+  },
+  "Sola lettura · l'import .txt è temporaneo": {
+    en: "Read-only · .txt import is temporary"
+  },
+  "Scheda attiva": {
+    en: "Active workout plan"
+  },
+  "Dieta attiva": {
+    en: "Active diet"
+  },
+  "Piani archiviati": {
+    en: "Archived plans"
+  },
+  "Nessun piano: si usa il testo predefinito dell'app": {
+    en: "No plan: the app's built-in text is used"
+  },
+  "Importa scheda .txt (temporaneo)": {
+    en: "Import workout .txt (temporary)"
+  },
+  "Importa dieta .txt (temporaneo)": {
+    en: "Import diet .txt (temporary)"
+  },
+  "Crea un nuovo piano attivo e archivia quello precedente": {
+    en: "Creates a new active plan and archives the previous one"
+  },
+  "Il piano attivo in testo leggibile": {
+    en: "The active plan as readable text"
+  },
+  "Tutto lo storage locale, tranne token e chiave Groq": {
+    en: "All local storage, except token and Groq key"
   },
   "Esporta scheda (.txt)": {
     en: "Export workout plan (.txt)"
   },
   "Esporta dieta (.txt)": {
     en: "Export diet (.txt)"
-  },
-  "Il testo attuale — modificalo e reimportalo qui sopra": {
-    en: "The current text — edit it and re-import it above"
   },
   "Esportato": {
     en: "Exported"
@@ -5134,9 +5239,6 @@ const I18N_DICT = {
   "Esporta backup (.json)": {
     en: "Export backup (.json)"
   },
-  "Tutto lo storage locale, chiave Groq inclusa": {
-    en: "All local storage, Groq key included"
-  },
   "Ripristina backup": {
     en: "Restore backup"
   },
@@ -5196,9 +5298,6 @@ const I18N_DICT = {
   },
   "File di testo": {
     en: "Text files"
-  },
-  "Importa scheda.txt e dieta.txt": {
-    en: "Import scheda.txt and dieta.txt"
   },
   "Cibi esclusi": {
     en: "Excluded foods"
@@ -5334,12 +5433,6 @@ const I18N_DICT = {
   },
   "Tutti i dati verranno eliminati: check-in, storico pesi, attività, impostazioni e file importati. Questa operazione non è reversibile.": {
     en: "All data will be deleted: check-ins, weight history, activities, settings and imported files. This cannot be undone."
-  },
-  "Collega il tuo Sheets": {
-    en: "Connect your Sheets"
-  },
-  "L'URL del foglio Google con scheda e dieta.": {
-    en: "Google Sheet URL with workout & diet."
   },
   "Per attivare il coach AI in chat.": {
     en: "To enable the AI coach in chat."
@@ -16127,7 +16220,7 @@ const _PLAN_IMPORT = {
     fromText: "workoutPlanFromText",
     legacy: "toLegacyScheda",
     local: "plan_workout",
-    textKey: "schedaData"
+    active: "workout"
   },
   dieta: {
     collection: "dietPlan",
@@ -16135,7 +16228,7 @@ const _PLAN_IMPORT = {
     fromText: "dietPlanFromText",
     legacy: "toLegacyDieta",
     local: "plan_diet",
-    textKey: "dietaData"
+    active: "diet"
   }
 };
 function _importPlanChanges(kind, text, fileName, now) {
@@ -16144,14 +16237,21 @@ function _importPlanChanges(kind, text, fileName, now) {
   const d = now || new Date();
   const p2 = n => String(n).padStart(2, "0");
   const today = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
-  const id = `${cfg.prefix}-${today.replace(/-/g, "")}-${p2(d.getHours())}${p2(d.getMinutes())}`;
+  const baseId = `${cfg.prefix}-${today.replace(/-/g, "")}-${p2(d.getHours())}${p2(d.getMinutes())}`;
+  const prev = window.storage ? window.storage.get(cfg.local, null) : null;
+  const taken = new Set();
+  if (prev && prev.id) taken.add(prev.id);
+  try {
+    (window.SyncV2 ? window.SyncV2.listRecords(cfg.collection) : []).forEach(r => taken.add(r.id));
+  } catch (_) {}
+  let id = baseId;
+  for (let n = 2; taken.has(id); n++) id = `${baseId}-${n}`;
   const name = String(fileName || "").replace(/\.txt$/i, "") || kind;
   const plan = PC[cfg.fromText](text, {
     id,
     name,
     validFrom: today
   });
-  const prev = window.storage ? window.storage.get(cfg.local, null) : null;
   if (prev && prev.data && JSON.stringify(PC[cfg.legacy](prev.data)) === JSON.stringify(PC[cfg.legacy](plan.data))) {
     return {
       identical: true,
@@ -16178,6 +16278,30 @@ function _importPlanChanges(kind, text, fileName, now) {
     changes
   };
 }
+const _DEVICE_LOCAL_KEYS = ["syncToken", "v2deviceId", "v2cursor", "v2epoch", "v2outbox", "groqApiKey", "errorLog"];
+function _isDeviceLocalKey(k) {
+  return _DEVICE_LOCAL_KEYS.indexOf(k) !== -1 || k.startsWith("v2grp:") || k.startsWith("r:");
+}
+function _backupData(st) {
+  const data = {};
+  st.keys().filter(k => !_isDeviceLocalKey(k)).sort().forEach(k => {
+    data[k] = st.get(k, null);
+  });
+  return data;
+}
+function _restoreBackupData(st, data) {
+  const keys = Object.keys(data || {}).filter(k => !_isDeviceLocalKey(k));
+  keys.forEach(k => st.set(k, data[k]));
+  return keys.length;
+}
+window.ImpostazioniLogic = {
+  importPlanChanges: _importPlanChanges,
+  isDeviceLocalKey: _isDeviceLocalKey,
+  backupData: _backupData,
+  restoreBackupData: _restoreBackupData,
+  validateSchedaText: _validateSchedaText,
+  validateDietaText: _validateDietaText
+};
 const FileImporter = ({
   label,
   icon,
@@ -16187,11 +16311,8 @@ const FileImporter = ({
 }) => {
   const t = useT();
   const cfg = _PLAN_IMPORT[kind];
-  const readPlan = () => window.storage ? window.storage.get(cfg.local, null) : null;
-  const [plan, setPlan] = React.useState(readPlan);
   const [status, setStatus] = React.useState(null);
   const inputRef = React.useRef(null);
-  useSyncedData([cfg.local], () => setPlan(readPlan()));
   const handleFile = e => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -16240,8 +16361,6 @@ const FileImporter = ({
         });
         return;
       }
-      if (window.storage) window.storage.set(cfg.textKey, text);
-      setPlan(readPlan());
       const okMsg = `${t("Importato")}${v.detail ? " · " + v.detail : ""}`;
       if (!window.SyncV2.hasToken()) {
         setStatus({
@@ -16268,8 +16387,6 @@ const FileImporter = ({
     };
     reader.readAsText(file, "UTF-8");
   };
-  const loaded = !!(plan && plan.data);
-  const subText = status ? status.msg : loaded ? `${plan.data.name || t("Caricato")}${plan.data.validFrom ? " · " + t("dal") + " " + _fmtImportDate(plan.data.validFrom) : ""}` : t("Nessun file importato");
   return React.createElement("div", {
     className: "row"
   }, React.createElement("div", {
@@ -16291,24 +16408,16 @@ const FileImporter = ({
     style: status ? {
       color: status.type === "err" ? "var(--danger)" : status.type === "warn" ? "var(--warning)" : "var(--success)"
     } : undefined
-  }, subText)), React.createElement("div", {
+  }, status ? status.msg : t("Crea un nuovo piano attivo e archivia quello precedente"))), React.createElement("div", {
     className: "row-trailing"
-  }, loaded && !status && React.createElement("span", {
-    className: "pill",
-    style: {
-      fontSize: 10,
-      background: "rgba(48,209,88,0.18)",
-      color: "var(--success)",
-      marginRight: 6
-    }
-  }, "✓"), React.createElement("button", {
+  }, React.createElement("button", {
     className: "btn",
     style: {
       padding: "6px 12px",
       fontSize: 12
     },
     onClick: () => inputRef.current?.click()
-  }, loaded ? t("Aggiorna") : t("Importa")), React.createElement("input", {
+  }, t("Importa")), React.createElement("input", {
     ref: inputRef,
     type: "file",
     accept: accept || undefined,
@@ -16321,18 +16430,92 @@ const FileImporter = ({
     }
   })));
 };
+const PlanKindRows = ({
+  kind,
+  label,
+  icon
+}) => {
+  const t = useT();
+  const cfg = _PLAN_IMPORT[kind];
+  const read = () => {
+    const act = window.SyncV2 ? window.SyncV2.activePlans()[cfg.active] : null;
+    let arch = [];
+    try {
+      arch = (window.SyncV2 ? window.SyncV2.listRecords(cfg.collection) : []).filter(r => !r.deleted && r.data && r.data.status === "archived").sort((x, y) => String(y.data.validFrom || "").localeCompare(String(x.data.validFrom || "")) || String(y.id).localeCompare(String(x.id)));
+    } catch (_) {}
+    return {
+      act,
+      arch
+    };
+  };
+  const [st, setSt] = React.useState(read);
+  const [open, setOpen] = React.useState(false);
+  useSyncedData([cfg.local], () => setSt(read()));
+  const act = st.act && st.act.data;
+  const count = act ? kind === "scheda" ? `${(act.days || []).length} ${t("giorni")}` : `${(act.variants || []).length} ${t("sezioni")}` : "";
+  const period = d => `${d.validFrom ? _fmtImportDate(d.validFrom) : "?"} – ${d.validTo ? _fmtImportDate(d.validTo) : "?"}`;
+  return React.createElement(React.Fragment, null, React.createElement(IRow, {
+    icon: icon,
+    iconBg: "#30D158",
+    title: `${label}${act && act.name ? ": " + act.name : ""}`,
+    sub: act ? `${act.validFrom ? t("dal") + " " + _fmtImportDate(act.validFrom) : ""}${count ? " · " + count : ""}` : t("Nessun piano: si usa il testo predefinito dell'app")
+  }), st.arch.length > 0 && React.createElement(IRow, {
+    icon: "clock",
+    iconBg: "#8E8E93",
+    title: `${t("Piani archiviati")} (${st.arch.length})`,
+    onClick: () => setOpen(o => !o),
+    trailing: React.createElement("span", {
+      style: {
+        transform: open ? "rotate(90deg)" : "none",
+        transition: "transform 0.2s",
+        display: "flex"
+      }
+    }, React.createElement(Icon, {
+      name: "chevron",
+      size: 13,
+      color: "var(--text-3)"
+    }))
+  }), open && st.arch.map(r => React.createElement("div", {
+    className: "row",
+    key: r.id
+  }, React.createElement("div", {
+    className: "row-main",
+    style: {
+      paddingLeft: 40
+    }
+  }, React.createElement("div", {
+    className: "row-title",
+    style: {
+      fontSize: 14
+    }
+  }, r.data.name || r.id), React.createElement("div", {
+    className: "row-sub"
+  }, period(r.data))))));
+};
 const PlanExportRow = ({
   label,
   icon,
-  storageKey,
+  kind,
   fallbackKey,
   fileName
 }) => {
   const t = useT();
+  const cfg = _PLAN_IMPORT[kind];
   const [status, setStatus] = React.useState(null);
+  const planText = () => {
+    const act = window.SyncV2 ? window.SyncV2.activePlans()[cfg.active] : null;
+    if (act && act.data && window.PlanConv) {
+      return kind === "scheda" ? window.PlanConv.planToText(act.data, null, {
+        full: true
+      }) : window.PlanConv.planToText(null, act.data, {
+        full: true
+      });
+    }
+    return window[fallbackKey] || "";
+  };
   const doExport = async () => {
     try {
-      const text = window.storage && window.storage.get(storageKey, null) || window[fallbackKey] || "";
+      const text = planText();
       if (!text) {
         setStatus({
           type: "err",
@@ -16379,7 +16562,7 @@ const PlanExportRow = ({
     icon: icon,
     iconBg: "#5AC8FA",
     title: label,
-    sub: status ? status.msg : t("Il testo attuale — modificalo e reimportalo qui sopra"),
+    sub: status ? status.msg : t("Il piano attivo in testo leggibile"),
     onClick: doExport,
     trailing: React.createElement(Icon, {
       name: "chevron",
@@ -16438,6 +16621,151 @@ const SyncNowRow = () => {
     color: "var(--accent)"
   }));
 };
+const _TOKEN_RE = /^[0-9a-fA-F]{64}$/;
+function _tokenFromInput(raw) {
+  const v = String(raw || "").trim();
+  const i = v.indexOf("#sync=");
+  const cand = i >= 0 ? v.slice(i + 6) : v;
+  return _TOKEN_RE.test(cand) ? cand : null;
+}
+const SyncLinkRow = () => {
+  const t = useT();
+  const read = () => {
+    const tok = window.storage ? window.storage.get("syncToken", null) : null;
+    return typeof tok === "string" && tok ? tok.slice(-4) : null;
+  };
+  const [tail, setTail] = React.useState(read);
+  const [val, setVal] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [res, setRes] = React.useState(null);
+  React.useEffect(() => {
+    const on = () => setTail(read());
+    window.addEventListener("lfh-sync", on);
+    return () => window.removeEventListener("lfh-sync", on);
+  }, []);
+  const connect = async () => {
+    if (busy) return;
+    const token = _tokenFromInput(val);
+    if (!token) {
+      setRes({
+        type: "err",
+        msg: t("Token non valido: servono 64 caratteri esadecimali")
+      });
+      return;
+    }
+    if (!window.SyncV2) {
+      setRes({
+        type: "err",
+        msg: t("Errore")
+      });
+      return;
+    }
+    setBusy(true);
+    setRes(null);
+    try {
+      const r = await window.SyncV2.setToken(token);
+      setTail(read());
+      if (r && r.ok) {
+        setVal("");
+        setRes({
+          type: "ok",
+          msg: t("Collegato e sincronizzato")
+        });
+      } else if (r && r.error === "unauthorized") setRes({
+        type: "err",
+        msg: t("Token rifiutato dal server")
+      });else {
+        setVal("");
+        setRes({
+          type: "warn",
+          msg: t("Token salvato, ma il server non è raggiungibile: riprova più tardi")
+        });
+      }
+    } catch (_) {
+      setTail(read());
+      setRes({
+        type: "err",
+        msg: t("Errore")
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const unlink = async () => {
+    if (busy || !window.SyncV2) return;
+    try {
+      await window.SyncV2.setToken("");
+    } catch (_) {}
+    setTail(read());
+    setRes(null);
+  };
+  const color = res ? res.type === "err" ? "var(--danger)" : res.type === "warn" ? "var(--warning)" : "var(--success)" : "var(--text-3)";
+  return React.createElement("div", null, React.createElement(IRow, {
+    icon: "key",
+    iconBg: "#5E5CE6",
+    title: t("Collega questo device"),
+    sub: tail ? `${t("Collegato")} · …${tail}` : t("Non collegato")
+  }, tail && React.createElement("button", {
+    className: "btn",
+    style: {
+      padding: "6px 12px",
+      fontSize: 12
+    },
+    onClick: unlink
+  }, t("Scollega"))), React.createElement("div", {
+    style: {
+      padding: "10px 16px 14px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 8,
+      borderTop: "1px solid var(--border)"
+    }
+  }, React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8
+    }
+  }, React.createElement("input", {
+    type: "text",
+    autoComplete: "off",
+    autoCorrect: "off",
+    autoCapitalize: "off",
+    spellCheck: false,
+    value: val,
+    onChange: e => setVal(e.target.value),
+    placeholder: t("Incolla il token o il link"),
+    "aria-label": t("Token di sincronizzazione"),
+    className: "input input-mono",
+    style: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: 13,
+      padding: "10px 12px",
+      WebkitTextSecurity: "disc"
+    }
+  }), React.createElement("button", {
+    className: "btn",
+    style: {
+      padding: "8px 14px",
+      fontSize: 13
+    },
+    onClick: connect,
+    disabled: busy || !val.trim()
+  }, busy ? React.createElement("span", {
+    className: "spinner",
+    style: {
+      width: 14,
+      height: 14
+    }
+  }) : t("Collega"))), React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color,
+      lineHeight: 1.4
+    }
+  }, res ? res.msg : t("In alternativa apri una volta il link con #sync=<token>: il token viene salvato e tolto dall'indirizzo."))));
+};
 const SyncStatusRow = () => {
   const t = useT();
   const [s, setS] = React.useState(() => window._syncState || {
@@ -16456,11 +16784,16 @@ const SyncStatusRow = () => {
     hour: "2-digit",
     minute: "2-digit"
   }) : null;
+  let pending = 0;
+  try {
+    pending = window.SyncV2 ? window.SyncV2.status().pending : 0;
+  } catch (_) {}
+  const base = time ? `${t("Ultimo sync")}: ${time} · ${t("Cloud: Cloudflare")}` : s.status === "unlinked" ? t("Device non collegato: dati solo in locale") : t("In attesa del primo sync");
   return React.createElement(IRow, {
     icon: "cloud",
     iconBg: "#30D158",
     title: t("Stato sincronizzazione"),
-    sub: time ? `${t("Ultimo sync")}: ${time} · ${t("Cloud: Cloudflare")}` : s.status === "unlinked" ? t("Device non collegato: dati solo in locale") : t("In attesa del primo sync")
+    sub: pending > 0 ? `${base} · ${pending} ${t("modifiche in coda")}` : base
   }, window.SyncBadge ? React.createElement(SyncBadge, null) : null);
 };
 const BackupRows = () => {
@@ -16471,10 +16804,7 @@ const BackupRows = () => {
     try {
       const st = window.storage;
       if (!st || !st.keys) throw new Error("storage non pronto");
-      const data = {};
-      st.keys().sort().forEach(k => {
-        data[k] = st.get(k, null);
-      });
+      const data = _backupData(st);
       const json = JSON.stringify({
         _lfhBackup: 1,
         exportedAt: new Date().toISOString(),
@@ -16535,12 +16865,11 @@ const BackupRows = () => {
         });
         return;
       }
-      const keys = Object.keys(p.data);
       if (!window.confirm(t("Ripristinare il backup? I dati locali attuali verranno sovrascritti."))) return;
-      keys.forEach(k => window.storage.set(k, p.data[k]));
+      const n = _restoreBackupData(window.storage, p.data);
       setStatus({
         type: "ok",
-        msg: `${t("Backup ripristinato")} · ${keys.length} ${t("chiavi")}`
+        msg: `${t("Backup ripristinato")} · ${n} ${t("chiavi")}`
       });
       setTimeout(() => window.location.reload(), 900);
     };
@@ -16550,7 +16879,7 @@ const BackupRows = () => {
     icon: "cloud",
     iconBg: "#30D158",
     title: t("Esporta backup (.json)"),
-    sub: status && status.type === "ok" ? status.msg : t("Tutto lo storage locale, chiave Groq inclusa"),
+    sub: status && status.type === "ok" ? status.msg : t("Tutto lo storage locale, tranne token e chiave Groq"),
     onClick: doExport,
     trailing: React.createElement(Icon, {
       name: "chevron",
@@ -17187,28 +17516,38 @@ const Impostazioni = ({
     placeholder: "gsk_…",
     testFn: () => window.groqAPI.testConnection()
   })), React.createElement(ISection, {
+    title: t("Sincronizzazione")
+  }, React.createElement(SyncStatusRow, null), React.createElement(SyncLinkRow, null), React.createElement(SyncNowRow, null)), React.createElement(ISection, {
     title: t("Piani"),
-    subtitle: t("Importa scheda.txt e dieta.txt")
-  }, React.createElement(FileImporter, {
-    label: t("Importa scheda (.txt)"),
+    subtitle: t("Sola lettura · l'import .txt è temporaneo")
+  }, React.createElement(PlanKindRows, {
+    kind: "scheda",
+    label: t("Scheda attiva"),
+    icon: "dumbbell"
+  }), React.createElement(PlanKindRows, {
+    kind: "dieta",
+    label: t("Dieta attiva"),
+    icon: "fork"
+  }), React.createElement(FileImporter, {
+    label: t("Importa scheda .txt (temporaneo)"),
     icon: "dumbbell",
     kind: "scheda",
     validate: _validateSchedaText
   }), React.createElement(FileImporter, {
-    label: t("Importa dieta (.txt)"),
+    label: t("Importa dieta .txt (temporaneo)"),
     icon: "fork",
     kind: "dieta",
     validate: _validateDietaText
   }), React.createElement(PlanExportRow, {
     label: t("Esporta scheda (.txt)"),
     icon: "send",
-    storageKey: "schedaData",
+    kind: "scheda",
     fallbackKey: "SCHEDA_TXT_FALLBACK",
     fileName: "scheda.txt"
   }), React.createElement(PlanExportRow, {
     label: t("Esporta dieta (.txt)"),
     icon: "send",
-    storageKey: "dietaData",
+    kind: "dieta",
     fallbackKey: "DIETA_TXT_FALLBACK",
     fileName: "dieta.txt"
   }), React.createElement(IRow, {
@@ -17224,8 +17563,6 @@ const Impostazioni = ({
       color: "var(--danger)"
     }
   }, "🚫 ", t("Sempre")))), React.createElement(ISection, {
-    title: t("Sincronizzazione")
-  }, React.createElement(SyncStatusRow, null), React.createElement(SyncNowRow, null)), React.createElement(ISection, {
     title: t("Backup"),
     subtitle: t("I dati per-giorno vivono solo su questo device")
   }, React.createElement(BackupRows, null)), React.createElement(ISection, {
@@ -17879,6 +18216,10 @@ if (window.storage) {
     } catch (e) {
       if (window._logError) window._logError(e);else console.warn("[sync] init:", e);
     }
+    try {
+      const p = window.SyncV2 && window.SyncV2.consumeLinkHash();
+      if (p && p.catch) p.catch(() => {});
+    } catch (_) {}
   });
 }
 function _syncNow() {

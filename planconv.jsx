@@ -5,7 +5,7 @@
 //     dietPlanFromText(text, {id,name,validFrom})    → {collection:"dietPlan",    id, data}
 //     toLegacyScheda(planData) → { days: [...] }          (forma di parseScheda)
 //     toLegacyDieta(planData)  → { riposo, mattina, … }   (forma di parseDieta)
-//     planToText(workoutData, dietData) → string          (testo compatto per il prompt del Coach)
+//     planToText(workoutData, dietData, { full }?) → string   (testo compatto per il prompt del Coach; full = completo, per l'export)
 //     activePlan(records, collection) → { id, data } | null
 //   }
 //
@@ -260,8 +260,44 @@
 
   // Testo compatto (italiano) di scheda e dieta per il prompt del Coach: una
   // sezione per piano, ciascuna ≤ 3000 caratteri (taglio con "[…troncato]").
-  function planToText(workoutData, dietData) {
+  function planToText(workoutData, dietData, opts) {
+    if (opts && opts.full) return [workoutFull(workoutData), dietFull(dietData)].filter(Boolean).join("\n\n");
     return [workoutText(workoutData), dietText(dietData)].filter(Boolean).map(clip).join("\n\n");
+  }
+
+  // Versione completa e leggibile (export da Impostazioni): una riga per esercizio / scelta,
+  // nessun taglio a 3000 caratteri e nessun limite di opzioni per pasto.
+  function workoutFull(data) {
+    if (!data || !Array.isArray(data.days)) return "";
+    const rows = [`SCHEDA ALLENAMENTO${data.name ? " – " + data.name : ""}`];
+    data.days.forEach((d, i) => {
+      const focus = (d.focus || []).length ? ` (${d.focus.join(", ")})` : "";
+      rows.push("", `Giorno ${i + 1} ${d.name}${focus}`);
+      (d.exercises || []).forEach((e) => {
+        let line = `- ${e.name} ${e.sets}x${e.reps} rec ${e.restSec}s`;
+        if (e.notes) line += ` · ${e.notes}`;
+        if ((e.alternatives || []).length) line += ` · alternative: ${e.alternatives.join(" / ")}`;
+        rows.push(line);
+      });
+    });
+    return rows.join("\n");
+  }
+
+  function dietFull(data) {
+    if (!data || !Array.isArray(data.variants)) return "";
+    const rows = [`PIANO ALIMENTARE${data.name ? " – " + data.name : ""}`];
+    data.variants.forEach((v) => {
+      rows.push("", `[${v.name}]`);
+      (v.meals || []).forEach((m) => {
+        rows.push(`${m.name} ${m.time}`);
+        (m.options || []).forEach((o) => rows.push(`- ${o.text}`));
+        (m.lines || []).forEach((l) => rows.push(l.label == null ? `- ${(l.choices || []).join(" | ")}` : `- ${l.label}: ${(l.choices || []).join(" | ")}`));
+      });
+      if ((v.supplements || []).length) {
+        rows.push("Integratori: " + v.supplements.map((s) => (s.moment ? `${s.moment}: ${s.name}` : s.name)).join(", "));
+      }
+    });
+    return rows.join("\n");
   }
 
   // ── Piano attivo ──────────────────────────────────────────────────────────

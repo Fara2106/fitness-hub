@@ -1525,6 +1525,145 @@ console.log("\nSuite App v2 — piani dal piano attivo, fallback embedded, vecch
       readFileSync(join(ROOT, "screens", "dashboard.jsx"), "utf8") + readFileSync(join(ROOT, "screens", "coach.jsx"), "utf8")));
 }
 
+// ---- Suite Impostazioni v2: link #sync=, import .txt temporaneo, backup senza dati del device, export completo, CSP ----
+// Sandbox vm con storage.jsx reale (in memoria) + parser/planconv/recordmap/syncv2/impostazioni.jsx; fetch finto
+// offline (mai la rete). Le funzioni pure stanno in window.ImpostazioniLogic e window.SyncV2.
+console.log("\nSuite Impostazioni v2 — link #sync=, import .txt (id senza collisioni), backup/ripristino, export completo, CSP");
+await (async () => {
+  const TOKEN = "ab12".repeat(16);
+  const FILES = ["storage.jsx", "parser.jsx", "planconv.jsx", "schedaState.jsx", "recordmap.jsx", "syncv2.jsx", "screens/impostazioni.jsx"];
+  const logs = [];
+  const sb = { window: {}, console: { log: (...a) => logs.push(a.join(" ")), warn: (...a) => logs.push(a.join(" ")), error: (...a) => logs.push(a.join(" ")) } };
+  sb.window.todayKey = () => "2026-11-03";
+  sb.window._logError = (e) => logs.push(String(e && e.message));
+  vm.createContext(sb);
+  // impostazioni.jsx contiene JSX: serve il runtime classico (stesso del bundle), il default di Babel 8 emette `import`.
+  const transformClassic = (f) => babel.transformFileSync(join(ROOT, f), { presets: [["@babel/preset-react", { runtime: "classic", development: false }]] }).code;
+  try { for (const f of FILES) vm.runInContext(transformClassic(f), sb, { filename: f }); }
+  catch (e) { ok("impostazioni.jsx e dipendenze si caricano sotto vm — " + e.message.split("\n")[0], false); return; }
+  const w = sb.window, S = w.storage, SV = w.SyncV2, L = w.ImpostazioniLogic, PC = w.PlanConv;
+  ok("impostazioni.jsx espone window.ImpostazioniLogic", !!L && ["importPlanChanges", "isDeviceLocalKey", "backupData", "restoreBackupData", "validateSchedaText", "validateDietaText"].every(k => typeof L[k] === "function"));
+  if (!L) return;
+  let offline = true;
+  const fetchFn = async () => { throw new TypeError("Failed to fetch"); };
+  SV.init({ storage: S, fetch: fetchFn, now: () => Date.now(), setTimeout: () => 1, clearTimeout: () => {} });
+
+  // ── #sync=<token> ──
+  ok("linkTokenFromHash: 64 hex → token", SV.linkTokenFromHash("#sync=" + TOKEN) === TOKEN);
+  ok("linkTokenFromHash: lunghezza sbagliata / non hex / altro hash / vuoto → null",
+    [("#sync=" + TOKEN.slice(1)), ("#sync=" + TOKEN + "a"), ("#sync=" + "g".repeat(64)), "#other", "#sync=", "", "sync=" + TOKEN, "#x#sync=" + TOKEN, "#sync=" + TOKEN + "&a=1", null, undefined]
+      .every(h => SV.linkTokenFromHash(h) === null));
+  {
+    const calls = [];
+    const hist = { replaceState: (...a) => calls.push(a) };
+    const bad = SV.consumeLinkHash({ hash: "#qualcosa", pathname: "/fitness-hub/", search: "" }, hist);
+    ok("consumeLinkHash: hash diverso → ignorato (nessun token, URL intatto)", bad === null && calls.length === 0 && !SV.hasToken());
+    const p = SV.consumeLinkHash({ hash: "#sync=" + TOKEN, pathname: "/fitness-hub/", search: "?v=1" }, hist);
+    ok("consumeLinkHash: hash valido → ripulisce l'URL (replaceState senza hash)", !!p && calls.length === 1 && calls[0][2] === "/fitness-hub/?v=1");
+    const r = await p;
+    ok("consumeLinkHash: syncToken salvato (anche senza rete), nessun errore di forma", S.get("syncToken") === TOKEN && SV.hasToken() && r && r.error !== "unauthorized");
+    ok("il token non finisce mai nei log", !logs.some(l => l.includes(TOKEN)));
+    SV.setToken("");
+    ok("setToken('') scollega", !SV.hasToken() && S.get("syncToken", null) === null);
+  }
+
+  // ── Import .txt → piano strutturato ──
+  const scheda = readFileSync(join(ROOT, "scheda.txt"), "utf8");
+  const dieta = readFileSync(join(ROOT, "dieta.txt"), "utf8");
+  const NOW = new Date(2026, 10, 3, 10, 5, 0);
+  const IDDAY = "20261103", IDMIN = "1005";
+  {
+    const base = JSON.parse(JSON.stringify(PC.workoutPlanFromText(scheda, { id: "workout-old", name: "Vecchia", validFrom: "2026-09-01" })));
+    S.set("plan_workout", { id: base.id, data: base.data });
+    const txt1 = scheda.replace("Push-up (bodyweight)", "Panca piana manubri");
+    const r1 = L.importPlanChanges("scheda", txt1, "Nuova scheda.txt", NOW);
+    ok("import scheda: 2 change (nuovo attivo + vecchio archiviato)", !r1.identical && r1.changes.length === 2);
+    const [nw, old] = r1.changes;
+    ok("import scheda: id workout-YYYYMMDD-HHMM, nome dal file, attivo, validFrom oggi",
+      nw.id === `workout-${IDDAY}-${IDMIN}` && nw.collection === "workoutPlan" && nw.data.name === "Nuova scheda" && nw.data.status === "active" && nw.data.validFrom === "2026-11-03" && nw.data.validTo === null);
+    ok("import scheda: id interni derivati dall'id del piano", nw.data.days[0].id === `${nw.id}/d0` && nw.data.days[0].exercises[0].id === `${nw.id}/d0/e0`);
+    ok("import scheda: vecchio piano archived con validTo = oggi, resto intatto",
+      old.id === "workout-old" && old.data.status === "archived" && old.data.validTo === "2026-11-03" && old.data.name === "Vecchia" && old.data.days.length === base.data.days.length);
+    SV.putRecords(r1.changes);
+    ok("putRecords: plan_workout = nuovo piano; archiviati leggibili", S.get("plan_workout").id === nw.id && SV.listRecords("workoutPlan").filter(r => r.data.status === "archived").length === 1);
+    ok("import scheda: stesso file di nuovo → identico, nessun change", (() => { const r = L.importPlanChanges("scheda", txt1, "Nuova scheda.txt", NOW); return r.identical === true && r.changes.length === 0; })());
+    // Due import nello stesso minuto: l'id esiste già → suffisso
+    const r2 = L.importPlanChanges("scheda", scheda.replace("Push-up (bodyweight)", "Croci ai cavi"), "Seconda.txt", NOW);
+    ok("import nello stesso minuto: id con suffisso -2 (nessuna collisione)", r2.changes[0].id === `workout-${IDDAY}-${IDMIN}-2` && r2.changes[0].data.days[0].id === `${r2.changes[0].id}/d0`);
+    ok("import nello stesso minuto: il primo piano viene archiviato (non sovrascritto)", r2.changes[1].id === nw.id && r2.changes[1].data.status === "archived" && r2.changes[1].data.name === "Nuova scheda");
+    SV.putRecords(r2.changes);
+    const r3 = L.importPlanChanges("scheda", scheda.replace("Push-up (bodyweight)", "Dip alle parallele"), "Terza.txt", NOW);
+    ok("terzo import nello stesso minuto: suffisso -3", r3.changes[0].id === `workout-${IDDAY}-${IDMIN}-3`);
+    SV.putRecords(r3.changes);
+    const ids = SV.listRecords("workoutPlan").map(r => r.id).sort();
+    ok("tre import: 4 piani distinti, uno solo attivo", ids.length === 4 && new Set(ids).size === 4 && SV.listRecords("workoutPlan").filter(r => r.data.status === "active").length === 1);
+    // Dieta: stesso schema
+    const d1 = L.importPlanChanges("dieta", dieta, "Dieta nuova.txt", NOW);
+    ok("import dieta senza piano precedente: 1 change dietPlan attivo diet-YYYYMMDD-HHMM", d1.changes.length === 1 && d1.changes[0].collection === "dietPlan" && d1.changes[0].id === `diet-${IDDAY}-${IDMIN}` && d1.changes[0].data.status === "active");
+    SV.putRecords(d1.changes);
+    const d2 = L.importPlanChanges("dieta", dieta.replace("- Opzione 1: 40g gallette grano saraceno (4)", "- Opzione 1: 99g fiocchi d'avena"), "Dieta 2.txt", NOW);
+    ok("import dieta nello stesso minuto: -2 e il precedente archiviato", d2.changes[0].id === `diet-${IDDAY}-${IDMIN}-2` && d2.changes[1].data.status === "archived" && d2.changes[1].data.validTo === "2026-11-03");
+    // Validazione (stessa dell'UI): file non valido → nessun cambiamento
+    ok("file scheda non valido → validate ko (l'UI non produce change)", L.validateSchedaText("ciao\nnon sono una scheda", (x) => x).ok === false && L.validateSchedaText(scheda, (x) => x).ok === true);
+    ok("file dieta non valido → validate ko", L.validateDietaText("ciao\nnon sono una dieta", (x) => x).ok === false && L.validateDietaText(dieta, (x) => x).ok === true);
+  }
+
+  // ── Backup: niente dati del device ──
+  {
+    const LOCAL = ["syncToken", "v2deviceId", "v2cursor", "v2epoch", "v2outbox", "v2grp:day:2026-11-03", "v2grp:weights", "r:setLog:abc", "r:workoutPlan:workout-1", "groqApiKey", "errorLog"];
+    const KEEP = ["bodyWeight", "weightLog", "spesaChecked", "theme", "lang", "checkIn_2026-11-03", "plan_workout", "exNotes"];
+    S.clear && S.clear();
+    LOCAL.forEach(k => S.set(k, "x-" + k, { silent: true }));
+    KEEP.forEach(k => S.set(k, { v: k }, { silent: true }));
+    const data = L.backupData(S);
+    ok("export backup: nessuna chiave del device (token, deviceId, cursore, epoch, coda, v2grp:*, r:*, Groq, errorLog)", LOCAL.every(k => !(k in data)) && !JSON.stringify(data).includes("x-"));
+    ok("export backup: tutte le altre chiavi presenti", KEEP.every(k => k in data));
+    ok("isDeviceLocalKey: solo le chiavi elencate (non v2foo, non plan_*)", LOCAL.every(k => L.isDeviceLocalKey(k)) && !L.isDeviceLocalKey("v2foo") && !L.isDeviceLocalKey("plan_workout") && !L.isDeviceLocalKey("bodyWeight") && !L.isDeviceLocalKey("rest"));
+    // Ripristino di un file vecchio che contiene ancora chiavi del device
+    S.set("syncToken", "TOKEN-DI-QUESTO-DEVICE", { silent: true });
+    S.set("groqApiKey", "gsk_questa", { silent: true });
+    const old = { bodyWeight: 81.5, syncToken: "TOKEN-VECCHIO", v2cursor: 999, "v2grp:weights": ["x"], "r:setLog:zz": {}, groqApiKey: "gsk_vecchia", errorLog: [1], v2outbox: { a: 1 }, spesaChecked: { "a-0": true } };
+    const n = L.restoreBackupData(S, old);
+    ok("ripristino: scrive solo le chiavi non del device (n corretto)", n === 2 && S.get("bodyWeight") === 81.5 && S.get("spesaChecked")["a-0"] === true);
+    ok("ripristino: token, Groq, cursore, coda, v2grp, r:* del file vecchio ignorati",
+      S.get("syncToken") === "TOKEN-DI-QUESTO-DEVICE" && S.get("groqApiKey") === "gsk_questa" && S.get("v2cursor", null) !== 999 && S.get("v2grp:weights", null) === "x-v2grp:weights" && S.get("r:setLog:zz", null) === null && S.get("v2outbox") === "x-v2outbox");
+  }
+
+  // ── Export: piano attivo completo, senza troncamenti ──
+  {
+    const wp = PC.workoutPlanFromText(scheda, { id: "w", name: "Scheda X", validFrom: "2026-11-03" }).data;
+    const dp = PC.dietPlanFromText(dieta, { id: "d", name: "Dieta X", validFrom: "2026-11-03" }).data;
+    const wt = PC.planToText(wp, null, { full: true }), dt = PC.planToText(null, dp, { full: true });
+    ok("export completo: scheda con tutti i giorni e tutti gli esercizi, nome del piano",
+      /SCHEDA ALLENAMENTO – Scheda X/.test(wt) && wp.days.every(d => wt.includes(d.name)) && wp.days.every(d => d.exercises.every(e => wt.includes(e.name))));
+    ok("export completo: dieta con tutte le sezioni e tutti i pasti, oltre i 3000 caratteri del Coach",
+      /PIANO ALIMENTARE – Dieta X/.test(dt) && dp.variants.every(v => dt.includes(`[${v.name}]`) && v.meals.every(m => dt.includes(m.name))) && dt.length > 3000 && !/troncato/.test(dt));
+    ok("export completo: ogni opzione/scelta del piano presente (nessun limite a 2)", dp.variants.every(v => v.meals.every(m => (m.options || []).every(o => dt.includes(o.text)) && (m.lines || []).every(l => l.choices.every(c => dt.includes(c))))));
+    ok("planToText senza opzioni: invariato per il Coach (compatto e troncato a 3000)", PC.planToText(null, dp).length <= 3000 + 20 && PC.planToText(wp, dp).split("\n\n").every(x => x.length <= 3000));
+  }
+
+  // ── CSP e orfani i18n ──
+  {
+    const html = readFileSync(join(ROOT, "index.html"), "utf8");
+    const csp = (html.match(/Content-Security-Policy" content="([^"]+)"/) || [, ""])[1];
+    const conn = (csp.match(/connect-src ([^;]+)/) || [, ""])[1].split(/\s+/);
+    ok("CSP connect-src: API v2 + proxy legacy (Groq) + worker push + api.groq.com + self",
+      ["'self'", "https://fitness-hub-api.lorefara97.workers.dev", "https://fitness-hub-proxy.lorefara97.workers.dev", "https://fitness-hub-push.lorefara97.workers.dev", "https://api.groq.com"].every(h => conn.includes(h)));
+    const i18n = readFileSync(join(ROOT, "i18n.jsx"), "utf8");
+    ok("i18n: stringhe Sheets orfane rimosse", !/Collega il tuo Sheets|L'URL del foglio Google/.test(i18n));
+    const src = readFileSync(join(ROOT, "screens", "impostazioni.jsx"), "utf8");
+    const used = [...src.matchAll(/\bt\("((?:[^"\\]|\\.)*)"\)/g)].map(m => m[1].replace(/\\"/g, '"'));
+    const newKeys = ["Collega questo device", "Scollega", "Collega", "Incolla il token o il link", "Token non valido: servono 64 caratteri esadecimali", "Token rifiutato dal server",
+      "Collegato e sincronizzato", "Token salvato, ma il server non è raggiungibile: riprova più tardi", "modifiche in coda", "Sola lettura · l'import .txt è temporaneo", "Scheda attiva", "Dieta attiva",
+      "Piani archiviati", "Importa scheda .txt (temporaneo)", "Importa dieta .txt (temporaneo)", "Crea un nuovo piano attivo e archivia quello precedente", "Il piano attivo in testo leggibile",
+      "Tutto lo storage locale, tranne token e chiave Groq", "Nessun piano: si usa il testo predefinito dell'app", "Collegato", "Token di sincronizzazione"];
+    ok("i18n: ogni nuova stringa dell'UI Impostazioni è usata e ha la traduzione EN", newKeys.every(k => used.includes(k) && i18n.includes(JSON.stringify(k) + ": { en:")));
+    ok("i18n: le stringhe tolte (import/export vecchi) non sono più usate", !used.some(k => /^Importa (scheda|dieta) \(\.txt\)$|^Il testo attuale|^Importa scheda\.txt e dieta\.txt$/.test(k)));
+    const mount = readFileSync(join(ROOT, "app.jsx"), "utf8");
+    ok("app.jsx: consumeLinkHash chiamato dopo SyncV2.init dentro storage.onReady", /SyncV2\.init\([\s\S]{0,300}consumeLinkHash\(/.test(mount));
+  }
+})();
+
 // ---- Suite bundle: app.compiled.js allineato ai sorgenti (no drift) ----
 // Il browser carica SOLO app.compiled.js: se un .jsx viene modificato senza
 // rigenerare il bundle (`npm run build`), l'app servirebbe codice vecchio.

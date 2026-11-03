@@ -129,15 +129,17 @@ await scenario("Upload scheda/dieta", async () => {
   const { ctx, page } = await openApp(IPHONE, st, { postDelay: 2500 });
   await page.reload(); await page.waitForFunction(() => document.querySelector(".lfh-scroll"));
   await nav(page, "Setup"); await page.waitForTimeout(500);
-  const before = await store(page, "schedaData");
+  // L'import (Impostazioni v2) crea un piano strutturato in plan_workout: si verifica quello, non più schedaData.
+  const planStr = async () => JSON.stringify(await store(page, "plan_workout"));
+  const before = await planStr();
   await page.locator("input[type=file]").nth(0).setInputFiles(badFile); await page.waitForTimeout(400);
-  ok("file non valido rifiutato, scheda intatta", (await store(page, "schedaData")) === before);
+  ok("file non valido rifiutato, scheda intatta", (await planStr()) === before);
   await page.locator("input[type=file]").nth(0).setInputFiles(schedaFile); await page.waitForTimeout(300);
   await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
   await page.waitForTimeout(1500);
-  const after = (await store(page, "schedaData")) || "";
+  const after = await planStr();
   ok("import sopravvive a un pull concorrente", after.includes("Panca IMPORTATA"));
-  ok("BOM e a-capo Windows normalizzati", !after.startsWith("﻿") && !after.includes("\r"));
+  ok("BOM e a-capo Windows normalizzati", after.includes("Panca IMPORTATA") && !after.includes("\\r") && !after.includes("\\ufeff"));
   await page.waitForTimeout(3000);
   ok("import arrivato nel cloud", (st.settings.schedaData || "").includes("Panca IMPORTATA"));
   await page.locator("input[type=file]").nth(1).setInputFiles(dietaFile); await page.waitForTimeout(3500);
@@ -146,7 +148,7 @@ await scenario("Upload scheda/dieta", async () => {
   await ctx.close();
 
   // b) device nuovo: il cloud ha l'import → non va sovrascritto dal .txt del repo
-  const st2 = newState({ ...BASE_SETTINGS, schedaData: after });
+  const st2 = newState({ ...BASE_SETTINGS, schedaData: repo.replace("Push-up (bodyweight)", "Panca IMPORTATA") });
   const d2 = await openApp(IPAD, st2);
   await d2.page.waitForTimeout(1500);
   ok("device nuovo riceve l'import dal cloud", ((await store(d2.page, "schedaData")) || "").includes("Panca IMPORTATA"));

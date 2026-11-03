@@ -104,6 +104,11 @@ if (window.storage) {
     _cleanupOldDailyKeys();
     try { if (window.SyncV2) window.SyncV2.init({ storage: window.storage }); }
     catch (e) { if (window._logError) window._logError(e); else console.warn("[sync] init:", e); }
+    // Link "#sync=<token>": collega il device e ripulisce l'hash dall'URL (il token non si logga).
+    try {
+      const p = window.SyncV2 && window.SyncV2.consumeLinkHash();
+      if (p && p.catch) p.catch(() => {});
+    } catch (_) {}
   });
 }
 

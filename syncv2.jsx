@@ -5,6 +5,7 @@
 //     init({ storage, fetch, now?, setTimeout?, clearTimeout?, today? })   da chiamare dopo storage.onReady
 //     setToken(token) → Promise<{ ok, error? }>   salva il token e prova un sync (401 → token non salvato)
 //     hasToken() → boolean
+//     linkTokenFromHash(hash) → token|null · consumeLinkHash(loc?, hist?) → Promise|null   (#sync=<64 hex> all'avvio)
 //     syncNow()  → Promise<{ ok, pushed, pulled, error? }>   error: "unlinked"|"offline"|"unauthorized"|…
 //     putRecords(changes)                    scrittura diretta di record ({collection,id,data,deleted?}), per i piani
 //     getRecord(collection, id) → Record|null      cache + modifiche in coda (tombstone inclusi)
@@ -610,6 +611,23 @@
     return out;
   }
 
+  // Link di collegamento: https://…/fitness-hub/#sync=<64 hex>. Funzione pura: il token o null
+  // (qualsiasi altro hash, o lunghezza/caratteri sbagliati, è ignorato).
+  function linkTokenFromHash(hash) {
+    const m = /^#sync=([0-9a-fA-F]{64})$/.exec(String(hash == null ? "" : hash));
+    return m ? m[1] : null;
+  }
+  // All'avvio (dopo init): se l'hash è un link valido, ripulisce l'URL (replaceState) e collega il
+  // device. Ritorna la Promise di setToken, o null se non c'era niente da fare. Il token non si logga.
+  function consumeLinkHash(loc, hist) {
+    const l = loc || (typeof location !== "undefined" ? location : null);
+    const h = hist || (typeof history !== "undefined" ? history : null);
+    const token = linkTokenFromHash(l && l.hash);
+    if (!token) return null;
+    try { if (h && typeof h.replaceState === "function") h.replaceState(null, "", (l.pathname || "") + (l.search || "")); } catch (_) {}
+    return setToken(token);
+  }
+
   function getRecord(collection, id) { return S ? effective(collection, String(id)) : null; }
   function listRecords(collection) { return S ? listEffective(collection) : []; }
   function activePlans() { return { workout: S ? S.get("plan_workout", null) : null, diet: S ? S.get("plan_diet", null) : null }; }
@@ -643,6 +661,6 @@
     return SyncV2;
   }
 
-  const SyncV2 = { API, init, setToken, hasToken, syncNow, putRecords, getRecord, listRecords, activePlans, status };
+  const SyncV2 = { API, init, setToken, hasToken, linkTokenFromHash, consumeLinkHash, syncNow, putRecords, getRecord, listRecords, activePlans, status };
   window.SyncV2 = SyncV2;
 })();
