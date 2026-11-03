@@ -347,10 +347,11 @@ window.groqAPI = {
     const saved = window.storage.get("groqModel", "");
     const candidates = model ? [model] : [saved, ...GROQ_MODELS].filter((m, i, a) => m && a.indexOf(m) === i);
     const send = m => {
+      const reasoning = /^openai\/gpt-oss|^qwen\//.test(m);
       const payload = {
         model: m,
         messages: msgs,
-        max_tokens: maxTokens,
+        max_tokens: reasoning ? Math.max(maxTokens, 256) : maxTokens,
         temperature: 0.75
       };
       if (/^openai\/gpt-oss/.test(m)) payload.reasoning_effort = "low";
@@ -441,7 +442,7 @@ window.groqAPI = {
         role: "user",
         content: "Rispondi solo con 'OK'."
       }],
-      maxTokens: 10
+      maxTokens: 256
     });
     return {
       ok: true,

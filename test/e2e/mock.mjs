@@ -39,8 +39,13 @@ export async function installMock(ctx, state, { postDelay = 0, getDelay = 0 } = 
       return route.fulfill({ status: 200, headers: H, body: JSON.stringify(body) });
     }
     if (url.pathname === "/groq") {
+      const g = JSON.parse(req.postData() || "{}");
       state.log.push("POST /groq");
-      return route.fulfill({ status: 200, headers: { ...H, "Content-Type": "text/event-stream" }, body: GROQ_SSE });
+      if (g.stream) return route.fulfill({ status: 200, headers: { ...H, "Content-Type": "text/event-stream" }, body: GROQ_SSE });
+      // Come Groq coi modelli che "ragionano": con un tetto di token piccolo
+      // il ragionamento lo esaurisce e il testo arriva vuoto.
+      const content = (g.max_tokens || 0) >= 256 ? "OK" : "";
+      return route.fulfill({ status: 200, headers: H, body: JSON.stringify({ choices: [{ message: { content }, finish_reason: content ? "stop" : "length" }] }) });
     }
     const b = JSON.parse(req.postData() || "{}");
     state.log.push("POST " + b.action + (b.key ? ":" + b.key : "") +

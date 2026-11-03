@@ -201,6 +201,8 @@ await scenario("Coach e UI", async () => {
   const txt = await page.evaluate(() => document.body.innerText);
   ok("risposta del Coach mostrata (via proxy /groq)", txt.includes("riso e pollo"));
   ok("markdown reso (grassetto, niente asterischi)", bold === 1 && !txt.includes("**"));
+  const conn = await page.evaluate(() => window.groqAPI.testConnection().then(r => r.reply, e => "ERR " + e.message));
+  ok("'Testa connessione' non torna vuoto (tetto token per modelli che ragionano)", conn === "OK", conn);
   ok("nessun errore JS", page._errors.length === 0, page._errors.join(" | "));
   await ctx.close();
 });

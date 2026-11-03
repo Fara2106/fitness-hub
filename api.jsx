@@ -209,9 +209,12 @@ window.groqAPI = {
       : [saved, ...GROQ_MODELS].filter((m, i, a) => m && a.indexOf(m) === i);
 
     const send = (m) => {
-      const payload = { model: m, messages: msgs, max_tokens: maxTokens, temperature: 0.75 };
-      // gpt-oss è un modello "reasoning": sforzo basso = risposta più rapida e
-      // meno token di ragionamento a consumare il tetto max_tokens.
+      // gpt-oss/qwen3 "ragionano" prima di rispondere e quei token contano nel
+      // tetto: con tetti piccoli (es. 10 del test connessione) la risposta
+      // arrivava VUOTA ("Risposta vuota dal modello") → minimo 256.
+      const reasoning = /^openai\/gpt-oss|^qwen\//.test(m);
+      const payload = { model: m, messages: msgs, max_tokens: reasoning ? Math.max(maxTokens, 256) : maxTokens, temperature: 0.75 };
+      // Sforzo basso = risposta più rapida e meno token di ragionamento.
       if (/^openai\/gpt-oss/.test(m)) payload.reasoning_effort = "low";
       if (onDelta) payload.stream = true;
       return apiKey
@@ -298,7 +301,7 @@ window.groqAPI = {
   async testConnection() {
     const reply = await this.complete({
       messages: [{ role: "user", content: "Rispondi solo con 'OK'." }],
-      maxTokens: 10,
+      maxTokens: 256,   // vedi complete(): i modelli che ragionano non stanno in 10 token
     });
     return { ok: true, reply };
   },
