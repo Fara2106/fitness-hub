@@ -25,14 +25,20 @@ const fromSheet = () => recordsFromSheet(sheet, plans, { now: NOW });
 const fromBackup = (stats) => recordsFromBackup(backup, plans, stats, { now: NOW });
 const get = (list, collection, id) => list.find((c) => c.collection === collection && c.id === id);
 const all = (list, collection) => list.filter((c) => c.collection === collection);
+// dayState per campo (Ruling 7): valore del campo `field` del giorno `date`, undefined se assente.
+const dayRec = (list, date, field) => get(list, "dayState", `${date}:${field}`);
+const dayVal = (list, date, field) => { const c = dayRec(list, date, field); return c ? c.data.value : undefined; };
+const dayOf = (list, date) => all(list, "dayState").filter((c) => c.data.date === date);
 
 // ── foglio ──────────────────────────────────────────────────────────────────
-test("foglio: check-in → dayState, stessa data vince l'ultima riga, riga vuota saltata", () => {
+test("foglio: check-in → dayState `${date}:checkIn`, stessa data vince l'ultima riga, riga vuota saltata", () => {
   const r = fromSheet();
-  assert.deepEqual(get(r, "dayState", "2026-10-26").data, { date: "2026-10-26", checkIn: { sleep: 4, energy: 3, ailments: "" } });
-  assert.deepEqual(get(r, "dayState", "2026-10-28").data.checkIn, { sleep: 5, energy: 4, ailments: "" });
-  assert.equal(get(r, "dayState", "2026-10-29"), undefined);
-  assert.equal(get(r, "dayState", "2026-10-28").updatedAt, noon("2026-10-28"));
+  assert.deepEqual(dayRec(r, "2026-10-26", "checkIn").data,
+    { date: "2026-10-26", field: "checkIn", value: { sleep: 4, energy: 3, ailments: "" } });
+  assert.deepEqual(dayVal(r, "2026-10-28", "checkIn"), { sleep: 5, energy: 4, ailments: "" });
+  assert.equal(dayOf(r, "2026-10-28").length, 1);
+  assert.equal(dayOf(r, "2026-10-29").length, 0);
+  assert.equal(dayRec(r, "2026-10-28", "checkIn").updatedAt, noon("2026-10-28"));
 });
 
 test("foglio: peso → bodyWeight (id = data, kg numero)", () => {
@@ -111,15 +117,18 @@ test("foglio: ogni change ha collection ammessa, updatedAt numerico e nessun seg
 });
 
 // ── backup PWA ──────────────────────────────────────────────────────────────
-test("backup: checkIn_/hydration_/notes_ della stessa data → UN dayState", () => {
+test("backup: checkIn_/hydration_/notes_ della stessa data → un dayState per campo (Ruling 7)", () => {
   const r = fromBackup();
-  assert.deepEqual(get(r, "dayState", "2026-10-27").data, {
-    date: "2026-10-27", checkIn: { sleep: 4, energy: 5, ailments: "" }, hydration: 6, notes: "Buona sessione",
-    dietVariant: "riposo",
-  });
-  assert.equal(get(r, "dayState", "2026-10-29").data.checkIn.ailments, "schiena");
-  assert.equal(get(r, "dayState", "2026-10-27").updatedAt, noon("2026-10-27"));
-  assert.equal(all(r, "dayState").length, 2);
+  assert.deepEqual(dayOf(r, "2026-10-27").map((c) => c.id).sort(),
+    ["2026-10-27:checkIn", "2026-10-27:dietVariant", "2026-10-27:hydration", "2026-10-27:notes"]);
+  assert.deepEqual(dayRec(r, "2026-10-27", "checkIn").data,
+    { date: "2026-10-27", field: "checkIn", value: { sleep: 4, energy: 5, ailments: "" } });
+  assert.deepEqual(dayRec(r, "2026-10-27", "hydration").data, { date: "2026-10-27", field: "hydration", value: 6 });
+  assert.deepEqual(dayRec(r, "2026-10-27", "notes").data, { date: "2026-10-27", field: "notes", value: "Buona sessione" });
+  assert.deepEqual(dayRec(r, "2026-10-27", "dietVariant").data, { date: "2026-10-27", field: "dietVariant", value: "riposo" });
+  assert.equal(dayVal(r, "2026-10-29", "checkIn").ailments, "schiena");
+  assert.ok(dayOf(r, "2026-10-27").every((c) => c.updatedAt === noon("2026-10-27")));
+  assert.equal(all(r, "dayState").length, 7); // 27: 4 campi; 29: checkIn, rest, 1 cardio
 });
 
 test("backup: weightLog, bodyMeasures, exNotes, prMap", () => {
@@ -210,32 +219,42 @@ test("backup: valori già serializzati come stringa JSON vengono letti lo stesso
   const b = { _lfhBackup: 1, data: { exNotes: JSON.stringify({ plank: "ok" }), "hydration_2026-10-27": 4 } };
   const r = recordsFromBackup(b, plans, undefined, { now: NOW });
   assert.equal(get(r, "exerciseNote", "plank").data.text, "ok");
-  assert.equal(get(r, "dayState", "2026-10-27").data.hydration, 4);
+  assert.equal(dayVal(r, "2026-10-27", "hydration"), 4);
 });
 
 test("backup: senza stats né piani non esplode", () => {
   const r = recordsFromBackup(backup, {}, undefined, { now: NOW });
-  assert.ok(get(r, "dayState", "2026-10-27"));
+  assert.ok(dayRec(r, "2026-10-27", "checkIn"));
+  assert.equal(dayRec(r, "2026-10-27", "dietVariant"), undefined); // senza piano dieta nessuna variante
   assert.equal(all(r, "mealCheck").length, 0);
 });
 
 // ── mergeChanges ────────────────────────────────────────────────────────────
 test("mergeChanges: updatedAt maggiore vince, merge superficiale dei campi, ordine stabile", () => {
   const a = [
-    { collection: "dayState", id: "d1", data: { date: "d1", checkIn: { sleep: 1 }, hydration: 2 }, updatedAt: 100 },
+    { collection: "bodyMeasure", id: "d1", data: { date: "d1", vita: 84, petto: 100 }, updatedAt: 100 },
     { collection: "settings", id: "lang", data: { value: "it" }, updatedAt: 5 },
   ];
   const b = [
-    { collection: "dayState", id: "d1", data: { date: "d1", checkIn: { sleep: 9 }, notes: "n" }, updatedAt: 200 },
+    { collection: "bodyMeasure", id: "d1", data: { date: "d1", vita: 83, braccio: 35 }, updatedAt: 200 },
     { collection: "settings", id: "lang", data: { value: "en" }, updatedAt: 1 },
     { collection: "settings", id: "theme", data: { value: "dark" }, updatedAt: 1 },
   ];
   const m = mergeChanges(a, b);
-  assert.deepEqual(m.map((c) => `${c.collection}/${c.id}`), ["dayState/d1", "settings/lang", "settings/theme"]);
-  assert.deepEqual(m[0].data, { date: "d1", checkIn: { sleep: 9 }, hydration: 2, notes: "n" });
+  assert.deepEqual(m.map((c) => `${c.collection}/${c.id}`), ["bodyMeasure/d1", "settings/lang", "settings/theme"]);
+  assert.deepEqual(m[0].data, { date: "d1", vita: 83, petto: 100, braccio: 35 });
   assert.equal(m[0].updatedAt, 200);
   assert.deepEqual(m[1].data, { value: "it" });
   assert.equal(m[1].updatedAt, 5);
+});
+
+test("mergeChanges: dayState (un record per campo) → il vincitore sostituisce il data, niente merge", () => {
+  const m = mergeChanges(
+    [{ collection: "dayState", id: "d1:checkIn", data: { date: "d1", field: "checkIn", value: { sleep: 1, energy: 2, ailments: "x" } }, updatedAt: 100 }],
+    [{ collection: "dayState", id: "d1:checkIn", data: { date: "d1", field: "checkIn", value: { sleep: 9, energy: 9, ailments: "" } }, updatedAt: 200 }],
+  );
+  assert.equal(m.length, 1);
+  assert.deepEqual(m[0].data, { date: "d1", field: "checkIn", value: { sleep: 9, energy: 9, ailments: "" } });
 });
 
 test("mergeChanges: a pari updatedAt vince l'ultimo argomento", () => {
@@ -358,7 +377,7 @@ test("I1: un giorno ore21 → tutte le spunte sotto la variante ore21, dietVaria
   assert.ok(ids.every((id) => id.startsWith(`2026-10-28:${variant("ore21").id}/`)), ids.join());
   assert.ok(get(r, "mealCheck", `2026-10-28:${mealOf("ore21", "Post-workout").id}`));
   assert.ok(get(r, "supplementCheck", `2026-10-28:${suppOf("ore21", "mgk").id}`));
-  assert.deepEqual(get(r, "dayState", "2026-10-28").data, { date: "2026-10-28", dietVariant: "ore21" });
+  assert.deepEqual(dayOf(r, "2026-10-28").map((c) => c.data), [{ date: "2026-10-28", field: "dietVariant", value: "ore21" }]);
   assert.equal(stats.discarded.mealCheck, 0);
   assert.equal(stats.discarded.supplementCheck, 0);
 });
@@ -368,7 +387,7 @@ test("I1: Colazione+Pranzo+Post-workout+vitac+mgk sono anche in ore17/ore22 → 
     "dietaCheck_2026-10-28": { "08:00|Colazione": true, "13:00|Pranzo": true, "19:30|Post-workout": true },
     "integ_2026-10-28": { vitac: true, mgk: true },
   }), plans, {}, { now: NOW });
-  assert.equal(get(r, "dayState", "2026-10-28").data.dietVariant, "ore17"); // prima delle tre a pari merito
+  assert.equal(dayVal(r, "2026-10-28", "dietVariant"), "ore17"); // prima delle tre a pari merito
   const ids = [...all(r, "mealCheck"), ...all(r, "supplementCheck")].map((c) => c.id);
   assert.equal(ids.length, 5);
   assert.ok(ids.every((id) => id.startsWith(`2026-10-28:${variant("ore17").id}/`)));
@@ -387,26 +406,26 @@ test("I1: spunte che la variante scelta non ha → scartate e contate; nessuna v
     // solo spunte false: nessun record
     "dietaCheck_2026-10-30": { "08:00|Colazione": false },
   }), plans, stats, { now: NOW });
-  assert.equal(get(r, "dayState", "2026-10-28").data.dietVariant, "riposo");
+  assert.equal(dayVal(r, "2026-10-28", "dietVariant"), "riposo");
   assert.equal(all(r, "mealCheck").length, 3);
   assert.equal(all(r, "supplementCheck").length, 1);
-  assert.equal(get(r, "dayState", "2026-10-29"), undefined);
-  assert.equal(get(r, "dayState", "2026-10-30"), undefined);
+  assert.equal(dayOf(r, "2026-10-29").length, 0);
+  assert.equal(dayOf(r, "2026-10-30").length, 0);
   assert.equal(stats.discarded.mealCheck, 2); // Post-workout (28) + Fantasma (29)
   assert.equal(stats.discarded.supplementCheck, 2); // boh (28) + boh (29)
 });
 
-test("I1: la variante si sceglie per giorno; il dayState si fonde con check-in del backup e del foglio", () => {
+test("I1: la variante si sceglie per giorno; check-in del backup e del foglio → un solo record checkIn per giorno", () => {
   const b = bk({
     "checkIn_2026-10-28": { sleep: 2, energy: 2, ailments: "" },
     "dietaCheck_2026-10-28": { "16:30|Merenda": true, "19:30|Post-workout": true },
     "dietaCheck_2026-10-27": { "18:00|Merenda": true },
   });
   const r = mergeChanges(fromSheet(), recordsFromBackup(b, plans, {}, { now: NOW }));
-  assert.equal(all(r, "dayState").filter((c) => c.id === "2026-10-28").length, 1);
-  assert.equal(get(r, "dayState", "2026-10-28").data.dietVariant, "ore21");
-  assert.deepEqual(get(r, "dayState", "2026-10-28").data.checkIn, { sleep: 2, energy: 2, ailments: "" });
-  assert.equal(get(r, "dayState", "2026-10-27").data.dietVariant, "ore22");
+  assert.equal(all(r, "dayState").filter((c) => c.id === "2026-10-28:checkIn").length, 1);
+  assert.equal(dayVal(r, "2026-10-28", "dietVariant"), "ore21");
+  assert.deepEqual(dayVal(r, "2026-10-28", "checkIn"), { sleep: 2, energy: 2, ailments: "" }); // backup dopo il foglio
+  assert.equal(dayVal(r, "2026-10-27", "dietVariant"), "ore22");
 });
 
 const prog = (completion, extra = {}) => ({ completion, substitutions: {}, pesos: {}, ...extra });
@@ -473,7 +492,7 @@ test("I2: senza nome e scheda reimportata dopo quel giorno → scartato (setLogP
   assert.equal(junk.positional.count, 1);
 });
 
-test("I3: activities → dayState.cardio per data locale dell'id (senza `when`); id non numerico scartato", () => {
+test("I3: activities → un dayState cardio per attività nella data locale dell'id (senza `when`); id non numerico scartato", () => {
   const t1 = new Date("2026-10-28T07:15:00").getTime(), t2 = new Date("2026-10-28T19:00:00").getTime();
   const t3 = new Date("2026-10-30T23:30:00").getTime();
   const stats = {};
@@ -489,24 +508,21 @@ test("I3: activities → dayState.cardio per data locale dell'id (senza `when`);
       null,
     ],
   }), plans, stats, { now: NOW });
-  assert.deepEqual(get(r, "dayState", "2026-10-28").data, {
-    date: "2026-10-28", checkIn: { sleep: 4, energy: 4, ailments: "" },
-    cardio: [
-      { id: t2, type: "walk", min: 40, km: 3.2, note: "sera" },
-      { id: t1, type: "walk", min: 15, km: 1, note: "" },
-    ],
-  });
-  assert.deepEqual(get(r, "dayState", "2026-10-30").data.cardio, [{ id: t3, type: "elliptical", min: 20, km: 0, note: "" }]);
+  assert.deepEqual(dayVal(r, "2026-10-28", "checkIn"), { sleep: 4, energy: 4, ailments: "" });
+  assert.deepEqual(get(r, "dayState", `2026-10-28:cardio:${t2}`).data,
+    { date: "2026-10-28", field: "cardio", value: { id: t2, type: "walk", min: 40, km: 3.2, note: "sera" } });
+  assert.deepEqual(dayVal(r, "2026-10-28", `cardio:${t1}`), { id: t1, type: "walk", min: 15, km: 1, note: "" });
+  assert.deepEqual(dayVal(r, "2026-10-30", `cardio:${t3}`), { id: t3, type: "elliptical", min: 20, km: 0, note: "" });
   assert.equal(stats.discarded.cardio, 4);
-  assert.equal(all(r, "dayState").length, 2);
+  assert.equal(all(r, "dayState").length, 4);
 });
 
 test("I3: restDay_ vero → dayState.rest; falso → niente", () => {
   const stats = {};
   const r = recordsFromBackup(bk({ "restDay_2026-10-28": true, "restDay_2026-10-29": false, "restDay_2026-10-30": "true" }), plans, stats, { now: NOW });
-  assert.deepEqual(get(r, "dayState", "2026-10-28").data, { date: "2026-10-28", rest: true });
-  assert.equal(get(r, "dayState", "2026-10-29"), undefined);
-  assert.equal(get(r, "dayState", "2026-10-30").data.rest, true); // stringa JSON "true" letta come true
+  assert.deepEqual(dayOf(r, "2026-10-28").map((c) => c.data), [{ date: "2026-10-28", field: "rest", value: true }]);
+  assert.equal(dayOf(r, "2026-10-29").length, 0);
+  assert.equal(dayVal(r, "2026-10-30", "rest"), true); // stringa JSON "true" letta come true
   assert.equal(stats.ignoredKeys.restDay_, undefined);
 });
 
@@ -545,7 +561,6 @@ test("fixture: sessione, riposo e cardio del backup di esempio", () => {
   const d0 = plans.workout.data.days[0];
   assert.deepEqual(get(r, "workoutSession", `2026-10-27:${d0.id}`).data,
     { date: "2026-10-27", dayId: d0.id, dayName: d0.name, startedAt: 1793093400000, done: true });
-  const d29 = get(r, "dayState", "2026-10-29").data;
-  assert.equal(d29.rest, true);
-  assert.deepEqual(d29.cardio, [{ id: 1793275200000, type: "walk", min: 30, km: 2.5, note: "parco" }]);
+  assert.equal(dayVal(r, "2026-10-29", "rest"), true);
+  assert.deepEqual(dayVal(r, "2026-10-29", "cardio:1793275200000"), { id: 1793275200000, type: "walk", min: 30, km: 2.5, note: "parco" });
 });

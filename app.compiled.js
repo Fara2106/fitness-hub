@@ -1870,8 +1870,8 @@ window.buildDefaultNotifConfig = function () {
 (function () {
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
   const DAY_KEY_RE = /^(checkIn_|hydration_|notes_|restDay_|dietaVariant_|dietaCheck_|integ_|schedaProg_|gymSaved_|gym_|gymStart_|muscleSets_|coachChat_)(\d{4}-\d{2}-\d{2})$/;
-  const GROUP_RE = /^(day|meals|supps|sets|session|coach):(\d{4}-\d{2}-\d{2})$/;
-  const NONE = "￿";
+  const GROUP_RE = /^(day|variant|cardio|meals|supps|sets|session|coach):(\d{4}-\d{2}-\d{2})$/;
+  const NONE = "\uffff";
   const HORIZON_DAYS = 90;
   const ACTIVITY_DAYS = 60;
   const CAP = {
@@ -1880,6 +1880,13 @@ window.buildDefaultNotifConfig = function () {
     bodyMeasures: 120
   };
   const SETTINGS_KEYS = ["spesaFreq", "weightGoal", "bodyWeight", "lang", "theme"];
+  const DAY_FIELD_KEY = {
+    checkIn: "checkIn_",
+    hydration: "hydration_",
+    notes: "notes_",
+    rest: "restDay_",
+    dietVariant: "dietaVariant_"
+  };
   const DIRECT = new Set(["workoutPlan", "dietPlan"]);
   const MUSCLE_GROUP = {
     petto: "Petto",
@@ -1925,6 +1932,12 @@ window.buildDefaultNotifConfig = function () {
       minId: NONE
     }
   });
+  const dayRec = (date, field, value) => rec("dayState", `${date}:${field}`, {
+    date,
+    field,
+    value
+  });
+  const dayFieldOf = r => r && isObj(r.data) && r.data.field || String(r && r.id || "").slice(11).split(":")[0];
   const recordDate = r => {
     if (r && isObj(r.data) && isDate(r.data.date)) return r.data.date;
     const head = String(r && r.id || "").slice(0, 10);
@@ -2028,11 +2041,11 @@ window.buildDefaultNotifConfig = function () {
         case "restDay_":
           return [`day:${d}`];
         case "dietaVariant_":
-          return [`day:${d}`, `meals:${d}`, `supps:${d}`];
+          return [`variant:${d}`, `meals:${d}`, `supps:${d}`];
         case "dietaCheck_":
-          return [`meals:${d}`, `day:${d}`];
+          return [`meals:${d}`, `variant:${d}`];
         case "integ_":
-          return [`supps:${d}`, `day:${d}`];
+          return [`supps:${d}`, `variant:${d}`];
         case "schedaProg_":
           return [`sets:${d}`, `session:${d}`];
         case "gymSaved_":
@@ -2051,7 +2064,7 @@ window.buildDefaultNotifConfig = function () {
         {
           const today = todayOf(ctx),
             out = [];
-          for (let i = 0; i < ACTIVITY_DAYS; i++) out.push(`day:${addDays(today, -i)}`);
+          for (let i = 0; i < ACTIVITY_DAYS; i++) out.push(`cardio:${addDays(today, -i)}`);
           return out;
         }
       case "weightLog":
@@ -2072,6 +2085,8 @@ window.buildDefaultNotifConfig = function () {
   }
   const DATED_COLLECTION = {
     day: "dayState",
+    variant: "dayState",
+    cardio: "dayState",
     meals: "mealCheck",
     supps: "supplementCheck",
     sets: "setLog",
@@ -2086,7 +2101,11 @@ window.buildDefaultNotifConfig = function () {
       if (date < addDays(todayOf(ctx), -HORIZON_DAYS)) return noTouch(DATED_COLLECTION[kind]);
       switch (kind) {
         case "day":
-          return dayGroup(date, get, ctx);
+          return dayGroup(date, get);
+        case "variant":
+          return variantGroup(date, get, ctx);
+        case "cardio":
+          return cardioGroup(date, get);
         case "meals":
           return checksGroup(date, get, ctx, "meals");
         case "supps":
@@ -2131,17 +2150,21 @@ window.buildDefaultNotifConfig = function () {
       case "prs":
         {
           const prs = get("prMap", {}),
-            records = [];
+            byId = new Map();
           for (const [name, r] of Object.entries(isObj(prs) ? prs : {})) {
             const k = nameKey(name);
             if (!k || !isObj(r)) continue;
-            records.push(rec("personalRecord", k, {
+            const prev = byId.get(k);
+            const w = toNumber(r.peso),
+              pw = prev ? toNumber(prev.data.peso) : null;
+            if (prev && w !== null && pw !== null && w < pw) continue;
+            byId.set(k, rec("personalRecord", k, {
               exerciseName: name,
               ...r
             }));
           }
           return {
-            records
+            records: [...byId.values()]
           };
         }
       case "shopping":
@@ -2209,39 +2232,49 @@ window.buildDefaultNotifConfig = function () {
       }
     };
   }
-  function dayGroup(date, get, ctx) {
+  function dayGroup(date, get) {
+    const records = [];
+    const checkIn = get(`checkIn_${date}`, null);
+    if (isObj(checkIn)) records.push(dayRec(date, "checkIn", checkIn));
+    const hydration = get(`hydration_${date}`, null);
+    if (hasValue(hydration)) records.push(dayRec(date, "hydration", hydration));
+    const notes = get(`notes_${date}`, null);
+    if (hasValue(notes)) records.push(dayRec(date, "notes", notes));
+    if (get(`restDay_${date}`, false) === true) records.push(dayRec(date, "rest", true));
+    return {
+      records
+    };
+  }
+  function variantGroup(date, get, ctx) {
+    const di = dietIndex(ctx && ctx.diet);
+    if (!di) return noTouch("dayState");
+    const v = dayVariant(date, get, di);
+    return {
+      records: v ? [dayRec(date, "dietVariant", v.key)] : []
+    };
+  }
+  function cardioGroup(date, get) {
     const acts = get("activities", []);
-    const list = Array.isArray(acts) ? acts : [];
-    if (list.length >= CAP.activities) {
-      const dates = list.filter(a => isObj(a) && Number.isSafeInteger(a.id) && a.id > 0).map(a => localDateKey(a.id));
-      const oldest = dates.reduce((m, d) => d < m ? d : m, NONE);
+    const list = (Array.isArray(acts) ? acts : []).filter(a => isObj(a) && Number.isSafeInteger(a.id) && a.id > 0);
+    if ((Array.isArray(acts) ? acts.length : 0) >= CAP.activities) {
+      const oldest = list.map(a => localDateKey(a.id)).reduce((m, d) => d < m ? d : m, NONE);
       if (date <= oldest) return noTouch("dayState");
     }
-    const data = {
-      date
-    };
-    const checkIn = get(`checkIn_${date}`, null);
-    if (isObj(checkIn)) data.checkIn = checkIn;
-    const hydration = get(`hydration_${date}`, null);
-    if (hasValue(hydration)) data.hydration = hydration;
-    const notes = get(`notes_${date}`, null);
-    if (hasValue(notes)) data.notes = notes;
-    const explicit = get(`dietaVariant_${date}`, null);
-    const v = hasValue(explicit) ? null : dayVariant(date, get, dietIndex(ctx && ctx.diet));
-    if (hasValue(explicit)) data.dietVariant = explicit;else if (v) data.dietVariant = v.key;
-    if (get(`restDay_${date}`, false) === true) data.rest = true;
-    const cardio = [];
+    const byId = new Map();
     for (const a of list) {
-      if (!isObj(a) || !Number.isSafeInteger(a.id) || a.id <= 0 || localDateKey(a.id) !== date) continue;
+      if (localDateKey(a.id) !== date) continue;
       const {
         when,
         ...entry
       } = a;
-      cardio.push(entry);
+      byId.set(a.id, rec("dayState", `${date}:cardio:${a.id}`, {
+        date,
+        field: "cardio",
+        value: entry
+      }));
     }
-    if (cardio.length) data.cardio = cardio;
     return {
-      records: Object.keys(data).length > 1 ? [rec("dayState", date, data)] : []
+      records: [...byId.values()]
     };
   }
   function checksGroup(date, get, ctx, kind) {
@@ -2395,7 +2428,11 @@ window.buildDefaultNotifConfig = function () {
     const d = recordDate(record);
     switch (record.collection) {
       case "dayState":
-        return d ? [`checkIn_${d}`, `hydration_${d}`, `notes_${d}`, `restDay_${d}`, `dietaVariant_${d}`, "activities"] : [];
+        {
+          const field = dayFieldOf(record);
+          if (field === "cardio") return ["activities"];
+          return d && DAY_FIELD_KEY[field] ? [`${DAY_FIELD_KEY[field]}${d}`] : [];
+        }
       case "mealCheck":
         return d ? [`dietaCheck_${d}`] : [];
       case "supplementCheck":
@@ -2442,29 +2479,44 @@ window.buildDefaultNotifConfig = function () {
     for (const key of new Set(keys || [])) {
       const m = DAY_KEY_RE.exec(key);
       if (m) {
-        const date = m[2],
-          day = one("dayState", date) || {};
+        const date = m[2];
+        const field = f => {
+          const d = one("dayState", `${date}:${f}`);
+          return d ? d.value : undefined;
+        };
         switch (m[1]) {
           case "checkIn_":
-            put(key, isObj(day.checkIn) ? day.checkIn : undefined);
-            break;
+            {
+              const v = field("checkIn");
+              put(key, isObj(v) ? v : undefined);
+              break;
+            }
           case "hydration_":
-            put(key, hasValue(day.hydration) ? day.hydration : undefined);
-            break;
+            {
+              const v = field("hydration");
+              put(key, hasValue(v) ? v : undefined);
+              break;
+            }
           case "notes_":
-            put(key, hasValue(day.notes) ? day.notes : undefined);
-            break;
+            {
+              const v = field("notes");
+              put(key, hasValue(v) ? v : undefined);
+              break;
+            }
           case "restDay_":
-            put(key, day.rest === true ? true : undefined);
+            put(key, field("rest") === true ? true : undefined);
             break;
           case "dietaVariant_":
-            put(key, hasValue(day.dietVariant) ? day.dietVariant : undefined);
-            break;
+            {
+              const v = field("dietVariant");
+              put(key, hasValue(v) ? v : undefined);
+              break;
+            }
           case "dietaCheck_":
-            rebuildChecks(key, date, day, "meals", onDate, ctx, out);
+            rebuildChecks(key, date, field("dietVariant"), "meals", onDate, ctx, out);
             break;
           case "integ_":
-            rebuildChecks(key, date, day, "supps", onDate, ctx, out);
+            rebuildChecks(key, date, field("dietVariant"), "supps", onDate, ctx, out);
             break;
           case "schedaProg_":
             rebuildProg(key, date, onDate, ctx, out);
@@ -2497,12 +2549,12 @@ window.buildDefaultNotifConfig = function () {
         case "activities":
           {
             const acts = [];
-            all("dayState").forEach(r => (Array.isArray(r.data.cardio) ? r.data.cardio : []).forEach(a => {
-              if (isObj(a)) acts.push({
-                ...a,
+            all("dayState").forEach(r => {
+              if (r.data.field === "cardio" && isObj(r.data.value)) acts.push({
+                ...r.data.value,
                 when: "Oggi"
               });
-            }));
+            });
             acts.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
             put(key, acts.slice(0, CAP.activities));
             break;
@@ -2564,7 +2616,7 @@ window.buildDefaultNotifConfig = function () {
     }
     return out;
   }
-  function rebuildChecks(key, date, day, kind, onDate, ctx, out) {
+  function rebuildChecks(key, date, pref, kind, onDate, ctx, out) {
     const di = dietIndex(ctx && ctx.diet);
     if (!di) return;
     const byId = kind === "meals" ? di.mealById : di.suppById;
@@ -2577,7 +2629,6 @@ window.buildDefaultNotifConfig = function () {
       out[key] = undefined;
       return;
     }
-    const pref = day.dietVariant;
     recs.sort((a, b) => (a.info.variant === pref) - (b.info.variant === pref));
     const o = {};
     recs.forEach(({

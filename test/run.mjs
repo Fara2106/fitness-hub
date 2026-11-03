@@ -656,9 +656,26 @@ console.log("\nSuite RecordMap — gruppi, round-trip chiavi ⇄ record, spunte 
     ok("setLog: sostituzione su ogni serie dell'esercizio", find(built, "setLog", `${D}:${day0.exercises[1].id}:0`).data.substitutedWith === "Chest press con manubri");
     ok("workoutSession: id `${date}:${dayId}`, startedAt da gymStart_", same(find(built, "workoutSession", `${D}:${day0.id}`).data,
       { date: D, dayId: day0.id, dayName: day0.name, startedAt: 1793093400000, done: true }));
-    ok("dayState: un record con checkIn/hydration/notes/rest/dietVariant/cardio (senza `when`)", same(find(built, "dayState", D).data, {
-      date: D, checkIn: store[`checkIn_${D}`], hydration: 6, notes: "Buona sessione", rest: true, dietVariant: "ore17",
-      cardio: [{ type: "walk", min: 30, km: 2.5, note: "parco", id: actId }] }));
+    ok("dayState: un record per campo `${date}:${field}` con { date, field, value } (Ruling 7)", same(built.filter(r => r.collection === "dayState").map(r => r.id).sort(),
+      [`${D}:cardio:${actId}`, `${D}:checkIn`, `${D}:dietVariant`, `${D}:hydration`, `${D}:notes`, `${D}:rest`]) &&
+      same(find(built, "dayState", `${D}:checkIn`).data, { date: D, field: "checkIn", value: store[`checkIn_${D}`] }) &&
+      same(find(built, "dayState", `${D}:notes`).data, { date: D, field: "notes", value: "Buona sessione" }) &&
+      same(find(built, "dayState", `${D}:rest`).data, { date: D, field: "rest", value: true }) &&
+      same(find(built, "dayState", `${D}:dietVariant`).data, { date: D, field: "dietVariant", value: "ore17" }));
+    ok("dayState cardio: un record per attività `${date}:cardio:<id>`, value senza `when`", same(find(built, "dayState", `${D}:cardio:${actId}`).data,
+      { date: D, field: "cardio", value: { type: "walk", min: 30, km: 2.5, note: "parco", id: actId } }));
+    const dayIds = (st) => J(RM.buildGroup(`day:${D}`, getter(st), ctx)).records.map(r => r.id);
+    ok("dayState: campo tolto in locale (note cancellate) → il suo record sparisce dal gruppo, gli altri restano", (() => {
+      const st = { ...store, [`notes_${D}`]: "" }; const ids = dayIds(st);
+      return !ids.includes(`${D}:notes`) && ids.includes(`${D}:checkIn`) && ids.includes(`${D}:hydration`);
+    })());
+    ok("dayState: campo mai impostato → nessun record", same(dayIds({ [`checkIn_${D}`]: { sleep: 3, energy: 3, ailments: "" } }), [`${D}:checkIn`]));
+    ok("dayState: attività cancellata (dentro la finestra) → sparisce solo il suo record cardio", (() => {
+      const a2 = { type: "run", min: 5, km: 1, note: "", id: actId + 60000, when: "Oggi" };
+      const both = J(RM.buildGroup(`cardio:${D}`, getter({ activities: [a2, store.activities[0]] }), ctx)).records.map(r => r.id);
+      const one = J(RM.buildGroup(`cardio:${D}`, getter({ activities: [a2] }), ctx));
+      return both.length === 2 && one.records.length === 1 && one.records[0].id === `${D}:cardio:${a2.id}` && !one.window;
+    })());
     ok("settings: le cinque chiavi incluso bodyWeight → { value }", ["spesaFreq", "weightGoal", "bodyWeight", "lang", "theme"].every(k => same(find(built, "settings", k).data, { value: store[k] })));
 
     // spunte tolte → update done:false / checked:false, mai assenti
@@ -676,8 +693,13 @@ console.log("\nSuite RecordMap — gruppi, round-trip chiavi ⇄ record, spunte 
     ok("dietaVariant_ presente → spunte sulla variante indicata", !!ore17Same && withV.length === 1 && withV[0].data.mealId === ore17Same.id);
     const noV = J(RM.buildGroup(`meals:${D}`, getter({ [`dietaCheck_${D}`]: ticks }), ctx)).records;
     ok("dietaVariant_ assente → scelta della migrazione (più spunte, poi ordine del piano)", noV.length === 1 && noV[0].data.mealId === riposo.meals[0].id);
-    ok("dietaVariant_ assente → dayState.dietVariant = variante scelta", J(RM.buildGroup(`day:${D}`, getter({ [`dietaCheck_${D}`]: ticks }), ctx)).records[0].data.dietVariant === "riposo");
-    ok("dietaVariant_ → ricalcola day/meals/supps", JSON.stringify(J(RM.groupsForKey(`dietaVariant_${D}`))) === JSON.stringify([`day:${D}`, `meals:${D}`, `supps:${D}`]));
+    ok("dietaVariant_ assente → dayState dietVariant = variante scelta", same(J(RM.buildGroup(`variant:${D}`, getter({ [`dietaCheck_${D}`]: ticks }), ctx)).records,
+      [{ collection: "dayState", id: `${D}:dietVariant`, data: { date: D, field: "dietVariant", value: "riposo" } }]));
+    const badV = { [`dietaCheck_${D}`]: ticks, [`dietaVariant_${D}`]: "vecchia" };
+    ok("dietaVariant_ non nel piano → dayState e spunte usano la stessa variante risolta", J(RM.buildGroup(`variant:${D}`, getter(badV), ctx)).records[0].data.value === "riposo" &&
+      J(RM.buildGroup(`meals:${D}`, getter(badV), ctx)).records[0].data.mealId === riposo.meals[0].id);
+    ok("dietaVariant_ senza piano dieta → variant non tocca nulla", J(RM.buildGroup(`variant:${D}`, getter(badV), { ...ctx, diet: null })).window.collection === "dayState");
+    ok("dietaVariant_ → ricalcola variant/meals/supps", JSON.stringify(J(RM.groupsForKey(`dietaVariant_${D}`))) === JSON.stringify([`variant:${D}`, `meals:${D}`, `supps:${D}`]));
 
     // finestre locali
     const wl = [];
@@ -693,14 +715,16 @@ console.log("\nSuite RecordMap — gruppi, round-trip chiavi ⇄ record, spunte 
 
     // activities: 60 giorni (Ruling 5) e lista piena
     const ag = J(RM.groupsForKey("activities", [], ctx));
-    ok("activities → day:<data> degli ultimi 60 giorni fino a ctx.today", ag.length === 60 && ag[0] === `day:${TODAY}` && ag[59] === "day:2026-09-01");
+    ok("activities → cardio:<data> degli ultimi 60 giorni fino a ctx.today", ag.length === 60 && ag[0] === `cardio:${TODAY}` && ag[59] === "cardio:2026-09-01");
     const full = [];
     for (let i = 0; i < 50; i++) full.push({ type: "walk", min: 10, km: 1, note: "", id: new Date(2026, 9, 29 - Math.floor(i / 2), 9).getTime() - i, when: "Oggi" });
-    const oldest = J(RM.buildGroup("day:2026-10-05", getter({ activities: full, "checkIn_2026-10-05": { sleep: 3, energy: 3 } }), ctx));
-    ok("activities piena (50): il giorno più vecchio in lista non viene riscritto (cardio monco)", oldest.records.length === 0 && oldest.window.minId > "2026-10-05");
-    ok("activities piena (50): i giorni più recenti sì", J(RM.buildGroup("day:2026-10-29", getter({ activities: full }), ctx)).records[0].data.cardio.length === 2);
-    const acts = rebuildFrom(full.map((a, i) => ({ collection: "dayState", id: "x" + i, data: { date: "x", cardio: [{ type: a.type, min: a.min, km: a.km, note: a.note, id: a.id }] } }))
-      .concat([{ collection: "dayState", id: "2026-10-30", data: { date: "2026-10-30", cardio: [{ type: "run", min: 5, km: 1, note: "", id: new Date(2026, 9, 30, 9).getTime() }] } }]), ["activities"]).activities;
+    const oldest = J(RM.buildGroup("cardio:2026-10-05", getter({ activities: full }), ctx));
+    ok("activities piena (50): il cardio del giorno più vecchio in lista non viene riscritto né tombstonato", oldest.records.length === 0 && oldest.window.collection === "dayState" && oldest.window.minId > "2026-10-05:cardio:~");
+    ok("activities piena (50): gli altri campi di quel giorno si sincronizzano lo stesso", J(RM.buildGroup("day:2026-10-05", getter({ activities: full, "checkIn_2026-10-05": { sleep: 3, energy: 3 } }), ctx)).records.length === 1);
+    ok("activities piena (50): i giorni più recenti sì", J(RM.buildGroup("cardio:2026-10-29", getter({ activities: full }), ctx)).records.length === 2);
+    const cardioRec = (a) => ({ collection: "dayState", id: `x:cardio:${a.id}`, data: { date: "x", field: "cardio", value: { type: a.type, min: a.min, km: a.km, note: a.note, id: a.id } } });
+    const acts = rebuildFrom(full.map(cardioRec).concat([cardioRec({ type: "run", min: 5, km: 1, note: "", id: new Date(2026, 9, 30, 9).getTime() }),
+      { collection: "dayState", id: "2026-10-30:notes", data: { date: "2026-10-30", field: "notes", value: "n" } }]), ["activities"]).activities;
     ok("rebuild activities: 50 più recenti, più recente prima, con when", acts.length === 50 && acts[0].type === "run" && acts.every((a, i) => i === 0 || acts[i - 1].id >= a.id) && acts.every(a => a.when === "Oggi"));
 
     // piani mancanti / record di altri piani
@@ -719,6 +743,18 @@ console.log("\nSuite RecordMap — gruppi, round-trip chiavi ⇄ record, spunte 
 
     // keysForRecord / rebuild di tombstone
     ok("keysForRecord: tombstone (data null) → data dall'id", JSON.stringify(J(RM.keysForRecord({ collection: "mealCheck", id: `${D}:dp/v0/m0`, data: null, deleted: true }, ctx))) === JSON.stringify([`dietaCheck_${D}`]));
+    ok("keysForRecord: dayState per campo → solo la sua chiave (anche da tombstone)", JSON.stringify(J(RM.keysForRecord({ collection: "dayState", id: `${D}:notes`, data: null, deleted: true }, ctx))) === JSON.stringify([`notes_${D}`]) &&
+      JSON.stringify(J(RM.keysForRecord(find(built, "dayState", `${D}:checkIn`), ctx))) === JSON.stringify([`checkIn_${D}`]) &&
+      JSON.stringify(J(RM.keysForRecord({ collection: "dayState", id: `${D}:cardio:1`, data: null, deleted: true }, ctx))) === JSON.stringify(["activities"]));
+    ok("rebuild: tombstone di un campo dayState → rimuove solo quella chiave", (() => {
+      const recs = built.filter(r => r.id !== `${D}:notes`);
+      const c = cacheOf(recs); const o = RM.rebuildKeys([`notes_${D}`, `checkIn_${D}`], c.getRecord, c.listRecords, ctx); // senza J: undefined resta
+      return `notes_${D}` in o && o[`notes_${D}`] === undefined && same(o[`checkIn_${D}`], store[`checkIn_${D}`]);
+    })());
+    const prDup = J(RM.buildGroup("prs", getter({ prMap: { "Band Squat": { peso: 30, date: "2026-10-01" }, "band squat": { peso: 25, date: "2026-10-20" }, "Plank": { peso: 0, date: "2026-10-01" }, "plank": { peso: 0, date: "2026-10-02" } } }), ctx)).records;
+    ok("prMap: nomi uguali a meno delle maiuscole → un record, vince il peso più alto (a pari peso l'ultimo)", prDup.length === 2 &&
+      same(find(prDup, "personalRecord", "band squat").data, { exerciseName: "Band Squat", peso: 30, date: "2026-10-01" }) &&
+      find(prDup, "personalRecord", "plank").data.date === "2026-10-02");
     ok("keysForRecord: piani e settings non locali → nessuna chiave", J(RM.keysForRecord({ collection: "workoutPlan", id: "wp", data: wp.data }, ctx)).length === 0 &&
       J(RM.keysForRecord({ collection: "settings", id: "excludedFoods", data: { value: [] } }, ctx)).length === 0);
     ok("DIRECT = workoutPlan, dietPlan", RM.DIRECT.has("workoutPlan") && RM.DIRECT.has("dietPlan") && RM.DIRECT.size === 2);

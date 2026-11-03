@@ -63,6 +63,14 @@ const hasValue = (v) => v !== null && v !== undefined && v !== "";
 
 const change = (collection, id, data, updatedAt) => ({ collection, id, data, updatedAt });
 
+// dayState = un record per campo del giorno (Ruling 7: LWW per record, così check-in, note e cardio
+// scritti da device diversi nello stesso giorno non si cancellano a vicenda):
+//   id `${date}:${field}` (checkIn|hydration|notes|rest|dietVariant), data { date, field, value };
+//   cardio: un record per attività, id `${date}:cardio:${activityId}`, value = attività senza `when`.
+const dayField = (date, field, value, at) => change("dayState", `${date}:${field}`, { date, field, value }, at);
+const cardioChange = (date, entry, at) =>
+  change("dayState", `${date}:cardio:${entry.id}`, { date, field: "cardio", value: entry }, at);
+
 // ── indici sui piani migrati ────────────────────────────────────────────────
 function indexWorkout(plan) {
   const days = (plan && plan.data && plan.data.days) || [];
@@ -143,15 +151,13 @@ export function recordsFromSheet(sheet, plans, opts = {}) {
   const wi = indexWorkout(plans && plans.workout);
   const out = [];
 
-  // getCheckIn → dayState.checkIn (stessa data: vince l'ultima riga, via mergeChanges)
+  // getCheckIn → dayState `${date}:checkIn` (stessa data: vince l'ultima riga, via mergeChanges)
   for (const r of Array.isArray(checkIn) ? checkIn : []) {
     if (!r) continue;
     if (!isDate(r.date)) { st.discarded.invalid++; continue; }
     const sleep = Number(r.sleep) || 0, energy = Number(r.energy) || 0;
     if (!sleep && !energy) continue; // come la PWA: riga vuota ignorata
-    out.push(change("dayState", r.date, {
-      date: r.date, checkIn: { sleep, energy, ailments: r.ailments || "" },
-    }, noon(r.date)));
+    out.push(dayField(r.date, "checkIn", { sleep, energy, ailments: r.ailments || "" }, noon(r.date)));
   }
 
   // getPesoCorporeo → bodyWeight
@@ -212,7 +218,6 @@ export function recordsFromBackup(backup, plans, stats, opts = {}) {
   // Chiavi per-giorno lette insieme (spunte dieta, scheda, sessione) → elaborate dopo il giro.
   const days = new Map();
   const day = (date) => { if (!days.has(date)) days.set(date, {}); return days.get(date); };
-  const cardio = new Map(); // data → attività di quel giorno
   const schedaImportedOn = importDate(data.schedaData_at);
 
   for (const [key, raw] of Object.entries(data)) {
@@ -226,13 +231,13 @@ export function recordsFromBackup(backup, plans, stats, opts = {}) {
       const at = noon(date);
       switch (prefix) {
         case "checkIn_":
-          if (isObj(val)) out.push(change("dayState", date, { date, checkIn: val }, at));
+          if (isObj(val)) out.push(dayField(date, "checkIn", val, at));
           break;
         case "hydration_":
-          if (hasValue(val)) out.push(change("dayState", date, { date, hydration: val }, at));
+          if (hasValue(val)) out.push(dayField(date, "hydration", val, at));
           break;
         case "notes_":
-          if (hasValue(val)) out.push(change("dayState", date, { date, notes: val }, at));
+          if (hasValue(val)) out.push(dayField(date, "notes", val, at));
           break;
         case "coachChat_":
           (Array.isArray(val) ? val : []).forEach((m, index) => {
@@ -255,7 +260,7 @@ export function recordsFromBackup(backup, plans, stats, opts = {}) {
           ignore(prefix);
           break;
         case "restDay_":
-          if (val === true) out.push(change("dayState", date, { date, rest: true }, at));
+          if (val === true) out.push(dayField(date, "rest", true, at));
           else if (val !== false) ignore(prefix);
           break;
         default:
@@ -283,14 +288,13 @@ export function recordsFromBackup(backup, plans, stats, opts = {}) {
         break;
       case "exNotes": out.push(...exNotesChanges(val, now)); break;
       case "activities":
-        // { id: Date.now(), type, min, km, note, when } → dayState.cardio del giorno di `id`
+        // { id: Date.now(), type, min, km, note, when } → un dayState cardio per attività, nel giorno di `id`
         for (const a of Array.isArray(val) ? val : []) {
           if (!isObj(a) || !Number.isSafeInteger(a.id) || a.id <= 0) { st.discarded.cardio++; continue; }
           const date = localDateKey(a.id);
           if (!isDate(date)) { st.discarded.cardio++; continue; }
           const { when, ...entry } = a; // `when` è un'etichetta ("Oggi"), non un dato
-          if (!cardio.has(date)) cardio.set(date, []);
-          cardio.get(date).push(entry);
+          out.push(cardioChange(date, entry, noon(date)));
         }
         break;
       case "prMap":
@@ -308,7 +312,6 @@ export function recordsFromBackup(backup, plans, stats, opts = {}) {
       default: ignore(key);
     }
   }
-  for (const [date, list] of cardio) out.push(change("dayState", date, { date, cardio: list }, noon(date)));
   for (const [date, d] of days) {
     out.push(...dietChecks(date, d.meals, d.supps, variants, st));
     out.push(...setLogsFromProg(date, d.prog, d.gymSaved, wi, st, schedaImportedOn));
@@ -348,7 +351,7 @@ function dietChecks(date, meals, supps, variants, st) {
     return [];
   }
   const at = noon(date);
-  const out = [change("dayState", date, { date, dietVariant: best.key }, at)];
+  const out = [dayField(date, "dietVariant", best.key, at)];
   for (const k of mealKeys) {
     const mealId = best.meals.get(k);
     if (!mealId) { st.discarded.mealCheck++; continue; }
@@ -457,7 +460,8 @@ function savedName(saved, id, substitution) {
 // ── merge ───────────────────────────────────────────────────────────────────
 // Stesso collection/id: vince updatedAt maggiore (a pari valore, il change che
 // compare dopo negli argomenti). Se entrambi i data sono oggetti → merge
-// superficiale (i campi del vincitore sovrascrivono). Ordine = prima apparizione.
+// superficiale (i campi del vincitore sovrascrivono), tranne dayState: un record
+// per campo, il vincitore sostituisce tutto. Ordine = prima apparizione.
 export function mergeChanges(...lists) {
   const map = new Map();
   for (const list of lists) {
@@ -468,7 +472,8 @@ export function mergeChanges(...lists) {
       const later = c.updatedAt >= prev.updatedAt ? c : prev;
       const earlier = later === c ? prev : c;
       const merged = { collection: c.collection, id: c.id, updatedAt: Math.max(prev.updatedAt, c.updatedAt) };
-      merged.data = isObj(later.data) && isObj(earlier.data) ? { ...earlier.data, ...later.data } : later.data;
+      const shallow = c.collection !== "dayState" && isObj(later.data) && isObj(earlier.data);
+      merged.data = shallow ? { ...earlier.data, ...later.data } : later.data;
       if (later.deleted) merged.deleted = true;
       map.set(k, merged);
     }

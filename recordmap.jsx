@@ -10,7 +10,11 @@
 //   get(key, def) legge lo storage; getRecord(collection,id) / listRecords(collection) leggono la
 //   cache dei record; ctx = { workout: {id,data}|null, diet: {id,data}|null, today: "YYYY-MM-DD" }.
 //
-// Gruppo = insieme deterministico di record prodotto da alcune chiavi locali (vedi GROUPS sotto).
+// Gruppo = insieme deterministico di record prodotto da alcune chiavi locali (groupsForKey):
+//   day:<d> (dayState checkIn/hydration/notes/rest), variant:<d> (dayState dietVariant),
+//   cardio:<d> (dayState, un record per attività), meals:<d>, supps:<d>, sets:<d>, session:<d>,
+//   coach:<d>, weights, measures, exNotes, prs, shopping, shoppingExtra, settings.
+// dayState è un record per campo (Ruling 7): id `${date}:${field}` / `${date}:cardio:<id>`.
 // Mapping, id e forme dei `data` = backend/migrate/records.mjs (recordsFromBackup) e
 // backend/CONTRACT.md; parità testata in backend/test/recordmap-parity.test.mjs. In più rispetto
 // alla migrazione: spunte tolte → done:false / checked:false (mai tombstone), settings bodyWeight.
@@ -18,7 +22,7 @@
 // `window` di buildGroup: il motore NON tombstona id della collezione < minId (date in ordine
 // lessicale). Serve per le liste locali a finestra (weightLog 90, bodyMeasures 120, activities 50)
 // e per ciò che lo sweep a 90 giorni ha già tolto: ciò che esce dalla finestra resta sul server.
-// minId = NONE ("￿") = "non toccare niente di questa collezione" (dati locali incompleti).
+// minId = NONE ("\uffff") = "non toccare niente del gruppo" (dati locali incompleti).
 //
 // rebuildKeys: chiave nel risultato con valore → scrivi; con undefined → rimuovi; chiave ASSENTE
 // dal risultato → lascia com'è (manca il piano per ricostruirla, o il dato non è sul server).
@@ -28,12 +32,15 @@
 (function () {
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
   const DAY_KEY_RE = /^(checkIn_|hydration_|notes_|restDay_|dietaVariant_|dietaCheck_|integ_|schedaProg_|gymSaved_|gym_|gymStart_|muscleSets_|coachChat_)(\d{4}-\d{2}-\d{2})$/;
-  const GROUP_RE = /^(day|meals|supps|sets|session|coach):(\d{4}-\d{2}-\d{2})$/;
-  const NONE = "￿";
+  const GROUP_RE = /^(day|variant|cardio|meals|supps|sets|session|coach):(\d{4}-\d{2}-\d{2})$/;
+  const NONE = "\uffff";
   const HORIZON_DAYS = 90;     // sweep _cleanupOldDailyKeys (app.jsx): chiavi per-giorno < oggi−90 rimosse
-  const ACTIVITY_DAYS = 60;    // Ruling 5: `activities` ricalcola i dayState degli ultimi 60 giorni
+  const ACTIVITY_DAYS = 60;    // Ruling 5: `activities` ricalcola il cardio degli ultimi 60 giorni
   const CAP = { activities: 50, weightLog: 90, bodyMeasures: 120 }; // stessi tagli della PWA
   const SETTINGS_KEYS = ["spesaFreq", "weightGoal", "bodyWeight", "lang", "theme"];
+  // dayState = un record per campo (Ruling 7): id `${date}:${field}`, data { date, field, value };
+  // cardio: un record per attività, id `${date}:cardio:${activityId}`. Campo → chiave locale:
+  const DAY_FIELD_KEY = { checkIn: "checkIn_", hydration: "hydration_", notes: "notes_", rest: "restDay_", dietVariant: "dietaVariant_" };
   const DIRECT = new Set(["workoutPlan", "dietPlan"]);
 
   // Stessa tabella di screens/scheda.jsx (handleSaveSession → muscleSets_<data>).
@@ -60,6 +67,9 @@
   const rec = (collection, id, data) => ({ collection, id, data });
   const noTouch = (collection) => ({ records: [], window: { collection, minId: NONE } });
   // Data di un record: data.date, altrimenti il prefisso dell'id (tombstone: data null).
+  const dayRec = (date, field, value) => rec("dayState", `${date}:${field}`, { date, field, value });
+  // Campo di un dayState: data.field, altrimenti dall'id `${date}:${field}[:…]` (tombstone).
+  const dayFieldOf = (r) => (r && isObj(r.data) && r.data.field) || String((r && r.id) || "").slice(11).split(":")[0];
   const recordDate = (r) => {
     if (r && isObj(r.data) && isDate(r.data.date)) return r.data.date;
     const head = String((r && r.id) || "").slice(0, 10);
@@ -139,9 +149,9 @@
       const d = m[2];
       switch (m[1]) {
         case "checkIn_": case "hydration_": case "notes_": case "restDay_": return [`day:${d}`];
-        case "dietaVariant_": return [`day:${d}`, `meals:${d}`, `supps:${d}`];
-        case "dietaCheck_": return [`meals:${d}`, `day:${d}`];
-        case "integ_": return [`supps:${d}`, `day:${d}`];
+        case "dietaVariant_": return [`variant:${d}`, `meals:${d}`, `supps:${d}`];
+        case "dietaCheck_": return [`meals:${d}`, `variant:${d}`];
+        case "integ_": return [`supps:${d}`, `variant:${d}`];
         case "schedaProg_": return [`sets:${d}`, `session:${d}`];
         case "gymSaved_": return [`sets:${d}`];
         case "gym_": case "gymStart_": return [`session:${d}`];
@@ -151,9 +161,9 @@
     }
     switch (key) {
       case "activities": {
-        // Ruling 5: la lista è condivisa fra i giorni → i dayState degli ultimi 60 giorni.
+        // Ruling 5: la lista è condivisa fra i giorni → il cardio degli ultimi 60 giorni.
         const today = todayOf(ctx), out = [];
-        for (let i = 0; i < ACTIVITY_DAYS; i++) out.push(`day:${addDays(today, -i)}`);
+        for (let i = 0; i < ACTIVITY_DAYS; i++) out.push(`cardio:${addDays(today, -i)}`);
         return out;
       }
       case "weightLog": return ["weights"];
@@ -167,7 +177,7 @@
   }
 
   // ── buildGroup ────────────────────────────────────────────────────────────
-  const DATED_COLLECTION = { day: "dayState", meals: "mealCheck", supps: "supplementCheck", sets: "setLog", session: "workoutSession", coach: "coachMessage" };
+  const DATED_COLLECTION = { day: "dayState", variant: "dayState", cardio: "dayState", meals: "mealCheck", supps: "supplementCheck", sets: "setLog", session: "workoutSession", coach: "coachMessage" };
 
   function buildGroup(groupId, get, ctx) {
     const g = GROUP_RE.exec(groupId);
@@ -176,7 +186,9 @@
       // Oltre l'orizzonte dello sweep le chiavi locali non ci sono più: il server resta com'è.
       if (date < addDays(todayOf(ctx), -HORIZON_DAYS)) return noTouch(DATED_COLLECTION[kind]);
       switch (kind) {
-        case "day": return dayGroup(date, get, ctx);
+        case "day": return dayGroup(date, get);
+        case "variant": return variantGroup(date, get, ctx);
+        case "cardio": return cardioGroup(date, get);
         case "meals": return checksGroup(date, get, ctx, "meals");
         case "supps": return checksGroup(date, get, ctx, "supps");
         case "sets": return setsGroup(date, get, ctx);
@@ -200,13 +212,18 @@
         return { records };
       }
       case "prs": {
-        const prs = get("prMap", {}), records = [];
+        // Nomi che differiscono solo per maiuscole → stesso id: vince il PR col peso più alto
+        // (a pari peso, o pesi non numerici, l'ultimo nell'ordine di prMap).
+        const prs = get("prMap", {}), byId = new Map();
         for (const [name, r] of Object.entries(isObj(prs) ? prs : {})) {
           const k = nameKey(name);
           if (!k || !isObj(r)) continue;
-          records.push(rec("personalRecord", k, { exerciseName: name, ...r }));
+          const prev = byId.get(k);
+          const w = toNumber(r.peso), pw = prev ? toNumber(prev.data.peso) : null;
+          if (prev && w !== null && pw !== null && w < pw) continue;
+          byId.set(k, rec("personalRecord", k, { exerciseName: name, ...r }));
         }
-        return { records };
+        return { records: [...byId.values()] };
       }
       case "shopping": {
         const checked = get("spesaChecked", {}), records = [];
@@ -257,37 +274,46 @@
     return { records: [...byDate.values()], window: { collection, minId } };
   }
 
-  // dayState: checkIn_/hydration_/notes_/restDay_/dietaVariant_ + attività del giorno.
-  function dayGroup(date, get, ctx) {
+  // dayState del giorno, un record per campo: checkIn_/hydration_/notes_/restDay_. Un campo tolto
+  // in locale (note cancellate, riposo tolto) sparisce dal gruppo → tombstone di quel solo record.
+  function dayGroup(date, get) {
+    const records = [];
+    const checkIn = get(`checkIn_${date}`, null);
+    if (isObj(checkIn)) records.push(dayRec(date, "checkIn", checkIn));
+    const hydration = get(`hydration_${date}`, null);
+    if (hasValue(hydration)) records.push(dayRec(date, "hydration", hydration));
+    const notes = get(`notes_${date}`, null);
+    if (hasValue(notes)) records.push(dayRec(date, "notes", notes));
+    if (get(`restDay_${date}`, false) === true) records.push(dayRec(date, "rest", true));
+    return { records };
+  }
+
+  // dayState dietVariant: la stessa variante risolta usata per le spunte (dayVariant: dietaVariant_
+  // solo se è nel piano attivo, altrimenti la scelta della migrazione). Senza piano: non si tocca.
+  function variantGroup(date, get, ctx) {
+    const di = dietIndex(ctx && ctx.diet);
+    if (!di) return noTouch("dayState");
+    const v = dayVariant(date, get, di);
+    return { records: v ? [dayRec(date, "dietVariant", v.key)] : [] };
+  }
+
+  // dayState cardio: un record per attività del giorno (senza `when`, che è un'etichetta).
+  // Lista piena (CAP): i giorni fino al più vecchio presente possono aver perso voci tagliate in
+  // locale → nessun record e nessun tombstone (sul server restano).
+  function cardioGroup(date, get) {
     const acts = get("activities", []);
-    const list = Array.isArray(acts) ? acts : [];
-    // Lista attività piena (CAP): i giorni fino al più vecchio presente possono aver perso voci
-    // tagliate in locale → non si riscrive il dayState (il cardio sul server resterebbe monco).
-    if (list.length >= CAP.activities) {
-      const dates = list.filter((a) => isObj(a) && Number.isSafeInteger(a.id) && a.id > 0).map((a) => localDateKey(a.id));
-      const oldest = dates.reduce((m, d) => (d < m ? d : m), NONE);
+    const list = (Array.isArray(acts) ? acts : []).filter((a) => isObj(a) && Number.isSafeInteger(a.id) && a.id > 0);
+    if ((Array.isArray(acts) ? acts.length : 0) >= CAP.activities) {
+      const oldest = list.map((a) => localDateKey(a.id)).reduce((m, d) => (d < m ? d : m), NONE);
       if (date <= oldest) return noTouch("dayState");
     }
-    const data = { date };
-    const checkIn = get(`checkIn_${date}`, null);
-    if (isObj(checkIn)) data.checkIn = checkIn;
-    const hydration = get(`hydration_${date}`, null);
-    if (hasValue(hydration)) data.hydration = hydration;
-    const notes = get(`notes_${date}`, null);
-    if (hasValue(notes)) data.notes = notes;
-    const explicit = get(`dietaVariant_${date}`, null);
-    const v = hasValue(explicit) ? null : dayVariant(date, get, dietIndex(ctx && ctx.diet));
-    if (hasValue(explicit)) data.dietVariant = explicit;
-    else if (v) data.dietVariant = v.key;
-    if (get(`restDay_${date}`, false) === true) data.rest = true;
-    const cardio = [];
+    const byId = new Map();
     for (const a of list) {
-      if (!isObj(a) || !Number.isSafeInteger(a.id) || a.id <= 0 || localDateKey(a.id) !== date) continue;
-      const { when, ...entry } = a; // `when` è un'etichetta ("Oggi"), non un dato
-      cardio.push(entry);
+      if (localDateKey(a.id) !== date) continue;
+      const { when, ...entry } = a;
+      byId.set(a.id, rec("dayState", `${date}:cardio:${a.id}`, { date, field: "cardio", value: entry }));
     }
-    if (cardio.length) data.cardio = cardio;
-    return { records: Object.keys(data).length > 1 ? [rec("dayState", date, data)] : [] };
+    return { records: [...byId.values()] };
   }
 
   // mealCheck / supplementCheck: tutte le voci (vere e false) sulla variante del giorno.
@@ -418,8 +444,11 @@
     if (!record || DIRECT.has(record.collection)) return [];
     const d = recordDate(record);
     switch (record.collection) {
-      case "dayState":
-        return d ? [`checkIn_${d}`, `hydration_${d}`, `notes_${d}`, `restDay_${d}`, `dietaVariant_${d}`, "activities"] : [];
+      case "dayState": {
+        const field = dayFieldOf(record);
+        if (field === "cardio") return ["activities"];
+        return d && DAY_FIELD_KEY[field] ? [`${DAY_FIELD_KEY[field]}${d}`] : [];
+      }
       case "mealCheck": return d ? [`dietaCheck_${d}`] : [];
       case "supplementCheck": return d ? [`integ_${d}`] : [];
       case "setLog": return d ? [`schedaProg_${d}`, `muscleSets_${d}`] : [];
@@ -451,15 +480,16 @@
     for (const key of new Set(keys || [])) {
       const m = DAY_KEY_RE.exec(key);
       if (m) {
-        const date = m[2], day = one("dayState", date) || {};
+        const date = m[2];
+        const field = (f) => { const d = one("dayState", `${date}:${f}`); return d ? d.value : undefined; };
         switch (m[1]) {
-          case "checkIn_": put(key, isObj(day.checkIn) ? day.checkIn : undefined); break;
-          case "hydration_": put(key, hasValue(day.hydration) ? day.hydration : undefined); break;
-          case "notes_": put(key, hasValue(day.notes) ? day.notes : undefined); break;
-          case "restDay_": put(key, day.rest === true ? true : undefined); break;
-          case "dietaVariant_": put(key, hasValue(day.dietVariant) ? day.dietVariant : undefined); break;
-          case "dietaCheck_": rebuildChecks(key, date, day, "meals", onDate, ctx, out); break;
-          case "integ_": rebuildChecks(key, date, day, "supps", onDate, ctx, out); break;
+          case "checkIn_": { const v = field("checkIn"); put(key, isObj(v) ? v : undefined); break; }
+          case "hydration_": { const v = field("hydration"); put(key, hasValue(v) ? v : undefined); break; }
+          case "notes_": { const v = field("notes"); put(key, hasValue(v) ? v : undefined); break; }
+          case "restDay_": put(key, field("rest") === true ? true : undefined); break;
+          case "dietaVariant_": { const v = field("dietVariant"); put(key, hasValue(v) ? v : undefined); break; }
+          case "dietaCheck_": rebuildChecks(key, date, field("dietVariant"), "meals", onDate, ctx, out); break;
+          case "integ_": rebuildChecks(key, date, field("dietVariant"), "supps", onDate, ctx, out); break;
           case "schedaProg_": rebuildProg(key, date, onDate, ctx, out); break;
           case "gym_": // la PWA non toglie mai gym_: senza sessione chiusa la chiave resta com'è
             if (onDate("workoutSession", date).some((r) => r.data.done)) put(key, true);
@@ -483,8 +513,9 @@
       switch (key) {
         case "activities": {
           const acts = [];
-          all("dayState").forEach((r) => (Array.isArray(r.data.cardio) ? r.data.cardio : [])
-            .forEach((a) => { if (isObj(a)) acts.push({ ...a, when: "Oggi" }); })); // `when` come lo scrive app.jsx
+          all("dayState").forEach((r) => {
+            if (r.data.field === "cardio" && isObj(r.data.value)) acts.push({ ...r.data.value, when: "Oggi" }); // `when` come app.jsx
+          });
           acts.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0)); // più recente prima (app.jsx)
           put(key, acts.slice(0, CAP.activities));
           break;
@@ -533,7 +564,7 @@
 
   // dietaCheck_/integ_ dai record del giorno nel piano dieta attivo; a parità di chiave locale
   // vince la variante del giorno (dayState.dietVariant).
-  function rebuildChecks(key, date, day, kind, onDate, ctx, out) {
+  function rebuildChecks(key, date, pref, kind, onDate, ctx, out) {
     const di = dietIndex(ctx && ctx.diet);
     if (!di) return;
     const byId = kind === "meals" ? di.mealById : di.suppById;
@@ -541,7 +572,6 @@
     const recs = onDate(kind === "meals" ? "mealCheck" : "supplementCheck", date)
       .map((r) => ({ r, info: byId.get(r.data[idField]) })).filter((x) => x.info);
     if (!recs.length) { out[key] = undefined; return; }
-    const pref = day.dietVariant;
     recs.sort((a, b) => (a.info.variant === pref) - (b.info.variant === pref));
     const o = {};
     recs.forEach(({ r, info }) => { o[info.key] = !!r.data.done; });

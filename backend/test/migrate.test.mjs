@@ -306,12 +306,12 @@ test("M5: --verify confronta il contenuto: data diverso, record mancante o elimi
   // stessi conteggi ma contenuto diverso: la verifica a soli conteggi passerebbe
   await t.DB.prepare(`UPDATE records SET data = '{"value":99}' WHERE collection = 'settings' AND id = 'weightGoal'`).run();
   await t.DB.prepare("UPDATE records SET deleted = 1, data = NULL WHERE collection = 'bodyWeight' AND id = '2026-10-28'").run();
-  await t.DB.prepare("UPDATE records SET id = 'altro' WHERE collection = 'dayState' AND id = '2026-10-26'").run();
+  await t.DB.prepare("UPDATE records SET id = 'altro' WHERE collection = 'dayState' AND id = '2026-10-26:checkIn'").run();
   const bad = await t.run({ verify: true });
   assert.equal(bad.ok, false);
   assert.deepEqual(bad.verify.diffs.map((d) => `${d.key} ${d.problem}`).sort(), [
     "bodyWeight/2026-10-28 eliminato sul server",
-    "dayState/2026-10-26 manca sul server",
+    "dayState/2026-10-26:checkIn manca sul server",
     "settings/weightGoal contenuto diverso",
   ]);
   assert.ok(bad.verify.rows.find((x) => x.collection === "settings").ok); // conteggio uguale, contenuto no

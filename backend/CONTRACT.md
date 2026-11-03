@@ -35,7 +35,7 @@ Protocollo di sync (push/pull, cursore, `conflicts`, `epoch`/`reset`, regola di 
 
 | Collezione | id | data |
 |---|---|---|
-| `dayState` | `YYYY-MM-DD` | `{ date, checkIn?: { sleep, energy, ailments }, hydration?, notes?, dietVariant?, rest?, cardio?: [{ id, type, min, km, note }] }` — `dietVariant` = key della variante dieta del giorno |
+| `dayState` | `${date}:${field}` con `field` = `checkIn`\|`hydration`\|`notes`\|`rest`\|`dietVariant`; cardio: `${date}:cardio:${activityId}` | `{ date, field, value }` — un record per campo del giorno (LWW per campo: un check-in su un device e il cardio su un altro nello stesso giorno non si cancellano). `value`: `checkIn` → `{ sleep, energy, ailments }`, `hydration` → numero, `notes` → stringa, `rest` → `true`, `dietVariant` → key della variante dieta del giorno, `cardio` → `{ id, type, min, km, note }` (un record per attività). Campo tolto → tombstone di quel record; campo mai impostato → nessun record |
 | `setLog` | `${date}:${exerciseId}:${setIndex}` (setIndex da 0) | `{ date, exerciseId, exerciseName, planId\|null, setIndex, weight: string, reps: number\|null, done, substitutedWith: string\|null }` — `exerciseName`/`planId` conservano il contesto anche se il piano cambia o viene eliminato; `exerciseId` = `name:<nome minuscolo>` se l'esercizio non è nel piano |
 | `workoutSession` | `${date}:${dayId}` | `{ date, dayId, dayName, startedAt: ms\|null, done }` |
 | `mealCheck` | `${date}:${mealId}` | `{ date, mealId, done }` |
