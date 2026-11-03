@@ -70,9 +70,10 @@ const TimerOverlay = ({ seconds, onClose }) => {
   const done = remaining === 0;
 
   return (
+    <UIPortal>
     <div
+      className="lfh-overlay"
       style={{
-        position: "fixed", inset: 0,
         background: "rgba(10,10,10,0.88)",
         backdropFilter: "blur(22px)",
         WebkitBackdropFilter: "blur(22px)",
@@ -123,6 +124,7 @@ const TimerOverlay = ({ seconds, onClose }) => {
       </div>
       <div className="muted" style={{ fontSize: 11.5, marginTop: 16, color: "#8e8e9a" }}>{t("Tocca ovunque per chiudere")}</div>
     </div>
+    </UIPortal>
   );
 };
 
@@ -305,6 +307,16 @@ const ExerciseCard = ({
       if (onPesosChange) onPesosChange(updated);
     }
   }, [sheetsWeights]);
+
+  // Pesi cambiati dal Player (stesso stato condiviso keyed-by-id): riallinea la
+  // lista. Prima la card teneva i valori vecchi e alla prima modifica nella
+  // lista li ripushava, cancellando i pesi digitati nel Player.
+  React.useEffect(() => {
+    if (savedPesos && savedPesos.length === ex.sets.length &&
+        savedPesos.join("\u0001") !== pesos.join("\u0001")) {
+      setPesos(savedPesos.slice());
+    }
+  }, [savedPesos]);
 
   // Notifica il parent quando i pesos cambiano (per il salvataggio su Sheets)
   const handlePesoChange = (i, v) => {
@@ -549,8 +561,9 @@ const SessionSummaryOverlay = ({ data, onClose }) => {
     </div>
   );
   return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 9992,
+    <UIPortal>
+    <div className="lfh-overlay" style={{
+      zIndex: 9992,
       background: "var(--bg)", display: "flex", flexDirection: "column",
       padding: "max(env(safe-area-inset-top), 20px) 20px calc(env(safe-area-inset-bottom) + 20px)",
       overflowY: "auto",
@@ -607,6 +620,7 @@ const SessionSummaryOverlay = ({ data, onClose }) => {
         </button>
       </div>
     </div>
+    </UIPortal>
   );
 };
 
@@ -622,6 +636,22 @@ const WorkoutPlayer = ({
   const [restSecs, setRestSecs] = React.useState(null);
 
   const ex = exercises[cursor];
+  // Storico reale dell'esercizio (ultime 3 sessioni da Sheets/getPesi).
+  // Hook PRIMA di ogni return: dopo il return condizionale l'ordine degli hook
+  // cambiava fra render ("Rendered fewer hooks") e React smontava l'app.
+  const exName = ex ? (substitutions[window.exId(dayKey, cursor)] || ex.name) : "";
+  const exHistory = React.useMemo(() => {
+    if (!window.Insights || !pesiHistory || !exName) return [];
+    return window.Insights.exerciseSessions(pesiHistory, exName, 3);
+  }, [pesiHistory, exName]);
+
+  // Esercizio senza serie (riga di testo/cardio nella scheda): saltalo invece
+  // di lasciare il player bloccato su uno schermo vuoto.
+  React.useEffect(() => {
+    if (ex && (!ex.sets || !ex.sets.length)) {
+      if (cursor < exercises.length - 1) setCursor(cursor + 1); else onClose();
+    }
+  }, [cursor, ex]);
   if (!ex || !ex.sets || !ex.sets.length) return null;
   const id = window.exId(dayKey, cursor);
   const done = completion[id] || new Array(ex.sets.length).fill(false);
@@ -658,15 +688,22 @@ const WorkoutPlayer = ({
     arr[curSet] = true;
     onPatch({ completion: { [id]: arr } });
     const nowAllDone = arr.every(Boolean);
-    if (autoRest && !nowAllDone) setRestSecs(ex.rest || 90);
-    else if (nowAllDone) setTimeout(advance, 250);
+    const isLast = cursor >= exercises.length - 1;
+    if (!nowAllDone) {
+      if (autoRest) setRestSecs(ex.rest || 90);
+    } else {
+      // Esercizio finito: si passa al successivo e, se non era l'ultimo, il
+      // recupero parte comunque (prima fra un esercizio e l'altro non c'era).
+      // Il timer copre il prossimo esercizio: chiudendolo lo hai già davanti.
+      if (autoRest && !isLast && !allSetsDone) setRestSecs(ex.rest || 90);
+      setTimeout(advance, 250);
+    }
   };
 
   const label = substitutions[id] ? t(substitutions[id]) : t(ex.name);
   const next = exercises[cursor + 1];
 
   // ── Progressione + PR (coach silenzioso) ──────────────────────────────────
-  const exName = substitutions[id] || ex.name;
   const WP = window.WorkoutProgress;
   // Ultimo peso reale della serie: pesi Sheets (getUltimiPesi) → history esercizio.
   const lastRaw = (() => {
@@ -686,19 +723,18 @@ const WorkoutPlayer = ({
   const isDeload = !!(deload && deload.deload);
   const deloadW  = isDeload && window.Insights ? window.Insights.deloadWeight(lastRaw) : null;
 
-  // Storico reale dell'esercizio (ultime 3 sessioni da Sheets/getPesi).
-  const exHistory = React.useMemo(() => {
-    if (!window.Insights || !pesiHistory) return [];
-    return window.Insights.exerciseSessions(pesiHistory, exName, 3);
-  }, [pesiHistory, exName]);
   const exNote = (exNotes || {})[(exName || "").toLowerCase()];
 
   return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 9990,
+    <UIPortal>
+    <div className="lfh-overlay" style={{
+      zIndex: 9990,
       background: "var(--bg)", display: "flex", flexDirection: "column",
       padding: "max(env(safe-area-inset-top), 20px) 20px calc(env(safe-area-inset-bottom) + 20px)",
     }}>
+      {/* Colonna centrata: su iPad/desktop il bottone "Serie fatta" e il resto
+          non si stirano su tutta la larghezza dello schermo. */}
+      <div style={{ flex: 1, minHeight: 0, width: "100%", maxWidth: 560, margin: "0 auto", display: "flex", flexDirection: "column" }}>
       {/* Top bar */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <button className="btn ghost" style={{ padding: "8px 10px" }} title={t("Esci dal player")} onClick={onClose}>
@@ -731,7 +767,8 @@ const WorkoutPlayer = ({
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 8 }}>
           <input
             type="text" value={pesoVal} onChange={(e) => setPeso(e.target.value)}
-            placeholder={t("kg o elastico")} className="input num"
+            // Placeholder corto: a 40px "kg o elastico" veniva troncato ("kg o (").
+            placeholder="kg" className="input num"
             style={{ width: 150, textAlign: "center", fontSize: 40, fontWeight: 700, padding: "8px 10px", borderRadius: 14 }}
           />
           <span className="num" style={{ fontSize: 22, fontWeight: 600, color: "var(--text-2)" }}>× {ex.sets[curSet].rip}</span>
@@ -835,11 +872,13 @@ const WorkoutPlayer = ({
           {t("Auto-recupero")} ({ex.rest || 90}s)
         </label>
       </div>
+      </div>
 
       {restSecs != null && (
         <TimerOverlay seconds={restSecs} onClose={() => setRestSecs(null)} />
       )}
     </div>
+    </UIPortal>
   );
 };
 
@@ -852,13 +891,16 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   const current = days.find(d => d.key === scheda) || days[0] || { key: "", num: 0, name: "", focus: [], exercises: [] };
 
   // Blocco progressi di giornata (piatto, keyed-by-id, valido per TUTTI i giorni).
-  const [prog, setProg] = React.useState(() => window.readSchedaProg(window.storage, _todayK()));
+  // Giorno della sessione fissato all'apertura: un allenamento a cavallo della
+  // mezzanotte non si spezza su due chiavi schedaProg_/gym_ diverse.
+  const dayK = React.useRef(_todayK()).current;
+  const [prog, setProg] = React.useState(() => window.readSchedaProg(window.storage, dayK));
   const completion    = prog.completion;      // { "Day#pos": [bool,…] }
   const substitutions = prog.substitutions;   // { "Day#pos": "nome alt" }
   const [timer, setTimer]   = React.useState(null);
   const [occupied, setOccupied] = React.useState({}); // effimero, keyed-by-id
   const [showConfetti, setShowConfetti] = React.useState(false);
-  const [notes, setNotes]   = React.useState(() => window.storage ? window.storage.get(`notes_${_todayK()}`, "") : "");
+  const [notes, setNotes]   = React.useState(() => window.storage ? window.storage.get(`notes_${dayK}`, "") : "");
   const [sheetsWeights, setSheetsWeights] = React.useState(null);
   // Storico completo per-esercizio da Sheets (getPesi): alimenta la card
   // "Ultime sessioni" nel Player e il confronto nel riepilogo di chiusura.
@@ -879,6 +921,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   const pesosRef = React.useRef(null);
   if (pesosRef.current === null) pesosRef.current = Object.assign({}, prog.pesos);
 
+  const [saveRequested, setSaveRequested] = React.useState(false); // fine Player → salva
   const [mode, setMode] = React.useState("list");   // "list" | "player"
   const [cursor, setCursor] = React.useState(0);      // indice esercizio nel player
   const [autoRest, setAutoRest] = React.useState(true);
@@ -897,13 +940,13 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
     // Prima serie completata del giorno → timestamp di inizio sessione
     // (usato dal riepilogo di chiusura per la durata reale).
     if (patch.completion && window.storage) {
-      const k = `gymStart_${_todayK()}`;
+      const k = `gymStart_${dayK}`;
       if (!window.storage.get(k, null) &&
           Object.values(patch.completion).some(arr => (arr || []).some(Boolean))) {
         window.storage.set(k, Date.now());
       }
     }
-    window.writeSchedaProg(window.storage, _todayK(), patch);
+    window.writeSchedaProg(window.storage, dayK, patch);
     setProg(p => ({
       completion:    Object.assign({}, p.completion,    patch.completion),
       substitutions: Object.assign({}, p.substitutions, patch.substitutions),
@@ -999,6 +1042,13 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
     if (!allDone) prevDoneRef.current = false;
   }, [allDone]);
 
+  // Salvataggio richiesto dal Player: gira con lo stato aggiornato.
+  React.useEffect(() => {
+    if (!saveRequested) return;
+    setSaveRequested(false);
+    if (completedSets > 0) handleSaveSession();
+  }, [saveRequested]);
+
   const toggleSet = (exIdx, setIdx) => {
     if (navigator.vibrate) navigator.vibrate([100]);
     const id = window.exId(scheda, exIdx);
@@ -1018,7 +1068,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
     setSaving(true);
     let sessionPRs = []; // PR battuti in QUESTA chiusura → riepilogo
     try {
-      const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
+      const today = dayK;
       // Persist notes
       if (window.storage) window.storage.set(`notes_${today}`, notes);
 
@@ -1082,50 +1132,66 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
       }
 
       let queuedOffline = false;
+      let nothingNew = false;
       if (window.sheetsAPI) {
-        // 1. Salva riepilogo sessione (se la rete manca finisce nella coda
-        //    offline di api.jsx e riparte da sola al ritorno online)
-        const sessRes = await window.sheetsAPI.saveSessione({
-          date: today,
-          type: scheda,
-          setsCompleted: completedSets,
-          totalSets,
-          notes,
-        });
-        queuedOffline = !!(sessRes && sessRes.queued);
-
-        // 2. Salva ogni serie completata su SerieAllenamento
-        const savePromises = [];
+        // Serie già inviate oggi ("Day#pos#set" → peso): richiudere la sessione
+        // (Player che risalva a fine giro + "Chiudi sessione", o riapertura)
+        // NON deve duplicare le righe su Sheets — si inviano solo le novità.
+        const savedKey = `gymSaved_${today}`;
+        const saved = (window.storage && window.storage.get(savedKey, {})) || {};
+        const toSend = [];
         exercises.forEach((ex, exIdx) => {
           const id = window.exId(scheda, exIdx);
           const exCompletion = completion[id] || [];
           const exName = substitutions[id] || ex.name;
           const exPesos = pesosRef.current[id] || ex.sets.map(s => String(s.peso));
           ex.sets.forEach((s, setIdx) => {
-            if (!exCompletion[setIdx]) return; // salta serie non completate
-            // Testo libero: peso può essere un numero (kg) o una parola (es. elastico
-            // "rosso"/"medio"). Salviamo il valore digitato COM'È; fallback al default
-            // solo se il campo è vuoto (prima un parseFloat lo convertiva e perdeva la parola).
+            if (!exCompletion[setIdx]) return;
             const raw = exPesos[setIdx];
             const peso = (raw != null && String(raw).trim() !== "") ? raw : s.peso;
-            savePromises.push(
-              window.sheetsAPI.savePeso({
-                date: today,
-                esercizio: exName,
-                setN: setIdx + 1,
-                peso,
-                rip: s.rip,
-                sessione: current.name || scheda,
-              })
-            );
+            const k = `${id}#${setIdx}`;
+            if (saved[k] === `${exName}|${peso}`) return;
+            toSend.push({ k, sig: `${exName}|${peso}`, exName, setIdx, peso, rip: s.rip });
           });
         });
-        // Fire-and-forget le serie (non bloccare UI se fallisce una)
-        await Promise.allSettled(savePromises);
+        nothingNew = toSend.length === 0;
+
+        // 1. Salva riepilogo sessione (se la rete manca finisce nella coda
+        //    offline di api.jsx e riparte da sola al ritorno online)
+        if (!nothingNew) {
+          const sessRes = await window.sheetsAPI.saveSessione({
+            date: today,
+            type: scheda,
+            setsCompleted: completedSets,
+            totalSets,
+            notes,
+          });
+          queuedOffline = !!(sessRes && sessRes.queued);
+        }
+
+        // 2. Salva ogni serie NUOVA su SerieAllenamento (testo libero: il peso
+        //    può essere "rosso"/"medio" per gli elastici — salvato com'è).
+        const results = await Promise.allSettled(toSend.map(r =>
+          window.sheetsAPI.savePeso({
+            date: today,
+            esercizio: r.exName,
+            setN: r.setIdx + 1,
+            peso: r.peso,
+            rip: r.rip,
+            sessione: current.name || scheda,
+          })
+        ));
+        if (toSend.length && window.storage) {
+          const next = Object.assign({}, window.storage.get(savedKey, {}) || {});
+          results.forEach((res, i) => { if (res.status === "fulfilled") next[toSend[i].k] = toSend[i].sig; });
+          window.storage.set(savedKey, next);
+        }
       }
-      setSaveMsg("✓ " + (queuedOffline
-        ? t("Sessione salvata — sync quando torni online")
-        : t("Sessione salvata")));
+      setSaveMsg("✓ " + (nothingNew
+        ? t("Sessione già salvata")
+        : queuedOffline
+          ? t("Sessione salvata — sync quando torni online")
+          : t("Sessione salvata")));
     } catch (err) {
       setSaveMsg("⚠️ " + (err.message || t("Errore salvataggio")));
     } finally {
@@ -1218,7 +1284,9 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
       </div>
 
       {/* Exercise grid */}
-      <div style={{ display: "grid", gridTemplateColumns: isDesktop ? "1fr 1fr" : "1fr", gap: isDesktop ? 18 : 12 }}>
+      {/* Colonne adattive: su iPad in verticale (Sidebar + ~600px utili) due
+          colonne fisse schiacciavano le card ("kg o ela…", nomi su 3 righe). */}
+      <div style={{ display: "grid", gridTemplateColumns: isDesktop ? "repeat(auto-fill, minmax(340px, 1fr))" : "1fr", gap: isDesktop ? 18 : 12 }}>
         {exercises.map((ex, i) => {
           const id = window.exId(scheda, i);
           return (
@@ -1321,9 +1389,11 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
           onClose={() => setMode("list")}
           onFinish={() => {
             // Fine dell'ultimo esercizio → chiudi il player e salva la sessione
-            // (con riepilogo). Se non c'è nulla di completato, solo chiusura.
+            // (con riepilogo). Salvataggio DIFFERITO al render successivo: qui
+            // la closure vedeva ancora lo stato PRIMA dell'ultima "Serie fatta"
+            // → l'ultima serie mancava da Sheets, PR e riepilogo.
             setMode("list");
-            if (completedSets > 0) handleSaveSession();
+            setSaveRequested(true);
           }}
         />
       )}
@@ -1335,6 +1405,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
 
       {/* Celebrazione record personali (PR) */}
       {newPRs.length > 0 && (
+        <UIPortal>
         <div className="pop-in" style={{
           position: "fixed", left: 16, right: 16, bottom: "calc(env(safe-area-inset-bottom) + 90px)",
           zIndex: 9995, background: "var(--card)", border: "1px solid rgba(48,209,88,0.4)",
@@ -1351,6 +1422,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
             </div>
           </div>
         </div>
+        </UIPortal>
       )}
     </div>
   );

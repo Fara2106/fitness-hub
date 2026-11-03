@@ -103,21 +103,71 @@ function _safe(p, ms) {
   ]);
 }
 
-// Salva una setting con un retry (le push erano fire-and-forget: un singolo
-// errore di rete faceva sparire per sempre il dato dal cloud).
+// ── Push settings: retry + serializzato/coalescente per chiave + "pending" ──
+// 1) Retry: un singolo errore di rete non fa sparire il dato dal cloud.
+// 2) Per chiave le push vanno in fila e si manda solo l'ULTIMO valore: con
+//    tante spunte rapide (Spesa) le POST parallele arrivavano ad Apps Script
+//    in ordine sparso e nel foglio restava uno stato vecchio.
+// 3) Ogni valore scritto in locale resta in "settingsPending" (persistito)
+//    finché il cloud non lo conferma. Il pull (cloud-wins) NON sovrascrive le
+//    chiavi pending né quelle confermate mentre il pull era in volo: prima un
+//    pull concorrente riportava indietro un import scheda/dieta o una spunta
+//    appena fatta. Le pending rimaste (offline, app chiusa) si ri-pushano al
+//    primo pull riuscito.
+const _push = {}; // key → { chain, latest, busy, doneAt }
+function _pendingSettings() {
+  return (window.storage && window.storage.get("settingsPending", {})) || {};
+}
+function _setPending(key, value) {
+  if (!window.storage) return;
+  const p = Object.assign({}, _pendingSettings());
+  if (value === undefined) { if (!(key in p)) return; delete p[key]; }
+  else p[key] = value;
+  window.storage.set("settingsPending", p);
+}
+
 function _saveSettingRetry(key, value, tries = 2) {
   if (!window.sheetsAPI) return Promise.resolve(false);
+  const v = String(value);
+  _setPending(key, v);
+  const slot = _push[key] || (_push[key] = { chain: Promise.resolve(), latest: null, busy: 0, doneAt: 0 });
+  slot.latest = v;
+  slot.busy++;
   const attempt = (n) =>
-    window.sheetsAPI.saveSettings({ key, value: String(value) })
-      .then(() => { console.log("[sync push]", key, "✓"); return true; })
+    window.sheetsAPI.saveSettings({ key, value: v })
+      .then(() => {
+        slot.doneAt = Date.now();
+        if (_pendingSettings()[key] === v) _setPending(key, undefined);
+        console.log("[sync push]", key, "✓");
+        return true;
+      })
       .catch(e => {
         if (n > 0) return new Promise(r => setTimeout(r, 800)).then(() => attempt(n - 1));
         console.warn("[sync push err]", key, e);
-        return false;
+        return false; // resta pending → ri-push al prossimo pull riuscito
       });
-  return attempt(tries);
+  // Superato da un valore più recente prima del suo turno → lo manda quello.
+  const run = slot.chain.then(() => (slot.latest !== v ? true : attempt(tries)));
+  slot.chain = run.catch(() => {}).then(() => { slot.busy--; });
+  return run;
 }
 window._saveSettingRetry = _saveSettingRetry;
+
+// Il pull deve lasciare stare questa chiave? (modifica locale non ancora
+// confermata dal cloud, o confermata DOPO l'avvio del pull → risposta stale)
+function _cloudSkip(key, pullStart) {
+  if (key in _pendingSettings()) return true;
+  const s = _push[key];
+  return !!(s && (s.busy > 0 || (s.doneAt && s.doneAt > pullStart - 1500)));
+}
+
+// Ri-pusha le modifiche locali rimaste pending (offline / app chiusa a metà).
+function _repushPending() {
+  Object.entries(_pendingSettings()).forEach(([k, v]) => {
+    const s = _push[k];
+    if (!s || s.busy === 0) _saveSettingRetry(k, v);
+  });
+}
 
 // ── Sorgente di verità: i file scheda.txt / dieta.txt del repo ────────────
 // L'app leggeva schedaData/dietaData SOLO da storage (import manuale o cloud):
@@ -143,13 +193,30 @@ async function _reconcileRepoFiles() {
       // cache-bust + no-store: prendi sempre la versione fresca del repo
       // (il service worker è comunque network-first sui file same-origin).
       const url = new URL(file, document.baseURI).href + "?_cb=" + Date.now();
-      const res = await fetch(url, { cache: "no-store" });
+      // Timeout: con rete "finta" (palestra) la fetch poteva restare appesa
+      // a lungo; il file del repo non è mai urgente.
+      const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+      const tid = ctrl && setTimeout(() => ctrl.abort(), 6000);
+      const res = await fetch(url, { cache: "no-store", signal: ctrl ? ctrl.signal : undefined })
+        .finally(() => clearTimeout(tid));
       if (!res.ok) return;                     // offline / 404 → non toccare nulla
       const text = await res.text();
       if (!text || !text.trim()) return;
       // Non applicare un file rotto: deve almeno parsare in modo valido.
       if (parse) { try { if (!valid(parse(text))) return; } catch (_) { return; } }
-      if (text === st.get(key + "_src", null)) return;  // invariato dall'ultima volta
+      const prevSrc = st.get(key + "_src", null);
+      if (text === prevSrc) return;  // invariato dall'ultima volta
+      if (prevSrc === null) {
+        // Primo avvio su QUESTO device (o PWA appena aggiunta alla Home, che ha
+        // uno storage separato da Safari): registra la versione del repo SENZA
+        // imporla né pusharla. Prima il .txt del repo vinceva e veniva pushato
+        // al cloud → cancellava ovunque la scheda/dieta importata a mano.
+        // La versione vera arriva dal pull cloud; se il cloud è vuoto resta
+        // questa (identica al fallback embedded).
+        st.set(key + "_src", text);
+        if (!st.get(key, null)) { st.set(key, text); st.set(key + "_name", file); }
+        return;
+      }
       st.set(key, text);
       st.set(key + "_src", text);
       st.set(key + "_name", file);             // mostrato in Impostazioni → File di testo
@@ -170,6 +237,7 @@ async function _cloudSync(opts) {
   if (!window.sheetsAPI || !window.storage) return;
   const st = window.storage;
   const { pesiMs = 8000, settingsMs = 15000 } = opts || {};
+  const pullStart = Date.now();
 
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
     _setSyncState("offline");
@@ -234,29 +302,35 @@ async function _cloudSync(opts) {
     if (settingsRes.ok && settingsRes.value && typeof settingsRes.value === "object") {
       const s = settingsRes.value;
       cloudKeys = s;
+      // Le chiavi con una modifica locale non ancora confermata restano locali.
+      const skip = (k) => _cloudSkip(k, pullStart);
       ["schedaData", "dietaData"].forEach(k => {
         // Se il .txt del repo ha già vinto in questa sessione, non lasciare che
         // il valore (ancora vecchio) del cloud lo riscriva prima che il push propaghi.
-        if (_repoOverride[k]) return;
-        if (s[k]) { st.set(k, s[k]); console.log("[sync pull]", k, "✓"); }
+        if (_repoOverride[k] || skip(k)) return;
+        if (s[k] && s[k] !== st.get(k, null)) {
+          st.set(k, s[k]);
+          st.set(k + "_name", "cloud");   // Impostazioni → Piani: "cloud · …"
+          console.log("[sync pull]", k, "✓");
+        }
       });
       // spesaChecked2: chiave cloud "pulita" (la vecchia "spesaChecked" aveva
       // righe duplicate nel foglio → lettura sempre stale). Pull retro-compatibile.
       const spesaCloud = s.spesaChecked2 || s.spesaChecked;
-      if (spesaCloud) {
+      if (spesaCloud && !skip("spesaChecked2")) {
         try { st.set("spesaChecked", JSON.parse(spesaCloud)); console.log("[sync pull] spesaChecked ✓"); } catch(_) {}
       }
-      if (s.spesaFreq)  st.set("spesaFreq", Number(s.spesaFreq) || 1);
-      if (s.spesaExtra) {
+      if (s.spesaFreq && !skip("spesaFreq"))  st.set("spesaFreq", Number(s.spesaFreq) || 1);
+      if (s.spesaExtra && !skip("spesaExtra")) {
         try { st.set("spesaExtra", JSON.parse(s.spesaExtra)); } catch (_) {}
       }
-      if (s.weightGoal && parseFloat(s.weightGoal) > 0) st.set("weightGoal", parseFloat(s.weightGoal));
-      if (s.exNotes) {
+      if (s.weightGoal && parseFloat(s.weightGoal) > 0 && !skip("weightGoal")) st.set("weightGoal", parseFloat(s.weightGoal));
+      if (s.exNotes && !skip("exNotes")) {
         try { st.set("exNotes", JSON.parse(s.exNotes)); } catch (_) {}
       }
       // groqApiKey: NON sincronizzata (sicurezza) — la chiave resta solo sul device,
       // così non finisce nel foglio Settings esposto dal backend pubblico.
-      if (s.bodyWeight && parseFloat(s.bodyWeight) > 0) {
+      if (s.bodyWeight && parseFloat(s.bodyWeight) > 0 && !skip("bodyWeight")) {
         st.set("bodyWeight", parseFloat(s.bodyWeight));
         console.log("[sync pull] bodyWeight (settings) →", s.bodyWeight);
       }
@@ -280,7 +354,7 @@ async function _cloudSync(opts) {
     // 4. Push locale → cloud SOLO per chiavi mancanti, e SOLO se il pull è
     //    riuscito (cloudKeys != null). Se il pull è fallito non sappiamo cosa
     //    c'è nel cloud → non pushare, per non sovrascrivere dati buoni.
-    if (cloudKeys) _cloudPushMissing(cloudKeys);
+    if (cloudKeys) { _repushPending(); _cloudPushMissing(cloudKeys); }
     else console.warn("[sync] pull settings fallito → push saltato (anti-clobber)");
 
     _setSyncState(settingsRes.ok || pesiRes.ok ? "ok" : "error");
@@ -408,7 +482,7 @@ function _cleanupOldDailyKeys() {
     const cut = new Date();
     cut.setDate(cut.getDate() - 90);
     const cutKey = `${cut.getFullYear()}-${String(cut.getMonth() + 1).padStart(2, "0")}-${String(cut.getDate()).padStart(2, "0")}`;
-    const re = /^(checkIn_|hydration_|notes_|gym_|integ_|coachChat_|schedaProg_|muscleSets_|dietaCheck_|gymStart_|restDay_|nudgeDismissed_)(\d{4}-\d{2}-\d{2})$/;
+    const re = /^(checkIn_|hydration_|notes_|gym_|integ_|coachChat_|schedaProg_|muscleSets_|dietaCheck_|gymStart_|gymSaved_|restDay_|nudgeDismissed_)(\d{4}-\d{2}-\d{2})$/;
     window.storage.keys().forEach(k => {
       const m = k.match(re);
       if (m && m[2] < cutKey) window.storage.remove(k);
@@ -560,15 +634,36 @@ const AppFrame = ({ device: _deviceProp, initialScreen, chromeless }) => {
   }, []);
   const syncNowRef = React.useRef(null);
 
+  // Riallinea lo stato React condiviso a quanto la sync ha scritto in storage.
+  const applySynced = () => {
+    const s = initState();
+    setStateRaw(prev => ({
+      ...prev,
+      bodyWeight:   s.bodyWeight,
+      checkIn:      s.checkIn,
+      spesaChecked: s.spesaChecked,
+      spesaFreq:    s.spesaFreq,
+    }));
+  };
+
   React.useEffect(() => {
     if (!storageReady || initialized) return;
     _cleanupOldDailyKeys();
-    _reconcileRepoFiles().finally(() => _cloudSync()).finally(() => {
-      const s = initState();
-      setStateRaw(s);
+    const finish = () => {
+      setStateRaw(initState());
       setLang(window.storage ? window.storage.get("lang", "it") : "it");
       setInitialized(true);
-    });
+    };
+    const bootSync = _reconcileRepoFiles().finally(() => _cloudSync());
+    if (window.storage && window.storage.get("onboardingDone", false)) {
+      // Avvio "a regime": UI subito dai dati locali, sync in background.
+      // Prima lo spinner aspettava .txt del repo + sync cloud (fino a ~15 s
+      // con la rete scarsa della palestra) a OGNI apertura.
+      finish();
+      bootSync.finally(applySynced);
+    } else {
+      bootSync.finally(finish); // primo avvio: serve il cloud per saltare l'onboarding
+    }
   }, [storageReady]);
 
   // Persist state changes to storage
@@ -626,6 +721,9 @@ const AppFrame = ({ device: _deviceProp, initialScreen, chromeless }) => {
   React.useEffect(() => {
     if (!initialized) return;
     const el = document.querySelector(".lfh-scroll");
+    // Il contenitore di scroll è condiviso fra le schermate: senza reset una
+    // tab si apriva già scrollata alla posizione della precedente.
+    if (el) el.scrollTop = 0;
     if (el && window.Motion) window.Motion.screenEnter(el);
   }, [state.screen, initialized]);
 
@@ -637,16 +735,7 @@ const AppFrame = ({ device: _deviceProp, initialScreen, chromeless }) => {
     // Pull dal cloud + riallinea lo stato React condiviso
     const pullAndApply = () => {
       if (document.visibilityState !== "visible") return Promise.resolve();
-      return _cloudSync({ pesiMs: 6000, settingsMs: 8000 }).finally(() => {
-        const s = initState();
-        setStateRaw(prev => ({
-          ...prev,
-          bodyWeight:   s.bodyWeight,
-          checkIn:      s.checkIn,
-          spesaChecked: s.spesaChecked,
-          spesaFreq:    s.spesaFreq,
-        }));
-      });
+      return _cloudSync({ pesiMs: 6000, settingsMs: 8000 }).finally(applySynced);
     };
     syncNowRef.current = pullAndApply;
 
@@ -705,7 +794,12 @@ const AppFrame = ({ device: _deviceProp, initialScreen, chromeless }) => {
           <div className="lfh-scroll" style={{ flex: 1 }}>
             {/* Contenuto centrato con max-width: sfrutta lo spazio iPad/desktop
                 senza stirare le schermate a tutta larghezza. */}
-            <div style={{ maxWidth: 960, width: "100%", margin: "0 auto", minHeight: "100%", display: "flex", flexDirection: "column" }}>
+            <div style={{
+              maxWidth: 960, width: "100%", margin: "0 auto", minHeight: "100%", display: "flex", flexDirection: "column",
+              // Coach = chat a tutta altezza con scroll interno: con il solo
+              // min-height il suo height:100% collassava (input a metà schermo).
+              height: state.screen === "coach" ? "100%" : undefined,
+            }}>
               <Screen which={state.screen} device={device} state={state} set={setState} globalCtx={globalCtx} />
             </div>
           </div>

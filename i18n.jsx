@@ -367,7 +367,7 @@ const I18N_DICT = {
 
   // Coach
   "Online · Claude Haiku 4.5": { en: "Online · Claude Haiku 4.5" },
-  "Groq · llama-3.3-70b-versatile": { en: "Groq · llama-3.3-70b-versatile" },
+  "Groq · gpt-oss-120b": { en: "Groq · gpt-oss-120b" },
   "Connesso": { en: "Connected" },
   "messaggi": { en: "messages" },
   "Chiedi al coach…": { en: "Ask the coach…" },
@@ -446,7 +446,7 @@ const I18N_DICT = {
   "API key e sorgenti dati": { en: "API keys & data sources" },
   "API key Groq": { en: "Groq API key" },
   "Per AI Coach": { en: "For AI Coach" },
-  "Coach AI · llama-3.3-70b-versatile": { en: "AI Coach · llama-3.3-70b-versatile" },
+  "Coach AI · Groq gpt-oss-120b": { en: "AI Coach · Groq gpt-oss-120b" },
   "Sheets: pesi, sessioni, movimenti": { en: "Sheets: weights, sessions, activities" },
   "Sorgente scheda + dieta": { en: "Workout + diet source" },
   "Mostra": { en: "Show" },
@@ -465,6 +465,11 @@ const I18N_DICT = {
   "Importato": { en: "Imported" },
   "Ultimo import": { en: "Last import" },
   "Formato non valido — dati attuali conservati": { en: "Invalid format — current data kept" },
+  "File identico a quello attuale": { en: "Same as the current file" },
+  "Sessione già salvata": { en: "Session already saved" },
+  "sync cloud…": { en: "cloud sync…" },
+  "sincronizzato": { en: "synced" },
+  "salvato sul device, sync cloud appena torna la rete": { en: "saved on device, cloud sync when back online" },
   "Errore di lettura del file": { en: "Could not read the file" },
   // Player: storico, note setup, deload, riepilogo sessione
   "Ultime sessioni": { en: "Recent sessions" },

@@ -189,10 +189,26 @@ const Bubble = ({ m }) => {
         border: "1px solid var(--border)",
         fontSize: 14, lineHeight: 1.5, letterSpacing: -0.003,
         whiteSpace: "pre-wrap",
-      }}>{m.text}</div>
+      }}>{_mdLite(m.text)}</div>
     </div>
   );
 };
+
+// Markdown minimo delle risposte del modello: **grassetto**, elenchi "- "/"* "
+// → "• ", titoli "#" → grassetto. Solo elementi React (niente innerHTML):
+// prima gli asterischi comparivano grezzi nella bolla.
+function _mdLite(text) {
+  return String(text || "").split("\n").map((line, li) => {
+    let l = line.replace(/^\s*[-*]\s+/, "• ").replace(/^\s*#{1,6}\s+(.*)$/, "**$1**");
+    const parts = l.split(/\*\*(.+?)\*\*/g); // indici dispari = grassetto
+    return (
+      <React.Fragment key={li}>
+        {li > 0 ? "\n" : null}
+        {parts.map((p, i) => (i % 2 ? <strong key={i} style={{ fontWeight: 650 }}>{p}</strong> : p))}
+      </React.Fragment>
+    );
+  });
+}
 
 // ── Coach screen ───────────────────────────────────────────────────────────
 const Coach = ({ device, onNav, activities = [], checkIn, bodyWeight }) => {
@@ -250,8 +266,7 @@ const Coach = ({ device, onNav, activities = [], checkIn, bodyWeight }) => {
       const reply = await window.groqAPI.complete({
         messages: history,
         systemPrompt: _buildSystemPrompt({ activities, checkIn, bodyWeight, lang }),
-        model: "llama-3.3-70b-versatile",
-        maxTokens: 512,
+        maxTokens: 900,   // modello: default di groqAPI (con fallback se ritirato)
         onDelta: (txt) => setPartial(txt),   // SSE: bolla che si riempie parola per parola
       });
 

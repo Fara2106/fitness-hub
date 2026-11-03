@@ -196,13 +196,14 @@ window.sheetsAPI = {
     console.log("[queue] drain:", q.length, "operazioni in coda");
     try {
       while (q.length) {
+        const head = q[0];
         try {
-          await this._send(q[0].body);
+          await this._send(head.body);
         } catch (e) {
           if (e._net) return;
-          console.warn("[queue] scartata (errore backend):", q[0].body.action, e.message);
+          console.warn("[queue] scartata (errore backend):", head.body.action, e.message);
         }
-        q = q.slice(1);
+        q = (window.storage.get("sheetsQueue", []) || []).filter(x => x !== head && !(x.ts === head.ts && JSON.stringify(x.body) === JSON.stringify(head.body)));
         window.storage.set("sheetsQueue", q);
       }
       console.log("[queue] coda svuotata ✓");
@@ -314,6 +315,7 @@ document.addEventListener("visibilitychange", () => {
 if (window.storage && window.storage.onReady) {
   window.storage.onReady(() => setTimeout(() => window.sheetsAPI.drainQueue(), 4000));
 }
+const GROQ_MODELS = ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b"];
 window.groqAPI = {
   hasLocalKey() {
     return !!(window.storage && (window.storage.get("groqApiKey", "") || "").trim());
@@ -333,8 +335,8 @@ window.groqAPI = {
   async complete({
     messages,
     systemPrompt,
-    model = "llama-3.3-70b-versatile",
-    maxTokens = 512,
+    model,
+    maxTokens = 900,
     onDelta
   }) {
     const apiKey = (window.storage.get("groqApiKey", "") || "").trim();
@@ -342,33 +344,53 @@ window.groqAPI = {
       role: "system",
       content: systemPrompt
     }, ...messages] : messages;
-    const payload = {
-      model,
-      messages: msgs,
-      max_tokens: maxTokens,
-      temperature: 0.75
+    const saved = window.storage.get("groqModel", "");
+    const candidates = model ? [model] : [saved, ...GROQ_MODELS].filter((m, i, a) => m && a.indexOf(m) === i);
+    const send = m => {
+      const payload = {
+        model: m,
+        messages: msgs,
+        max_tokens: maxTokens,
+        temperature: 0.75
+      };
+      if (/^openai\/gpt-oss/.test(m)) payload.reasoning_effort = "low";
+      if (onDelta) payload.stream = true;
+      return apiKey ? fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(payload)
+      }) : fetch(_PROXY + "/groq", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
     };
-    if (onDelta) payload.stream = true;
-    const res = apiKey ? await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(payload)
-    }) : await fetch(_PROXY + "/groq", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
-    if (!res.ok) {
+    let res = null,
+      rateLimited = false;
+    for (let i = 0; i < candidates.length; i++) {
+      res = await send(candidates[i]);
+      if (res.ok) {
+        if (!model && !rateLimited && candidates[i] !== saved) window.storage.set("groqModel", candidates[i]);
+        break;
+      }
       let errMsg = `HTTP ${res.status}`;
       try {
         const e = await res.json();
         errMsg = (typeof e.error === "string" ? e.error : e.error?.message) || errMsg;
       } catch (_) {}
+      const gone = /does not exist|decommission|model_not_found|not supported|no access/i.test(errMsg);
+      const limited = res.status === 429 || /rate limit/i.test(errMsg);
+      if (limited) rateLimited = true;
+      if ((gone || limited) && i < candidates.length - 1) {
+        console.warn("[groq]", limited ? "rate limit" : "modello non disponibile", "→ provo il successivo:", candidates[i]);
+        continue;
+      }
+      if (limited) throw new Error("Troppe richieste al Coach in questo minuto — riprova tra qualche secondo.");
       throw new Error(errMsg);
     }
     const ctype = res.headers.get("content-type") || "";
@@ -2337,8 +2359,8 @@ const I18N_DICT = {
   "Online · Claude Haiku 4.5": {
     en: "Online · Claude Haiku 4.5"
   },
-  "Groq · llama-3.3-70b-versatile": {
-    en: "Groq · llama-3.3-70b-versatile"
+  "Groq · gpt-oss-120b": {
+    en: "Groq · gpt-oss-120b"
   },
   "Connesso": {
     en: "Connected"
@@ -2562,8 +2584,8 @@ const I18N_DICT = {
   "Per AI Coach": {
     en: "For AI Coach"
   },
-  "Coach AI · llama-3.3-70b-versatile": {
-    en: "AI Coach · llama-3.3-70b-versatile"
+  "Coach AI · Groq gpt-oss-120b": {
+    en: "AI Coach · Groq gpt-oss-120b"
   },
   "Sheets: pesi, sessioni, movimenti": {
     en: "Sheets: weights, sessions, activities"
@@ -2618,6 +2640,21 @@ const I18N_DICT = {
   },
   "Formato non valido — dati attuali conservati": {
     en: "Invalid format — current data kept"
+  },
+  "File identico a quello attuale": {
+    en: "Same as the current file"
+  },
+  "Sessione già salvata": {
+    en: "Session already saved"
+  },
+  "sync cloud…": {
+    en: "cloud sync…"
+  },
+  "sincronizzato": {
+    en: "synced"
+  },
+  "salvato sul device, sync cloud appena torna la rete": {
+    en: "saved on device, cloud sync when back online"
   },
   "Errore di lettura del file": {
     en: "Could not read the file"
@@ -3701,6 +3738,11 @@ const UIStatTile = ({
     marginLeft: 3
   }
 }, unit) : null), children);
+const UIPortal = ({
+  children
+}) => window.ReactDOM && ReactDOM.createPortal && typeof document !== "undefined" ? ReactDOM.createPortal(React.createElement("div", {
+  className: "lfh-portal"
+}, children), document.body) : children;
 const UISheet = ({
   open,
   onClose,
@@ -3708,7 +3750,7 @@ const UISheet = ({
   children
 }) => {
   if (!open) return null;
-  return React.createElement("div", {
+  return React.createElement(UIPortal, null, React.createElement("div", {
     className: "ui-sheet-backdrop",
     onClick: onClose
   }, React.createElement("div", {
@@ -3739,7 +3781,7 @@ const UISheet = ({
       fontSize: 17,
       cursor: "pointer"
     }
-  }, "✕")), children));
+  }, "✕")), children)));
 };
 const UIEmpty = ({
   icon = "spark",
@@ -3831,6 +3873,7 @@ window.UIProgress = UIProgress;
 window.UIButton = UIButton;
 window.UIStatTile = UIStatTile;
 window.UISheet = UISheet;
+window.UIPortal = UIPortal;
 window.UIEmpty = UIEmpty;
 window.UISkeleton = UISkeleton;
 window.UIAnimatedNumber = UIAnimatedNumber;
@@ -5253,9 +5296,13 @@ const Onboarding = ({
       gap: 8
     }
   }, React.createElement("input", {
-    autoFocus: true,
+    autoFocus: isDesktop,
     className: "input " + (current.mono ? "input-mono" : ""),
-    type: current.field === "api" ? "password" : "text",
+    type: "text",
+    autoComplete: "off",
+    autoCorrect: "off",
+    autoCapitalize: "off",
+    spellCheck: false,
     placeholder: current.placeholder,
     value: values[current.field],
     onChange: e => setValues(v => ({
@@ -5267,7 +5314,8 @@ const Onboarding = ({
       fontSize: isDesktop ? 17 : 15.5,
       padding: "14px 18px",
       textAlign: current.suffix ? "center" : "left",
-      fontWeight: current.mono ? 600 : 500
+      fontWeight: current.mono ? 600 : 500,
+      WebkitTextSecurity: current.field === "api" ? "disc" : "none"
     },
     onKeyDown: e => {
       if (e.key === "Enter" && canNext) handleNext();
@@ -6153,7 +6201,9 @@ const Dashboard = ({
         alignItems: "center",
         gap: 10
       }
-    }, window.SyncBadge ? React.createElement(SyncBadge, null) : null, React.createElement(UIAvatarLF, {
+    }, window.SyncBadge ? React.createElement(SyncBadge, {
+      compact: !isDesktop
+    }) : null, React.createElement(UIAvatarLF, {
       onClick: () => onNav("impostazioni")
     }))
   }), nudge && React.createElement("div", {
@@ -6615,10 +6665,9 @@ const TimerOverlay = ({
   const C = 2 * Math.PI * R;
   const dashOffset = C - C * Math.min(1, Math.max(0, remaining) / total);
   const done = remaining === 0;
-  return React.createElement("div", {
+  return React.createElement(UIPortal, null, React.createElement("div", {
+    className: "lfh-overlay",
     style: {
-      position: "fixed",
-      inset: 0,
       background: "rgba(10,10,10,0.88)",
       backdropFilter: "blur(22px)",
       WebkitBackdropFilter: "blur(22px)",
@@ -6749,7 +6798,7 @@ const TimerOverlay = ({
       marginTop: 16,
       color: "#8e8e9a"
     }
-  }, t("Tocca ovunque per chiudere")));
+  }, t("Tocca ovunque per chiudere"))));
 };
 const SetRow = ({
   s,
@@ -7146,6 +7195,11 @@ const ExerciseCard = ({
       if (onPesosChange) onPesosChange(updated);
     }
   }, [sheetsWeights]);
+  React.useEffect(() => {
+    if (savedPesos && savedPesos.length === ex.sets.length && savedPesos.join("\u0001") !== pesos.join("\u0001")) {
+      setPesos(savedPesos.slice());
+    }
+  }, [savedPesos]);
   const handlePesoChange = (i, v) => {
     setPesos(p => {
       const n = [...p];
@@ -7507,10 +7561,9 @@ const SessionSummaryOverlay = ({
       color: "var(--text-2)"
     }
   }, sub));
-  return React.createElement("div", {
+  return React.createElement(UIPortal, null, React.createElement("div", {
+    className: "lfh-overlay",
     style: {
-      position: "fixed",
-      inset: 0,
       zIndex: 9992,
       background: "var(--bg)",
       display: "flex",
@@ -7631,7 +7684,7 @@ const SessionSummaryOverlay = ({
       fontWeight: 600
     },
     onClick: onClose
-  }, t("Fatto"))));
+  }, t("Fatto")))));
 };
 const WorkoutPlayer = ({
   dayKey,
@@ -7658,6 +7711,16 @@ const WorkoutPlayer = ({
   const [showSubs, setShowSubs] = React.useState(false);
   const [restSecs, setRestSecs] = React.useState(null);
   const ex = exercises[cursor];
+  const exName = ex ? substitutions[window.exId(dayKey, cursor)] || ex.name : "";
+  const exHistory = React.useMemo(() => {
+    if (!window.Insights || !pesiHistory || !exName) return [];
+    return window.Insights.exerciseSessions(pesiHistory, exName, 3);
+  }, [pesiHistory, exName]);
+  React.useEffect(() => {
+    if (ex && (!ex.sets || !ex.sets.length)) {
+      if (cursor < exercises.length - 1) setCursor(cursor + 1);else onClose();
+    }
+  }, [cursor, ex]);
   if (!ex || !ex.sets || !ex.sets.length) return null;
   const id = window.exId(dayKey, cursor);
   const done = completion[id] || new Array(ex.sets.length).fill(false);
@@ -7693,11 +7756,16 @@ const WorkoutPlayer = ({
       }
     });
     const nowAllDone = arr.every(Boolean);
-    if (autoRest && !nowAllDone) setRestSecs(ex.rest || 90);else if (nowAllDone) setTimeout(advance, 250);
+    const isLast = cursor >= exercises.length - 1;
+    if (!nowAllDone) {
+      if (autoRest) setRestSecs(ex.rest || 90);
+    } else {
+      if (autoRest && !isLast && !allSetsDone) setRestSecs(ex.rest || 90);
+      setTimeout(advance, 250);
+    }
   };
   const label = substitutions[id] ? t(substitutions[id]) : t(ex.name);
   const next = exercises[cursor + 1];
-  const exName = substitutions[id] || ex.name;
   const WP = window.WorkoutProgress;
   const lastRaw = (() => {
     const k = (exName || "").toLowerCase(),
@@ -7713,20 +7781,25 @@ const WorkoutPlayer = ({
   const isPR = prBest != null && curNum != null && curNum > prBest;
   const isDeload = !!(deload && deload.deload);
   const deloadW = isDeload && window.Insights ? window.Insights.deloadWeight(lastRaw) : null;
-  const exHistory = React.useMemo(() => {
-    if (!window.Insights || !pesiHistory) return [];
-    return window.Insights.exerciseSessions(pesiHistory, exName, 3);
-  }, [pesiHistory, exName]);
   const exNote = (exNotes || {})[(exName || "").toLowerCase()];
-  return React.createElement("div", {
+  return React.createElement(UIPortal, null, React.createElement("div", {
+    className: "lfh-overlay",
     style: {
-      position: "fixed",
-      inset: 0,
       zIndex: 9990,
       background: "var(--bg)",
       display: "flex",
       flexDirection: "column",
       padding: "max(env(safe-area-inset-top), 20px) 20px calc(env(safe-area-inset-bottom) + 20px)"
+    }
+  }, React.createElement("div", {
+    style: {
+      flex: 1,
+      minHeight: 0,
+      width: "100%",
+      maxWidth: 560,
+      margin: "0 auto",
+      display: "flex",
+      flexDirection: "column"
     }
   }, React.createElement("div", {
     style: {
@@ -7817,7 +7890,7 @@ const WorkoutPlayer = ({
     type: "text",
     value: pesoVal,
     onChange: e => setPeso(e.target.value),
-    placeholder: t("kg o elastico"),
+    placeholder: "kg",
     className: "input num",
     style: {
       width: 150,
@@ -8012,10 +8085,10 @@ const WorkoutPlayer = ({
     type: "checkbox",
     checked: autoRest,
     onChange: e => setAutoRest(e.target.checked)
-  }), t("Auto-recupero"), " (", ex.rest || 90, "s)")), restSecs != null && React.createElement(TimerOverlay, {
+  }), t("Auto-recupero"), " (", ex.rest || 90, "s)"))), restSecs != null && React.createElement(TimerOverlay, {
     seconds: restSecs,
     onClose: () => setRestSecs(null)
-  }));
+  })));
 };
 const Scheda = ({
   device,
@@ -8033,13 +8106,14 @@ const Scheda = ({
     focus: [],
     exercises: []
   };
-  const [prog, setProg] = React.useState(() => window.readSchedaProg(window.storage, _todayK()));
+  const dayK = React.useRef(_todayK()).current;
+  const [prog, setProg] = React.useState(() => window.readSchedaProg(window.storage, dayK));
   const completion = prog.completion;
   const substitutions = prog.substitutions;
   const [timer, setTimer] = React.useState(null);
   const [occupied, setOccupied] = React.useState({});
   const [showConfetti, setShowConfetti] = React.useState(false);
-  const [notes, setNotes] = React.useState(() => window.storage ? window.storage.get(`notes_${_todayK()}`, "") : "");
+  const [notes, setNotes] = React.useState(() => window.storage ? window.storage.get(`notes_${dayK}`, "") : "");
   const [sheetsWeights, setSheetsWeights] = React.useState(null);
   const [pesiHistory, setPesiHistory] = React.useState(null);
   const [exNotes, setExNotes] = React.useState(() => window.storage ? window.storage.get("exNotes", {}) : {});
@@ -8052,6 +8126,7 @@ const Scheda = ({
   const prevDoneRef = React.useRef(null);
   const pesosRef = React.useRef(null);
   if (pesosRef.current === null) pesosRef.current = Object.assign({}, prog.pesos);
+  const [saveRequested, setSaveRequested] = React.useState(false);
   const [mode, setMode] = React.useState("list");
   const [cursor, setCursor] = React.useState(0);
   const [autoRest, setAutoRest] = React.useState(true);
@@ -8064,12 +8139,12 @@ const Scheda = ({
   }, []);
   const patchProg = patch => {
     if (patch.completion && window.storage) {
-      const k = `gymStart_${_todayK()}`;
+      const k = `gymStart_${dayK}`;
       if (!window.storage.get(k, null) && Object.values(patch.completion).some(arr => (arr || []).some(Boolean))) {
         window.storage.set(k, Date.now());
       }
     }
-    window.writeSchedaProg(window.storage, _todayK(), patch);
+    window.writeSchedaProg(window.storage, dayK, patch);
     setProg(p => ({
       completion: Object.assign({}, p.completion, patch.completion),
       substitutions: Object.assign({}, p.substitutions, patch.substitutions),
@@ -8147,6 +8222,11 @@ const Scheda = ({
     }
     if (!allDone) prevDoneRef.current = false;
   }, [allDone]);
+  React.useEffect(() => {
+    if (!saveRequested) return;
+    setSaveRequested(false);
+    if (completedSets > 0) handleSaveSession();
+  }, [saveRequested]);
   const toggleSet = (exIdx, setIdx) => {
     if (navigator.vibrate) navigator.vibrate([100]);
     const id = window.exId(scheda, exIdx);
@@ -8168,7 +8248,7 @@ const Scheda = ({
     setSaving(true);
     let sessionPRs = [];
     try {
-      const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
+      const today = dayK;
       if (window.storage) window.storage.set(`notes_${today}`, notes);
       if (window.storage) {
         window.storage.set(`gym_${today}`, true);
@@ -8239,16 +8319,11 @@ const Scheda = ({
         }));
       }
       let queuedOffline = false;
+      let nothingNew = false;
       if (window.sheetsAPI) {
-        const sessRes = await window.sheetsAPI.saveSessione({
-          date: today,
-          type: scheda,
-          setsCompleted: completedSets,
-          totalSets,
-          notes
-        });
-        queuedOffline = !!(sessRes && sessRes.queued);
-        const savePromises = [];
+        const savedKey = `gymSaved_${today}`;
+        const saved = window.storage && window.storage.get(savedKey, {}) || {};
+        const toSend = [];
         exercises.forEach((ex, exIdx) => {
           const id = window.exId(scheda, exIdx);
           const exCompletion = completion[id] || [];
@@ -8258,19 +8333,46 @@ const Scheda = ({
             if (!exCompletion[setIdx]) return;
             const raw = exPesos[setIdx];
             const peso = raw != null && String(raw).trim() !== "" ? raw : s.peso;
-            savePromises.push(window.sheetsAPI.savePeso({
-              date: today,
-              esercizio: exName,
-              setN: setIdx + 1,
+            const k = `${id}#${setIdx}`;
+            if (saved[k] === `${exName}|${peso}`) return;
+            toSend.push({
+              k,
+              sig: `${exName}|${peso}`,
+              exName,
+              setIdx,
               peso,
-              rip: s.rip,
-              sessione: current.name || scheda
-            }));
+              rip: s.rip
+            });
           });
         });
-        await Promise.allSettled(savePromises);
+        nothingNew = toSend.length === 0;
+        if (!nothingNew) {
+          const sessRes = await window.sheetsAPI.saveSessione({
+            date: today,
+            type: scheda,
+            setsCompleted: completedSets,
+            totalSets,
+            notes
+          });
+          queuedOffline = !!(sessRes && sessRes.queued);
+        }
+        const results = await Promise.allSettled(toSend.map(r => window.sheetsAPI.savePeso({
+          date: today,
+          esercizio: r.exName,
+          setN: r.setIdx + 1,
+          peso: r.peso,
+          rip: r.rip,
+          sessione: current.name || scheda
+        })));
+        if (toSend.length && window.storage) {
+          const next = Object.assign({}, window.storage.get(savedKey, {}) || {});
+          results.forEach((res, i) => {
+            if (res.status === "fulfilled") next[toSend[i].k] = toSend[i].sig;
+          });
+          window.storage.set(savedKey, next);
+        }
       }
-      setSaveMsg("✓ " + (queuedOffline ? t("Sessione salvata — sync quando torni online") : t("Sessione salvata")));
+      setSaveMsg("✓ " + (nothingNew ? t("Sessione già salvata") : queuedOffline ? t("Sessione salvata — sync quando torni online") : t("Sessione salvata")));
     } catch (err) {
       setSaveMsg("⚠️ " + (err.message || t("Errore salvataggio")));
     } finally {
@@ -8441,7 +8543,7 @@ const Scheda = ({
   }))), React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: isDesktop ? "1fr 1fr" : "1fr",
+      gridTemplateColumns: isDesktop ? "repeat(auto-fill, minmax(340px, 1fr))" : "1fr",
       gap: isDesktop ? 18 : 12
     }
   }, exercises.map((ex, i) => {
@@ -8577,12 +8679,12 @@ const Scheda = ({
     onClose: () => setMode("list"),
     onFinish: () => {
       setMode("list");
-      if (completedSets > 0) handleSaveSession();
+      setSaveRequested(true);
     }
   }), summary && React.createElement(SessionSummaryOverlay, {
     data: summary,
     onClose: () => setSummary(null)
-  }), newPRs.length > 0 && React.createElement("div", {
+  }), newPRs.length > 0 && React.createElement(UIPortal, null, React.createElement("div", {
     className: "pop-in",
     style: {
       position: "fixed",
@@ -8623,7 +8725,7 @@ const Scheda = ({
       textOverflow: "ellipsis",
       whiteSpace: "nowrap"
     }
-  }, newPRs.slice(0, 3).map(p => `${t(p.esercizio)} ${p.peso}kg`).join(" · ")))));
+  }, newPRs.slice(0, 3).map(p => `${t(p.esercizio)} ${p.peso}kg`).join(" · "))))));
 };
 window.Scheda = Scheda;
 })();
@@ -11321,8 +11423,22 @@ const Bubble = ({
       letterSpacing: -0.003,
       whiteSpace: "pre-wrap"
     }
-  }, m.text));
+  }, _mdLite(m.text)));
 };
+function _mdLite(text) {
+  return String(text || "").split("\n").map((line, li) => {
+    let l = line.replace(/^\s*[-*]\s+/, "• ").replace(/^\s*#{1,6}\s+(.*)$/, "**$1**");
+    const parts = l.split(/\*\*(.+?)\*\*/g);
+    return React.createElement(React.Fragment, {
+      key: li
+    }, li > 0 ? "\n" : null, parts.map((p, i) => i % 2 ? React.createElement("strong", {
+      key: i,
+      style: {
+        fontWeight: 650
+      }
+    }, p) : p));
+  });
+}
 const Coach = ({
   device,
   onNav,
@@ -11387,8 +11503,7 @@ const Coach = ({
           bodyWeight,
           lang
         }),
-        model: "llama-3.3-70b-versatile",
-        maxTokens: 512,
+        maxTokens: 900,
         onDelta: txt => setPartial(txt)
       });
       setMessages(ms => [...ms, {
@@ -13407,7 +13522,11 @@ const ApiKeyRow = ({
       gap: 8
     }
   }, React.createElement("input", {
-    type: show ? "text" : "password",
+    type: "text",
+    autoComplete: "off",
+    autoCorrect: "off",
+    autoCapitalize: "off",
+    spellCheck: false,
     value: val,
     onChange: e => save(e.target.value),
     placeholder: placeholder || t("Inserisci…"),
@@ -13415,7 +13534,8 @@ const ApiKeyRow = ({
     style: {
       flex: 1,
       fontSize: 13,
-      padding: "10px 12px"
+      padding: "10px 12px",
+      WebkitTextSecurity: show ? "none" : "disc"
     }
   }), React.createElement("button", {
     className: "btn ghost",
@@ -13542,7 +13662,7 @@ const FileImporter = ({
       msg: t("Errore di lettura del file")
     });
     reader.onload = ev => {
-      const text = ev.target.result;
+      const text = String(ev.target.result || "").replace(/^﻿/, "").replace(/\r\n?/g, "\n");
       const v = validate ? validate(text, t) : {
         ok: true,
         detail: ""
@@ -13554,6 +13674,14 @@ const FileImporter = ({
         });
         return;
       }
+      if (window.storage && text === window.storage.get(storageKey, null)) {
+        setStatus({
+          type: "ok",
+          msg: t("File identico a quello attuale")
+        });
+        setTimeout(() => setStatus(null), 4000);
+        return;
+      }
       const now = new Date().toISOString();
       if (window.storage) {
         window.storage.set(storageKey, text);
@@ -13563,18 +13691,22 @@ const FileImporter = ({
       setLoaded(true);
       setFileName(file.name);
       setImportedAt(now);
+      const okMsg = `${t("Importato")}${v.detail ? " · " + v.detail : ""}`;
       setStatus({
         type: "ok",
-        msg: `${t("Importato")}${v.detail ? " · " + v.detail : ""}`
+        msg: `${okMsg} · ${t("sync cloud…")}`
       });
-      if (window._saveSettingRetry) {
-        window._saveSettingRetry(storageKey, text);
-      } else if (window.sheetsAPI) {
-        window.sheetsAPI.saveSettings({
-          key: storageKey,
-          value: text
-        }).catch(() => {});
-      }
+      const push = window._saveSettingRetry ? window._saveSettingRetry(storageKey, text) : Promise.resolve(false);
+      push.then(ok => {
+        setStatus(ok ? {
+          type: "ok",
+          msg: `${okMsg} · ${t("sincronizzato")}`
+        } : {
+          type: "warn",
+          msg: `${okMsg} · ${t("salvato sul device, sync cloud appena torna la rete")}`
+        });
+        setTimeout(() => setStatus(null), 6000);
+      });
     };
     reader.readAsText(file, "UTF-8");
   };
@@ -13598,7 +13730,7 @@ const FileImporter = ({
   }, label), React.createElement("div", {
     className: "row-sub",
     style: status ? {
-      color: status.type === "err" ? "var(--danger)" : "var(--success)"
+      color: status.type === "err" ? "var(--danger)" : status.type === "warn" ? "var(--warning)" : "var(--success)"
     } : undefined
   }, subText)), React.createElement("div", {
     className: "row-trailing"
@@ -14024,9 +14156,8 @@ const ResetModal = ({
   const t = useT();
   return React.createElement("div", {
     onClick: onCancel,
+    className: "lfh-overlay",
     style: {
-      position: "fixed",
-      inset: 0,
       zIndex: 300,
       background: "rgba(0,0,0,0.5)",
       backdropFilter: "blur(2px)",
@@ -14131,172 +14262,172 @@ const ProfileEditor = ({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
   const PROGRAMS = ["Powerbuilding", "Hypertrophy", "Strength", "Cut", "Lean bulk"];
-  return React.createElement("div", {
-    onClick: onClose,
-    style: {
-      position: "absolute",
-      inset: 0,
-      zIndex: 200,
-      background: "rgba(0,0,0,0.55)",
-      backdropFilter: "blur(8px)",
-      display: "flex",
-      alignItems: isDesktop ? "center" : "flex-end",
-      justifyContent: "center",
-      animation: "fadeUp 0.18s ease"
-    }
-  }, React.createElement("div", {
-    onClick: e => e.stopPropagation(),
-    className: "pop-in",
-    style: {
-      width: isDesktop ? 480 : "100%",
-      background: "var(--card)",
-      borderRadius: isDesktop ? 18 : "22px 22px 0 0",
-      border: "1px solid var(--border)",
-      padding: 22,
-      display: "flex",
-      flexDirection: "column",
-      gap: 18,
-      overflow: "auto",
-      boxShadow: "0 20px 60px rgba(0,0,0,0.6)"
-    }
-  }, !isDesktop && React.createElement("div", {
-    style: {
-      width: 40,
-      height: 4,
-      borderRadius: 2,
-      background: "var(--card-3)",
-      margin: "-8px auto 0"
-    }
-  }), React.createElement("div", {
-    style: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center"
-    }
-  }, React.createElement("h2", {
-    style: {
-      fontSize: 20,
-      fontWeight: 600,
-      letterSpacing: -0.02
-    }
-  }, t("Modifica profilo")), React.createElement("button", {
-    onClick: onClose,
-    style: {
-      width: 30,
-      height: 30,
-      borderRadius: 999,
-      background: "var(--card-2)",
-      border: 0,
-      color: "var(--text-2)",
-      cursor: "pointer",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center"
-    }
-  }, React.createElement(Icon, {
-    name: "x",
-    size: 14,
-    strokeWidth: 2.4
-  }))), React.createElement("div", {
-    style: {
-      alignSelf: "center",
-      width: 80,
-      height: 80,
-      borderRadius: 999,
-      background: "linear-gradient(135deg, #FF9F0A 0%, #FF453A 100%)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      fontFamily: "var(--display)",
-      fontWeight: 700,
-      fontSize: 34,
-      color: "#1a0a04"
-    }
-  }, p.name.slice(0, 1).toUpperCase() || "?"), React.createElement("div", {
-    style: {
-      display: "flex",
-      flexDirection: "column",
-      gap: 14
-    }
-  }, React.createElement(IField, {
-    label: t("Nome")
-  }, React.createElement("input", {
-    className: "input",
-    value: p.name,
-    onChange: e => set("name", e.target.value),
-    autoFocus: true,
-    style: {
-      background: "var(--card-2)"
-    }
-  })), React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "1fr 1fr",
-      gap: 12
-    }
-  }, React.createElement(IField, {
-    label: t("Altezza (cm)")
-  }, React.createElement("input", {
-    className: "input input-mono",
-    value: p.height,
-    onChange: e => set("height", e.target.value.replace(/\D/g, "")),
-    style: {
-      background: "var(--card-2)"
-    }
-  })), React.createElement(IField, {
-    label: t("Età")
-  }, React.createElement("input", {
-    className: "input input-mono",
-    value: p.age,
-    onChange: e => set("age", e.target.value.replace(/\D/g, "")),
-    style: {
-      background: "var(--card-2)"
-    }
-  }))), React.createElement(IField, {
-    label: t("Programma")
-  }, React.createElement("div", {
-    style: {
-      display: "flex",
-      flexWrap: "wrap",
-      gap: 6
-    }
-  }, PROGRAMS.map(pr => {
-    const on = p.program === pr;
-    return React.createElement("button", {
-      key: pr,
-      onClick: () => set("program", pr),
+  return (React.createElement(UIPortal, null, React.createElement("div", {
+      onClick: onClose,
+      className: "lfh-overlay",
       style: {
-        padding: "8px 14px",
-        border: 0,
-        background: on ? "var(--accent)" : "var(--card-2)",
-        color: on ? "#fff" : "var(--text)",
-        borderRadius: 999,
-        fontSize: 12.5,
-        fontWeight: on ? 600 : 500,
-        cursor: "pointer",
-        transition: "all 0.16s"
+        zIndex: 200,
+        background: "rgba(0,0,0,0.55)",
+        backdropFilter: "blur(8px)",
+        display: "flex",
+        alignItems: isDesktop ? "center" : "flex-end",
+        justifyContent: "center",
+        animation: "fadeUp 0.18s ease"
       }
-    }, t(pr));
-  })))), React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 8,
-      marginTop: 4
-    }
-  }, React.createElement("button", {
-    className: "btn",
-    style: {
-      flex: 1
-    },
-    onClick: onClose
-  }, t("Annulla")), React.createElement("button", {
-    className: "btn primary",
-    style: {
-      flex: 2
-    },
-    onClick: () => onSave(p),
-    disabled: !p.name.trim()
-  }, t("Salva")))));
+    }, React.createElement("div", {
+      onClick: e => e.stopPropagation(),
+      className: "pop-in",
+      style: {
+        width: isDesktop ? 480 : "100%",
+        background: "var(--card)",
+        borderRadius: isDesktop ? 18 : "22px 22px 0 0",
+        border: "1px solid var(--border)",
+        padding: 22,
+        display: "flex",
+        flexDirection: "column",
+        gap: 18,
+        overflow: "auto",
+        boxShadow: "0 20px 60px rgba(0,0,0,0.6)"
+      }
+    }, !isDesktop && React.createElement("div", {
+      style: {
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+        background: "var(--card-3)",
+        margin: "-8px auto 0"
+      }
+    }), React.createElement("div", {
+      style: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center"
+      }
+    }, React.createElement("h2", {
+      style: {
+        fontSize: 20,
+        fontWeight: 600,
+        letterSpacing: -0.02
+      }
+    }, t("Modifica profilo")), React.createElement("button", {
+      onClick: onClose,
+      style: {
+        width: 30,
+        height: 30,
+        borderRadius: 999,
+        background: "var(--card-2)",
+        border: 0,
+        color: "var(--text-2)",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center"
+      }
+    }, React.createElement(Icon, {
+      name: "x",
+      size: 14,
+      strokeWidth: 2.4
+    }))), React.createElement("div", {
+      style: {
+        alignSelf: "center",
+        width: 80,
+        height: 80,
+        borderRadius: 999,
+        background: "linear-gradient(135deg, #FF9F0A 0%, #FF453A 100%)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "var(--display)",
+        fontWeight: 700,
+        fontSize: 34,
+        color: "#1a0a04"
+      }
+    }, p.name.slice(0, 1).toUpperCase() || "?"), React.createElement("div", {
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        gap: 14
+      }
+    }, React.createElement(IField, {
+      label: t("Nome")
+    }, React.createElement("input", {
+      className: "input",
+      value: p.name,
+      onChange: e => set("name", e.target.value),
+      autoFocus: true,
+      style: {
+        background: "var(--card-2)"
+      }
+    })), React.createElement("div", {
+      style: {
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: 12
+      }
+    }, React.createElement(IField, {
+      label: t("Altezza (cm)")
+    }, React.createElement("input", {
+      className: "input input-mono",
+      value: p.height,
+      onChange: e => set("height", e.target.value.replace(/\D/g, "")),
+      style: {
+        background: "var(--card-2)"
+      }
+    })), React.createElement(IField, {
+      label: t("Età")
+    }, React.createElement("input", {
+      className: "input input-mono",
+      value: p.age,
+      onChange: e => set("age", e.target.value.replace(/\D/g, "")),
+      style: {
+        background: "var(--card-2)"
+      }
+    }))), React.createElement(IField, {
+      label: t("Programma")
+    }, React.createElement("div", {
+      style: {
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 6
+      }
+    }, PROGRAMS.map(pr => {
+      const on = p.program === pr;
+      return React.createElement("button", {
+        key: pr,
+        onClick: () => set("program", pr),
+        style: {
+          padding: "8px 14px",
+          border: 0,
+          background: on ? "var(--accent)" : "var(--card-2)",
+          color: on ? "#fff" : "var(--text)",
+          borderRadius: 999,
+          fontSize: 12.5,
+          fontWeight: on ? 600 : 500,
+          cursor: "pointer",
+          transition: "all 0.16s"
+        }
+      }, t(pr));
+    })))), React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 8,
+        marginTop: 4
+      }
+    }, React.createElement("button", {
+      className: "btn",
+      style: {
+        flex: 1
+      },
+      onClick: onClose
+    }, t("Annulla")), React.createElement("button", {
+      className: "btn primary",
+      style: {
+        flex: 2
+      },
+      onClick: () => onSave(p),
+      disabled: !p.name.trim()
+    }, t("Salva"))))))
+  );
 };
 const Impostazioni = ({
   device,
@@ -14489,7 +14620,7 @@ const Impostazioni = ({
     icon: "spark",
     iconBg: "#BF5AF2",
     title: t("API key Groq"),
-    sub: t("Coach AI · llama-3.3-70b-versatile"),
+    sub: t("Coach AI · Groq gpt-oss-120b"),
     storageKey: "groqApiKey",
     placeholder: "gsk_…",
     testFn: () => window.groqAPI.testConnection()
@@ -14565,10 +14696,10 @@ const Impostazioni = ({
       fontSize: 11.5,
       padding: "8px 0 24px"
     }
-  }, "Lorenzo Fitness Hub · v2.8.0 · build 2026.07"), showReset && React.createElement(ResetModal, {
+  }, "Lorenzo Fitness Hub · v2.8.0 · build 2026.07"), showReset && React.createElement(UIPortal, null, React.createElement(ResetModal, {
     onConfirm: handleReset,
     onCancel: () => setShowReset(false)
-  }));
+  })));
 };
 window.Impostazioni = Impostazioni;
 })();
@@ -15202,12 +15333,37 @@ function _safe(p, ms) {
     err: "timeout"
   }), ms))]);
 }
+const _push = {};
+function _pendingSettings() {
+  return window.storage && window.storage.get("settingsPending", {}) || {};
+}
+function _setPending(key, value) {
+  if (!window.storage) return;
+  const p = Object.assign({}, _pendingSettings());
+  if (value === undefined) {
+    if (!(key in p)) return;
+    delete p[key];
+  } else p[key] = value;
+  window.storage.set("settingsPending", p);
+}
 function _saveSettingRetry(key, value, tries = 2) {
   if (!window.sheetsAPI) return Promise.resolve(false);
+  const v = String(value);
+  _setPending(key, v);
+  const slot = _push[key] || (_push[key] = {
+    chain: Promise.resolve(),
+    latest: null,
+    busy: 0,
+    doneAt: 0
+  });
+  slot.latest = v;
+  slot.busy++;
   const attempt = n => window.sheetsAPI.saveSettings({
     key,
-    value: String(value)
+    value: v
   }).then(() => {
+    slot.doneAt = Date.now();
+    if (_pendingSettings()[key] === v) _setPending(key, undefined);
     console.log("[sync push]", key, "✓");
     return true;
   }).catch(e => {
@@ -15215,9 +15371,24 @@ function _saveSettingRetry(key, value, tries = 2) {
     console.warn("[sync push err]", key, e);
     return false;
   });
-  return attempt(tries);
+  const run = slot.chain.then(() => slot.latest !== v ? true : attempt(tries));
+  slot.chain = run.catch(() => {}).then(() => {
+    slot.busy--;
+  });
+  return run;
 }
 window._saveSettingRetry = _saveSettingRetry;
+function _cloudSkip(key, pullStart) {
+  if (key in _pendingSettings()) return true;
+  const s = _push[key];
+  return !!(s && (s.busy > 0 || s.doneAt && s.doneAt > pullStart - 1500));
+}
+function _repushPending() {
+  Object.entries(_pendingSettings()).forEach(([k, v]) => {
+    const s = _push[k];
+    if (!s || s.busy === 0) _saveSettingRetry(k, v);
+  });
+}
 const _repoOverride = {};
 async function _reconcileRepoFiles() {
   if (!window.storage) return;
@@ -15241,9 +15412,12 @@ async function _reconcileRepoFiles() {
   }) => {
     try {
       const url = new URL(file, document.baseURI).href + "?_cb=" + Date.now();
+      const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+      const tid = ctrl && setTimeout(() => ctrl.abort(), 6000);
       const res = await fetch(url, {
-        cache: "no-store"
-      });
+        cache: "no-store",
+        signal: ctrl ? ctrl.signal : undefined
+      }).finally(() => clearTimeout(tid));
       if (!res.ok) return;
       const text = await res.text();
       if (!text || !text.trim()) return;
@@ -15254,7 +15428,16 @@ async function _reconcileRepoFiles() {
           return;
         }
       }
-      if (text === st.get(key + "_src", null)) return;
+      const prevSrc = st.get(key + "_src", null);
+      if (text === prevSrc) return;
+      if (prevSrc === null) {
+        st.set(key + "_src", text);
+        if (!st.get(key, null)) {
+          st.set(key, text);
+          st.set(key + "_name", file);
+        }
+        return;
+      }
       st.set(key, text);
       st.set(key + "_src", text);
       st.set(key + "_name", file);
@@ -15276,6 +15459,7 @@ async function _cloudSync(opts) {
     pesiMs = 8000,
     settingsMs = 15000
   } = opts || {};
+  const pullStart = Date.now();
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
     _setSyncState("offline");
     return;
@@ -15328,33 +15512,35 @@ async function _cloudSync(opts) {
     if (settingsRes.ok && settingsRes.value && typeof settingsRes.value === "object") {
       const s = settingsRes.value;
       cloudKeys = s;
+      const skip = k => _cloudSkip(k, pullStart);
       ["schedaData", "dietaData"].forEach(k => {
-        if (_repoOverride[k]) return;
-        if (s[k]) {
+        if (_repoOverride[k] || skip(k)) return;
+        if (s[k] && s[k] !== st.get(k, null)) {
           st.set(k, s[k]);
+          st.set(k + "_name", "cloud");
           console.log("[sync pull]", k, "✓");
         }
       });
       const spesaCloud = s.spesaChecked2 || s.spesaChecked;
-      if (spesaCloud) {
+      if (spesaCloud && !skip("spesaChecked2")) {
         try {
           st.set("spesaChecked", JSON.parse(spesaCloud));
           console.log("[sync pull] spesaChecked ✓");
         } catch (_) {}
       }
-      if (s.spesaFreq) st.set("spesaFreq", Number(s.spesaFreq) || 1);
-      if (s.spesaExtra) {
+      if (s.spesaFreq && !skip("spesaFreq")) st.set("spesaFreq", Number(s.spesaFreq) || 1);
+      if (s.spesaExtra && !skip("spesaExtra")) {
         try {
           st.set("spesaExtra", JSON.parse(s.spesaExtra));
         } catch (_) {}
       }
-      if (s.weightGoal && parseFloat(s.weightGoal) > 0) st.set("weightGoal", parseFloat(s.weightGoal));
-      if (s.exNotes) {
+      if (s.weightGoal && parseFloat(s.weightGoal) > 0 && !skip("weightGoal")) st.set("weightGoal", parseFloat(s.weightGoal));
+      if (s.exNotes && !skip("exNotes")) {
         try {
           st.set("exNotes", JSON.parse(s.exNotes));
         } catch (_) {}
       }
-      if (s.bodyWeight && parseFloat(s.bodyWeight) > 0) {
+      if (s.bodyWeight && parseFloat(s.bodyWeight) > 0 && !skip("bodyWeight")) {
         st.set("bodyWeight", parseFloat(s.bodyWeight));
         console.log("[sync pull] bodyWeight (settings) →", s.bodyWeight);
       }
@@ -15374,7 +15560,10 @@ async function _cloudSync(opts) {
       }
       console.log("[sync] onboardingDone → true");
     }
-    if (cloudKeys) _cloudPushMissing(cloudKeys);else console.warn("[sync] pull settings fallito → push saltato (anti-clobber)");
+    if (cloudKeys) {
+      _repushPending();
+      _cloudPushMissing(cloudKeys);
+    } else console.warn("[sync] pull settings fallito → push saltato (anti-clobber)");
     _setSyncState(settingsRes.ok || pesiRes.ok ? "ok" : "error");
     if (settingsRes.ok) _maybeAutoBackup();
   } catch (e) {
@@ -15479,7 +15668,7 @@ function _cleanupOldDailyKeys() {
     const cut = new Date();
     cut.setDate(cut.getDate() - 90);
     const cutKey = `${cut.getFullYear()}-${String(cut.getMonth() + 1).padStart(2, "0")}-${String(cut.getDate()).padStart(2, "0")}`;
-    const re = /^(checkIn_|hydration_|notes_|gym_|integ_|coachChat_|schedaProg_|muscleSets_|dietaCheck_|gymStart_|restDay_|nudgeDismissed_)(\d{4}-\d{2}-\d{2})$/;
+    const re = /^(checkIn_|hydration_|notes_|gym_|integ_|coachChat_|schedaProg_|muscleSets_|dietaCheck_|gymStart_|gymSaved_|restDay_|nudgeDismissed_)(\d{4}-\d{2}-\d{2})$/;
     window.storage.keys().forEach(k => {
       const m = k.match(re);
       if (m && m[2] < cutKey) window.storage.remove(k);
@@ -15685,15 +15874,31 @@ const AppFrame = ({
     return () => window.removeEventListener("lfh-sw-update", onUpd);
   }, []);
   const syncNowRef = React.useRef(null);
+  const applySynced = () => {
+    const s = initState();
+    setStateRaw(prev => ({
+      ...prev,
+      bodyWeight: s.bodyWeight,
+      checkIn: s.checkIn,
+      spesaChecked: s.spesaChecked,
+      spesaFreq: s.spesaFreq
+    }));
+  };
   React.useEffect(() => {
     if (!storageReady || initialized) return;
     _cleanupOldDailyKeys();
-    _reconcileRepoFiles().finally(() => _cloudSync()).finally(() => {
-      const s = initState();
-      setStateRaw(s);
+    const finish = () => {
+      setStateRaw(initState());
       setLang(window.storage ? window.storage.get("lang", "it") : "it");
       setInitialized(true);
-    });
+    };
+    const bootSync = _reconcileRepoFiles().finally(() => _cloudSync());
+    if (window.storage && window.storage.get("onboardingDone", false)) {
+      finish();
+      bootSync.finally(applySynced);
+    } else {
+      bootSync.finally(finish);
+    }
   }, [storageReady]);
   const setState = React.useCallback(updater => {
     setStateRaw(prev => {
@@ -15747,6 +15952,7 @@ const AppFrame = ({
   React.useEffect(() => {
     if (!initialized) return;
     const el = document.querySelector(".lfh-scroll");
+    if (el) el.scrollTop = 0;
     if (el && window.Motion) window.Motion.screenEnter(el);
   }, [state.screen, initialized]);
   React.useEffect(() => {
@@ -15756,16 +15962,7 @@ const AppFrame = ({
       return _cloudSync({
         pesiMs: 6000,
         settingsMs: 8000
-      }).finally(() => {
-        const s = initState();
-        setStateRaw(prev => ({
-          ...prev,
-          bodyWeight: s.bodyWeight,
-          checkIn: s.checkIn,
-          spesaChecked: s.spesaChecked,
-          spesaFreq: s.spesaFreq
-        }));
-      });
+      }).finally(applySynced);
     };
     syncNowRef.current = pullAndApply;
     const handleVisibility = () => {
@@ -15856,7 +16053,8 @@ const AppFrame = ({
         margin: "0 auto",
         minHeight: "100%",
         display: "flex",
-        flexDirection: "column"
+        flexDirection: "column",
+        height: state.screen === "coach" ? "100%" : undefined
       }
     }, React.createElement(Screen, {
       which: state.screen,

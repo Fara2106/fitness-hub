@@ -67,38 +67,57 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Navigazione (HTML) → network-first: serve sempre la versione più fresca
-  // Questo assicura che index.html con il codice di auto-reload venga scaricato
+  // Richieste con cache-buster (?_cb=, es. scheda.txt/dieta.txt del repo):
+  // vogliono la rete per definizione. Prima finivano in cache con un URL
+  // diverso a ogni avvio → la cache cresceva senza limiti fino al deploy dopo.
+  if (url.searchParams.has("_cb")) return;
+
+  const fromCache = (req) =>
+    caches.match(req).then((r) => r || caches.match(req, { ignoreSearch: true }));
+  const fetchAndStore = (req) =>
+    fetch(req).then((response) => {
+      if (response && response.ok) {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
+      }
+      return response;
+    });
+
+  // Navigazione (HTML) → network-first: serve sempre la versione più fresca.
+  // Con la rete "lenta ma non assente" della palestra la fetch poteva restare
+  // appesa decine di secondi prima del fallback: dopo 4 s si usa la copia in
+  // cache (se c'è) e la risposta di rete aggiorna comunque la cache.
   if (event.request.mode === "navigate") {
+    const net = fetchAndStore(event.request);
+    event.respondWith(new Promise((resolve) => {
+      let done = false;
+      const fallback = () => fromCache(event.request).then((r) => {
+        if (r && !done) { done = true; resolve(r); }
+        return r;
+      });
+      const tid = setTimeout(fallback, 4000);
+      net.then((r) => { clearTimeout(tid); if (!done) { done = true; resolve(r); } })
+        .catch(() => { clearTimeout(tid); fallback().then((r) => { if (!done) { done = true; resolve(r || Response.error()); } }); });
+    }));
+    return;
+  }
+
+  // Asset versionati (?v=<deploy>) → cache-first: il contenuto di un URL
+  // versionato non cambia mai (ogni deploy bumpa ?v= in index.html, che è
+  // network-first), quindi la rete serve solo alla prima richiesta.
+  if (url.searchParams.has("v")) {
     event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          if (response && response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          }
-          return response;
-        })
-        .catch(() => caches.match(event.request)) // fallback offline
+      caches.match(event.request).then((r) => r || fetchAndStore(event.request)
+        .catch(() => fromCache(event.request)))
     );
     return;
   }
 
-  // File statici (JS, CSS, immagini) → network-first con fallback cache.
-  // Prima si tentava stale-while-revalidate, che però serviva SEMPRE la versione
-  // vecchia al primo avvio: su iOS il nuovo codice (incluso questo SW) arrivava
-  // solo alla seconda apertura. Con network-first, appena online si prende
-  // l'ultima versione; la cache resta solo per l'uso offline.
+  // Altri file statici → network-first con fallback cache. ignoreSearch nel
+  // fallback: il precache ha gli URL senza query, la pagina li chiede con ?v=
+  // → prima il primo avvio offline dopo l'installazione restava senza bundle.
   event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        if (response && response.ok) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        }
-        return response;
-      })
-      .catch(() => caches.match(event.request))
+    fetchAndStore(event.request).catch(() => fromCache(event.request))
   );
 });
 

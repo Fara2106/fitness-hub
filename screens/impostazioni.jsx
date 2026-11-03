@@ -94,12 +94,15 @@ const ApiKeyRow = ({ icon, iconBg, title, sub, storageKey, testFn, placeholder }
         <div className="fade-up" style={{ padding: "12px 16px 14px", borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <input
-              type={show ? "text" : "password"}
+              // Testo mascherato invece di type="password": il campo password
+              // attivava portachiavi/autofill iOS (che poteva riempirlo da solo).
+              type="text"
+              autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
               value={val}
               onChange={(e) => save(e.target.value)}
               placeholder={placeholder || t("Inserisci…")}
               className="input input-mono"
-              style={{ flex: 1, fontSize: 13, padding: "10px 12px" }}
+              style={{ flex: 1, fontSize: 13, padding: "10px 12px", WebkitTextSecurity: show ? "none" : "disc" }}
             />
             <button className="btn ghost" style={{ padding: "8px 10px", flexShrink: 0 }} onClick={() => setShow(s => !s)}>
               <Icon name={show ? "eye-off" : "eye"} size={14} />
@@ -183,11 +186,18 @@ const FileImporter = ({ label, icon, storageKey, accept = "", validate }) => {
     const reader = new FileReader();
     reader.onerror = () => setStatus({ type: "err", msg: t("Errore di lettura del file") });
     reader.onload = (ev) => {
-      const text = ev.target.result;
+      // Normalizza: BOM (file da Windows/Blocco note) e a-capo CR/CRLF → LF,
+      // così il testo salvato/sincato è identico a prescindere dall'editor.
+      const text = String(ev.target.result || "").replace(/^﻿/, "").replace(/\r\n?/g, "\n");
       // Validazione: se il formato non torna, NON toccare i dati esistenti
       const v = validate ? validate(text, t) : { ok: true, detail: "" };
       if (!v.ok) {
         setStatus({ type: "err", msg: t("Formato non valido — dati attuali conservati") });
+        return;
+      }
+      if (window.storage && text === window.storage.get(storageKey, null)) {
+        setStatus({ type: "ok", msg: t("File identico a quello attuale") });
+        setTimeout(() => setStatus(null), 4000);
         return;
       }
       const now = new Date().toISOString();
@@ -199,13 +209,20 @@ const FileImporter = ({ label, icon, storageKey, accept = "", validate }) => {
       setLoaded(true);
       setFileName(file.name);
       setImportedAt(now);
-      setStatus({ type: "ok", msg: `${t("Importato")}${v.detail ? " · " + v.detail : ""}` });
-      // Sync al cloud (scheda/dieta disponibili su tutti i device) con retry
-      if (window._saveSettingRetry) {
-        window._saveSettingRetry(storageKey, text);
-      } else if (window.sheetsAPI) {
-        window.sheetsAPI.saveSettings({ key: storageKey, value: text }).catch(() => {});
-      }
+      const okMsg = `${t("Importato")}${v.detail ? " · " + v.detail : ""}`;
+      setStatus({ type: "ok", msg: `${okMsg} · ${t("sync cloud…")}` });
+      // Sync al cloud (scheda/dieta disponibili su tutti i device): retry +
+      // "pending" → un pull concorrente non può più riportare la versione
+      // vecchia, e se la rete manca riparte da sola al prossimo sync.
+      const push = window._saveSettingRetry
+        ? window._saveSettingRetry(storageKey, text)
+        : Promise.resolve(false);
+      push.then(ok => {
+        setStatus(ok
+          ? { type: "ok",   msg: `${okMsg} · ${t("sincronizzato")}` }
+          : { type: "warn", msg: `${okMsg} · ${t("salvato sul device, sync cloud appena torna la rete")}` });
+        setTimeout(() => setStatus(null), 6000);
+      });
     };
     reader.readAsText(file, "UTF-8");
   };
@@ -223,7 +240,7 @@ const FileImporter = ({ label, icon, storageKey, accept = "", validate }) => {
       </div>
       <div className="row-main">
         <div className="row-title">{label}</div>
-        <div className="row-sub" style={status ? { color: status.type === "err" ? "var(--danger)" : "var(--success)" } : undefined}>{subText}</div>
+        <div className="row-sub" style={status ? { color: status.type === "err" ? "var(--danger)" : status.type === "warn" ? "var(--warning)" : "var(--success)" } : undefined}>{subText}</div>
       </div>
       <div className="row-trailing">
         {loaded && !status && <span className="pill" style={{ fontSize: 10, background: "rgba(48,209,88,0.18)", color: "var(--success)", marginRight: 6 }}>✓</span>}
@@ -539,8 +556,9 @@ const ResetModal = ({ onConfirm, onCancel }) => {
   return (
     <div
       onClick={onCancel}
+      className="lfh-overlay"
       style={{
-        position: "fixed", inset: 0, zIndex: 300,
+        zIndex: 300,
         background: "rgba(0,0,0,0.5)",
         backdropFilter: "blur(2px)", WebkitBackdropFilter: "blur(2px)",
         display: "flex", alignItems: "flex-end",
@@ -585,8 +603,11 @@ const ProfileEditor = ({ profile, onSave, onClose, isDesktop }) => {
   const PROGRAMS = ["Powerbuilding", "Hypertrophy", "Strength", "Cut", "Lean bulk"];
 
   return (
-    <div onClick={onClose} style={{
-      position: "absolute", inset: 0, zIndex: 200,
+    // Overlay fisso in un portal: con position:absolute sulla pagina lunga di
+    // Impostazioni il pannello finiva in fondo alla pagina, fuori schermo.
+    <UIPortal>
+    <div onClick={onClose} className="lfh-overlay" style={{
+      zIndex: 200,
       background: "rgba(0,0,0,0.55)", backdropFilter: "blur(8px)",
       display: "flex", alignItems: isDesktop ? "center" : "flex-end", justifyContent: "center",
       animation: "fadeUp 0.18s ease",
@@ -645,6 +666,7 @@ const ProfileEditor = ({ profile, onSave, onClose, isDesktop }) => {
         </div>
       </div>
     </div>
+    </UIPortal>
   );
 };
 
@@ -765,7 +787,7 @@ const Impostazioni = ({ device, onNav, theme, setTheme, bodyWeight, setBodyWeigh
           icon="spark"
           iconBg="#BF5AF2"
           title={t("API key Groq")}
-          sub={t("Coach AI · llama-3.3-70b-versatile")}
+          sub={t("Coach AI · Groq gpt-oss-120b")}
           storageKey="groqApiKey"
           placeholder="gsk_…"
           testFn={() => window.groqAPI.testConnection()}
@@ -844,7 +866,7 @@ const Impostazioni = ({ device, onNav, theme, setTheme, bodyWeight, setBodyWeigh
       </div>
 
       {showReset && (
-        <ResetModal onConfirm={handleReset} onCancel={() => setShowReset(false)} />
+        <UIPortal><ResetModal onConfirm={handleReset} onCancel={() => setShowReset(false)} /></UIPortal>
       )}
     </div>
   );

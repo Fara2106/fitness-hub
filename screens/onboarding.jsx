@@ -196,9 +196,14 @@ const Onboarding = ({ device, onDone }) => {
 
           <div className="fade-up" key={`f${step}`} style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 8 }}>
             <input
-              autoFocus
+              // Su iPhone niente autofocus: apriva la tastiera/barra accessori
+              // al primo avvio prima ancora di leggere lo step.
+              autoFocus={isDesktop}
               className={"input " + (current.mono ? "input-mono" : "")}
-              type={current.field === "api" ? "password" : "text"}
+              // Testo mascherato invece di type="password": il campo password
+              // attivava portachiavi/autofill iOS (che poteva riempirlo da solo).
+              type="text"
+              autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
               placeholder={current.placeholder}
               value={values[current.field]}
               onChange={(e) => setValues(v => ({ ...v, [current.field]: e.target.value }))}
@@ -208,6 +213,7 @@ const Onboarding = ({ device, onDone }) => {
                 padding: "14px 18px",
                 textAlign: current.suffix ? "center" : "left",
                 fontWeight: current.mono ? 600 : 500,
+                WebkitTextSecurity: current.field === "api" ? "disc" : "none",
               }}
               onKeyDown={(e) => { if (e.key === "Enter" && canNext) handleNext(); }}
             />

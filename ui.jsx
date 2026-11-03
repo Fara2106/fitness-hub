@@ -166,9 +166,20 @@ const UIStatTile = ({ cap, value, unit, onClick, children }) => (
   </UICard>
 );
 
+// — Portal per overlay a schermo intero (Player, riepilogo, timer, sheet…) —
+// Renderizzati DENTRO .lfh-scroll restavano intrappolati nel suo stacking
+// context (iOS): la TabBar, sorella successiva, gli passava sopra e copriva
+// "Serie fatta"/la parte bassa — qualunque z-index avessero. Su document.body
+// stanno sopra a tutto. Il contesto React (lingua) passa comunque.
+const UIPortal = ({ children }) =>
+  (window.ReactDOM && ReactDOM.createPortal && typeof document !== "undefined")
+    ? ReactDOM.createPortal(<div className="lfh-portal">{children}</div>, document.body)
+    : children;
+
 const UISheet = ({ open, onClose, title, children }) => {
   if (!open) return null;
   return (
+    <UIPortal>
     <div className="ui-sheet-backdrop" onClick={onClose}>
       <div className="ui-sheet" onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
@@ -185,6 +196,7 @@ const UISheet = ({ open, onClose, title, children }) => {
         {children}
       </div>
     </div>
+    </UIPortal>
   );
 };
 
@@ -236,6 +248,7 @@ window.UIProgress = UIProgress;
 window.UIButton   = UIButton;
 window.UIStatTile = UIStatTile;
 window.UISheet    = UISheet;
+window.UIPortal   = UIPortal;
 window.UIEmpty    = UIEmpty;
 window.UISkeleton = UISkeleton;
 window.UIAnimatedNumber = UIAnimatedNumber;

@@ -101,13 +101,18 @@ window.sheetsAPI = {
     console.log("[queue] drain:", q.length, "operazioni in coda");
     try {
       while (q.length) {
+        const head = q[0];
         try {
-          await this._send(q[0].body);
+          await this._send(head.body);
         } catch (e) {
           if (e._net) return; // ancora offline: riprova al prossimo trigger
-          console.warn("[queue] scartata (errore backend):", q[0].body.action, e.message);
+          console.warn("[queue] scartata (errore backend):", head.body.action, e.message);
         }
-        q = q.slice(1);
+        // Rimuovi SOLO l'elemento inviato rileggendo la coda persistita: mentre
+        // la send era in volo un'altra scrittura fallita può essere stata
+        // accodata — riscrivere la copia locale la cancellava (dato perso).
+        q = (window.storage.get("sheetsQueue", []) || []).filter(x => x !== head &&
+          !(x.ts === head.ts && JSON.stringify(x.body) === JSON.stringify(head.body)));
         window.storage.set("sheetsQueue", q);
       }
       console.log("[queue] coda svuotata ✓");
@@ -165,6 +170,10 @@ if (window.storage && window.storage.onReady) {
 //      la chiave dal secret GROQ_API_KEY di Cloudflare. Così i device nuovi
 //      funzionano senza configurare nulla e nessuna chiave vive nel client.
 // Finché il Worker non ha il secret, la route risponde con un errore chiaro.
+// Modelli chat Groq in ordine di preferenza (verificati 2026-11-03 con
+// GET /openai/v1/models). Il primo che risponde viene ricordato in storage.
+const GROQ_MODELS = ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b"];
+
 window.groqAPI = {
   hasLocalKey() {
     return !!(window.storage && (window.storage.get("groqApiKey", "") || "").trim());
@@ -184,36 +193,67 @@ window.groqAPI = {
   // onDelta (opzionale): callback col testo parziale accumulato → risposta in
   // streaming (SSE). Se il server risponde JSON (proxy legacy, errori) si
   // ricade in automatico sul percorso non-stream.
-  async complete({ messages, systemPrompt, model = "llama-3.3-70b-versatile", maxTokens = 512, onDelta }) {
+  // model (opzionale): se assente si usa l'ultimo modello che ha funzionato
+  // (storage "groqModel") e poi la lista GROQ_MODELS. Se Groq risponde che il
+  // modello non esiste più (ritirato) si passa al successivo: a nov 2026
+  // llama-3.3-70b-versatile è sparito e il Coach era rotto per tutti.
+  async complete({ messages, systemPrompt, model, maxTokens = 900, onDelta }) {
     const apiKey = (window.storage.get("groqApiKey", "") || "").trim();
 
     const msgs = systemPrompt
       ? [{ role: "system", content: systemPrompt }, ...messages]
       : messages;
-    const payload = { model, messages: msgs, max_tokens: maxTokens, temperature: 0.75 };
-    if (onDelta) payload.stream = true;
 
-    const res = apiKey
-      ? await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify(payload),
-        })
-      : await fetch(_PROXY + "/groq", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
+    const saved = window.storage.get("groqModel", "");
+    const candidates = model ? [model]
+      : [saved, ...GROQ_MODELS].filter((m, i, a) => m && a.indexOf(m) === i);
 
-    if (!res.ok) {
+    const send = (m) => {
+      const payload = { model: m, messages: msgs, max_tokens: maxTokens, temperature: 0.75 };
+      // gpt-oss è un modello "reasoning": sforzo basso = risposta più rapida e
+      // meno token di ragionamento a consumare il tetto max_tokens.
+      if (/^openai\/gpt-oss/.test(m)) payload.reasoning_effort = "low";
+      if (onDelta) payload.stream = true;
+      return apiKey
+        ? fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify(payload),
+          })
+        : fetch(_PROXY + "/groq", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+    };
+
+    let res = null, rateLimited = false;
+    for (let i = 0; i < candidates.length; i++) {
+      res = await send(candidates[i]);
+      if (res.ok) {
+        // Ricorda solo un cambio "strutturale" (modello ritirato), non il
+        // ripiego momentaneo per rate limit.
+        if (!model && !rateLimited && candidates[i] !== saved) window.storage.set("groqModel", candidates[i]);
+        break;
+      }
       let errMsg = `HTTP ${res.status}`;
       try {
         const e = await res.json();
         errMsg = (typeof e.error === "string" ? e.error : e.error?.message) || errMsg;
       } catch (_) {}
+      const gone = /does not exist|decommission|model_not_found|not supported|no access/i.test(errMsg);
+      // Piano gratuito Groq: tetto di token/minuto PER MODELLO → un altro
+      // modello di solito risponde subito.
+      const limited = res.status === 429 || /rate limit/i.test(errMsg);
+      if (limited) rateLimited = true;
+      if ((gone || limited) && i < candidates.length - 1) {
+        console.warn("[groq]", limited ? "rate limit" : "modello non disponibile", "→ provo il successivo:", candidates[i]);
+        continue;
+      }
+      if (limited) throw new Error("Troppe richieste al Coach in questo minuto — riprova tra qualche secondo.");
       throw new Error(errMsg);
     }
 

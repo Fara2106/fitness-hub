@@ -413,7 +413,9 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
         title={t(greetKey)}
         right={
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {window.SyncBadge ? <SyncBadge /> : null}
+            {/* Su iPhone solo icona: con l'etichetta ("Sync non riuscito") il
+                saluto veniva troncato in "Buongiorno Lo…". Dettaglio in Setup. */}
+            {window.SyncBadge ? <SyncBadge compact={!isDesktop} /> : null}
             <UIAvatarLF onClick={() => onNav("impostazioni")} />
           </div>
         }

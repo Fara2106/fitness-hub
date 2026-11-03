@@ -70,8 +70,12 @@ if ('serviceWorker' in navigator) {
   // Ricarica quando un nuovo SW prende il controllo (scatta DOPO che l'utente
   // tocca "Aggiorna" → SKIP_WAITING → il nuovo SW si attiva). Guard anti-loop.
   let _refreshing = false;
+  // Alla PRIMA installazione il SW fa clients.claim() → controllerchange anche
+  // senza alcun update: senza questo guard la pagina si ricaricava da sola al
+  // primo avvio (es. a metà onboarding). Si ricarica solo se un SW c'era già.
+  const _hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (_refreshing) return;
+    if (_refreshing || !_hadController) return;
     _refreshing = true;
     console.log('[SW] Nuovo SW attivo, ricarico...');
     window.location.reload();
@@ -80,9 +84,16 @@ if ('serviceWorker' in navigator) {
   // Ponte verso React: segnala che c'è un update pronto e come applicarlo.
   // Stesso schema del ponte sync ("lfh-sync"). _swUpdateReady copre il caso in
   // cui React monti DOPO l'evento (lo stato iniziale lo rilegge).
+  let _reg = null;
   function _promptUpdate(worker) {
     if (!worker) return;
-    window._swApplyUpdate = () => worker.postMessage({ type: 'SKIP_WAITING' });
+    // Al tap usa il worker in attesa PIÙ RECENTE: con due deploy ravvicinati
+    // quello catturato qui diventa "redundant" e il messaggio andava perso
+    // (banner che ricompare dopo il reload).
+    window._swApplyUpdate = () => {
+      const w = (_reg && _reg.waiting) || worker;
+      w.postMessage({ type: 'SKIP_WAITING' });
+    };
     window._swUpdateReady = true;
     try { window.dispatchEvent(new Event('lfh-sw-update')); } catch (_) {}
     console.log('[SW] Update disponibile, banner mostrato.');
@@ -95,21 +106,32 @@ if ('serviceWorker' in navigator) {
         // senza guard, reg.scope lancerebbe un TypeError confuso dentro il catch
         if (!reg) { console.warn('[SW] Registrazione bloccata dall\'ambiente (nessun registration object) — ok in test/automazione'); return; }
         console.log('[SW] Registrato:', reg.scope);
-        // Controlla aggiornamenti subito e poi ogni 60s
-        reg.update().catch(() => {});
-        setInterval(() => reg.update().catch(() => {}), 60000);
-
-        // Se un worker è già in attesa al load → update pronto.
-        if (reg.waiting && navigator.serviceWorker.controller) _promptUpdate(reg.waiting);
-
-        // Nuovo worker trovato: quando è "installed" E c'è già un controller
-        // (= aggiornamento, non prima installazione) → mostra il banner.
-        reg.addEventListener('updatefound', () => {
-          const nw = reg.installing;
+        _reg = reg;
+        // Un worker in installazione: quando è "installed" E c'è già un
+        // controller (= aggiornamento, non prima installazione) → banner.
+        const track = (nw) => {
           if (!nw) return;
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) { _promptUpdate(nw); return; }
           nw.addEventListener('statechange', () => {
             if (nw.state === 'installed' && navigator.serviceWorker.controller) _promptUpdate(nw);
           });
+        };
+        // Se un worker è già in attesa al load → update pronto.
+        if (reg.waiting && navigator.serviceWorker.controller) _promptUpdate(reg.waiting);
+        // …o già in installazione: l'updatefound è scattato PRIMA che il
+        // listener sotto esistesse (update trovato durante register()).
+        track(reg.installing);
+        reg.addEventListener('updatefound', () => track(reg.installing));
+
+        // Controlla aggiornamenti subito, ogni 60s e — soprattutto su iOS, dove
+        // la PWA resta sospesa e i timer non girano — al ritorno in foreground.
+        reg.update().catch(() => {});
+        setInterval(() => reg.update().catch(() => {}), 60000);
+        let _lastCheck = Date.now();
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState !== 'visible' || Date.now() - _lastCheck < 15000) return;
+          _lastCheck = Date.now();
+          reg.update().catch(() => {});
         });
       })
       .catch(err => console.warn('[SW] Registrazione non riuscita (normale se l\'ambiente blocca i service worker):', err && err.message ? err.message : err));

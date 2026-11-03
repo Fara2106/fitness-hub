@@ -147,7 +147,7 @@ export default {
         // Solo i campi attesi, con tetto sui token: il Worker non è un proxy
         // generico verso Groq, fa esattamente quello che serve al Coach.
         const body = {
-          model:       typeof p.model === "string" ? p.model : "llama-3.3-70b-versatile",
+          model:       typeof p.model === "string" ? p.model : "openai/gpt-oss-120b",
           messages:    p.messages,
           max_tokens:  Math.min(Number(p.max_tokens) || 512, 1024),
           temperature: typeof p.temperature === "number" ? p.temperature : 0.75,
