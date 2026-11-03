@@ -13,7 +13,13 @@ import { recordsFromSheet, recordsFromBackup, mergeChanges, sanitizeChanges } fr
 export const LEGACY_SHEET_URL = "https://fitness-hub-proxy.lorefara97.workers.dev";
 const LEGACY_ORIGIN = "https://fara2106.github.io";
 const DEVICE_ID = "migration";
-const BATCH = 500;
+// Lotti del push: al massimo 500 change E 1,5 MB di JSON per richiesta (il Worker rifiuta oltre 2 MB).
+export const BATCH_MAX_CHANGES = 500;
+export const BATCH_MAX_BYTES = 1.5 * 1024 * 1024;
+// Righe massime che il Worker legacy restituisce (google-apps-script.gs): con esattamente
+// questo numero di righe lo storico più vecchio potrebbe essere rimasto fuori.
+const LEGACY_LIMITS = { checkIn: 30, pesoCorporeo: 90, pesiPerEsercizio: 12 };
+const MAX_DIFFS = 20;
 const MONTHS = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"];
 
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -104,6 +110,23 @@ function parseBackup(backupJson) {
   return b;
 }
 
+// ── storico troncato dal foglio (M3) ─────────────────────────────────────────
+function truncationWarnings(sheet) {
+  const out = [];
+  if (Array.isArray(sheet.checkIn) && sheet.checkIn.length === LEGACY_LIMITS.checkIn) {
+    out.push(`check-in: ${LEGACY_LIMITS.checkIn} righe (il massimo che il foglio restituisce)`);
+  }
+  if (Array.isArray(sheet.pesoCorporeo) && sheet.pesoCorporeo.length === LEGACY_LIMITS.pesoCorporeo) {
+    out.push(`peso corporeo: ${LEGACY_LIMITS.pesoCorporeo} righe (il massimo che il foglio restituisce)`);
+  }
+  for (const [name, rows] of Object.entries(isObj(sheet.pesi) ? sheet.pesi : {})) {
+    if (Array.isArray(rows) && rows.length === LEGACY_LIMITS.pesiPerEsercizio) {
+      out.push(`serie di "${name}": ${LEGACY_LIMITS.pesiPerEsercizio} righe (il massimo per esercizio)`);
+    }
+  }
+  return out;
+}
+
 // ── conteggi ────────────────────────────────────────────────────────────────
 function countByCollection(changes) {
   const out = {};
@@ -131,28 +154,66 @@ function makeApi({ fetchFn, api, token }) {
   };
 }
 
+const utf8Bytes = (s) => Buffer.byteLength(s, "utf8");
+// Margine per l'involucro { deviceId, cursor, changes: [...] } attorno ai change.
+const ENVELOPE_BYTES = 256;
+
+// Divide i change in lotti di al massimo maxChanges change e maxBytes byte di JSON per richiesta.
+export function makeBatches(changes, { maxChanges = BATCH_MAX_CHANGES, maxBytes = BATCH_MAX_BYTES } = {}) {
+  const batches = [];
+  let cur = [], bytes = ENVELOPE_BYTES;
+  for (const c of changes) {
+    const size = utf8Bytes(JSON.stringify(c)) + 1; // + la virgola
+    if (cur.length && (cur.length >= maxChanges || bytes + size > maxBytes)) {
+      batches.push(cur);
+      cur = []; bytes = ENVELOPE_BYTES;
+    }
+    cur.push(c); bytes += size;
+  }
+  if (cur.length) batches.push(cur);
+  return batches;
+}
+
 async function pushAll(post, changes, log) {
   let applied = 0, stale = 0, cursor = 0;
-  for (let i = 0; i < changes.length; i += BATCH) {
-    const batch = changes.slice(i, i + BATCH);
+  const batches = makeBatches(changes);
+  for (const [i, batch] of batches.entries()) {
     const r = await post({ deviceId: DEVICE_ID, cursor, changes: batch });
     applied += r.applied; stale += r.stale;
     cursor = Number.isSafeInteger(r.cursor) ? r.cursor : cursor;
-    log(`  lotto ${i / BATCH + 1}: ${batch.length} inviati, applied ${r.applied}, stale ${r.stale}`);
+    log(`  lotto ${i + 1}/${batches.length}: ${batch.length} inviati, applied ${r.applied}, stale ${r.stale}`);
   }
-  return { sent: changes.length, applied, stale };
+  return { sent: changes.length, applied, stale, batches: batches.length };
 }
 
+const keyOf = (c) => `${c.collection}/${c.id}`;
+
+// Pull completo dal cursore 0: collection/id → record vivo o tombstone.
 async function pullLive(post) {
-  const live = {};
+  const live = new Map();
   let cursor = 0;
   for (;;) {
     const r = await post({ deviceId: DEVICE_ID, cursor, changes: [] });
-    for (const c of r.changes) if (!c.deleted) live[c.collection] = (live[c.collection] || 0) + 1;
+    for (const c of r.changes) live.set(keyOf(c), c);
     if (!r.more) return live;
     if (!(r.cursor > cursor)) throw new Error("sync: il cursor non avanza durante il pull");
     cursor = r.cursor;
   }
+}
+
+// Ogni record atteso deve esistere sul server con lo stesso stato (vivo/tombstone) e lo stesso data.
+function contentDiffs(expected, live) {
+  const diffs = [];
+  for (const c of expected) {
+    const got = live.get(keyOf(c));
+    if (!got) { diffs.push({ key: keyOf(c), problem: "manca sul server" }); continue; }
+    if (!!got.deleted !== !!c.deleted) {
+      diffs.push({ key: keyOf(c), problem: got.deleted ? "eliminato sul server" : "vivo sul server, atteso eliminato" });
+      continue;
+    }
+    if (JSON.stringify(got.data ?? null) !== JSON.stringify(c.data ?? null)) diffs.push({ key: keyOf(c), problem: "contenuto diverso" });
+  }
+  return diffs;
 }
 
 // ── orchestrazione ──────────────────────────────────────────────────────────
@@ -196,6 +257,7 @@ async function migrate(opts) {
   const backupRecords = backup ? recordsFromBackup(backup, plans, stats, { now }) : [];
   const changes = sanitizeChanges(mergeChanges(planRecords, sheetRecords, backupRecords), stats);
   const counts = countByCollection(changes);
+  const truncation = truncationWarnings(sheet);
 
   log(`Piani: scheda da ${planSource.workout} (${summary.workout.days} giorni, ${summary.workout.exercises} esercizi); `
     + `dieta da ${planSource.diet} (${summary.diet.variants} varianti, ${summary.diet.meals} pasti, ${summary.diet.supplements} integratori)`);
@@ -205,9 +267,19 @@ async function migrate(opts) {
   }
   log(`Scartati: ${JSON.stringify(stats.discarded)}`);
   if (stats.invalidSamples.length) log(`  esempi non validi: ${stats.invalidSamples.join(", ")}`);
+  if (stats.discarded.setLogPositional) {
+    log(`Serie scartate perché la scheda è stata reimportata dopo quel giorno (schedaProg_ senza nomi): ${stats.discarded.setLogPositional}`);
+  }
+  if (stats.positional.count) {
+    log(`Serie mappate per posizione nella scheda attuale (schedaProg_ senza nomi): ${stats.positional.count}, `
+      + `dal ${stats.positional.from} al ${stats.positional.to}`);
+  }
   if (Object.keys(stats.ignoredKeys).length) log(`Chiavi del backup ignorate: ${JSON.stringify(stats.ignoredKeys)}`);
+  for (const w of truncation) log(`  attenzione — possibile storico troncato: ${w}`);
 
-  const result = { ok: true, counts, total: changes.length, stats, planSource, plans: summary, changes, push: null, verify: null };
+  const result = {
+    ok: true, counts, total: changes.length, stats, planSource, plans: summary, truncation, changes, push: null, verify: null,
+  };
   if (!push && !verify) { log("Dry-run: nessuna scrittura."); return result; }
 
   const post = makeApi({ fetchFn, api, token });
@@ -219,16 +291,21 @@ async function migrate(opts) {
   if (verify) {
     log("Verifica (pull completo dal cursor 0) ...");
     const live = await pullLive(post);
+    const liveCounts = {};
+    for (const c of live.values()) if (!c.deleted) liveCounts[c.collection] = (liveCounts[c.collection] || 0) + 1;
     const rows = [];
-    for (const col of [...new Set([...Object.keys(counts), ...Object.keys(live)])].sort()) {
+    for (const col of [...new Set([...Object.keys(counts), ...Object.keys(liveCounts)])].sort()) {
       const expected = counts[col] ? counts[col].live : 0;
-      const actual = live[col] || 0;
+      const actual = liveCounts[col] || 0;
       rows.push({ collection: col, expected, actual, ok: expected === actual });
       log(`  ${expected === actual ? "✔" : "✘"} ${col}: atteso ${expected}, sul server ${actual}`);
     }
-    result.verify = { ok: rows.every((r) => r.ok), rows };
+    const diffs = contentDiffs(changes, live);
+    for (const d of diffs.slice(0, MAX_DIFFS)) log(`  ✘ ${d.key}: ${d.problem}`);
+    if (diffs.length > MAX_DIFFS) log(`  ... e altre ${diffs.length - MAX_DIFFS} differenze`);
+    result.verify = { ok: rows.every((r) => r.ok) && diffs.length === 0, rows, diffs };
     result.ok = result.verify.ok;
-    log(result.ok ? "Verifica OK." : "Verifica FALLITA: i conteggi non coincidono.");
+    log(result.ok ? "Verifica OK." : `Verifica FALLITA: ${diffs.length ? `${diffs.length} record diversi dall'atteso` : "i conteggi non coincidono"}.`);
   }
   return result;
 }

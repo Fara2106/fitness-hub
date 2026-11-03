@@ -74,25 +74,28 @@ function indexWorkout(plan) {
   return { plan, days, byName };
 }
 
-// Pasti e integratori: se lo stesso pasto/integratore compare in più varianti
-// vince la PRIMA trovata (ordine delle varianti nel piano).
+// Per ogni variante (nell'ordine del piano): pasti `${time}|${name}` → mealId e
+// integratori key → supplementId (se una variante ripete un key vince il primo).
 function indexDiet(plan) {
   const variants = (plan && plan.data && plan.data.variants) || [];
-  const meals = new Map(); // `${time}|${name}` → mealId
-  const supps = new Map(); // key → supplementId
-  for (const v of variants) {
+  return variants.map((v) => {
+    const meals = new Map();
     for (const m of v.meals || []) {
       const k = `${m.time}|${m.name}`;
       if (!meals.has(k)) meals.set(k, m.id);
     }
+    const supps = new Map();
     for (const s of v.supplements || []) if (!supps.has(s.key)) supps.set(s.key, s.id);
-  }
-  return { meals, supps };
+    return { key: v.key, meals, supps };
+  });
 }
 
 function newStats(stats) {
   const s = stats || {};
-  s.discarded = Object.assign({ mealCheck: 0, supplementCheck: 0, setLog: 0, invalid: 0 }, s.discarded);
+  s.discarded = Object.assign({
+    mealCheck: 0, supplementCheck: 0, setLog: 0, setLogPositional: 0, workoutSession: 0, cardio: 0, invalid: 0,
+  }, s.discarded);
+  s.positional = s.positional || { count: 0, from: null, to: null };
   s.ignoredKeys = s.ignoredKeys || {};
   s.invalidSamples = s.invalidSamples || [];
   return s;
@@ -152,13 +155,11 @@ export function recordsFromSheet(sheet, plans, opts = {}) {
   }
 
   // getPesoCorporeo → bodyWeight
-  const weightDates = new Set();
   for (const r of Array.isArray(pesoCorporeo) ? pesoCorporeo : []) {
     if (!r) continue;
     if (!isDate(r.date)) { st.discarded.invalid++; continue; }
     const kg = toNumber(r.weight);
     if (kg === null || kg <= 0) continue;
-    weightDates.add(r.date);
     out.push(change("bodyWeight", r.date, { date: r.date, kg }, noon(r.date)));
   }
 
@@ -173,11 +174,12 @@ export function recordsFromSheet(sheet, plans, opts = {}) {
       const setN = Number(r.setN);
       if (!Number.isInteger(setN) || setN < 1) continue;
       const setIndex = setN - 1;
-      const reps = Number(r.rip);
+      // Il foglio salva 0 quando il peso manca (Number("") = 0) e in `rip` le ripetizioni
+      // del piano, non quelle fatte: peso 0 → "", reps sempre null.
+      const weight = hasValue(r.peso) && toNumber(r.peso) !== 0 ? String(r.peso) : "";
       out.push(change("setLog", `${r.date}:${exerciseId}:${setIndex}`, {
         date: r.date, exerciseId, exerciseName: name, planId, setIndex,
-        weight: hasValue(r.peso) ? String(r.peso) : "", reps: Number.isFinite(reps) && r.rip !== "" && r.rip != null ? reps : null,
-        done: true, substitutedWith: null,
+        weight, reps: null, done: true, substitutedWith: null,
       }, noon(r.date)));
     }
   }
@@ -191,12 +193,9 @@ export function recordsFromSheet(sheet, plans, opts = {}) {
   out.push(...shoppingExtraChanges(parseMaybe(s.spesaExtra), now));
   out.push(...exNotesChanges(parseMaybe(s.exNotes), now));
 
-  // bodyWeight (settings) → peso di oggi, solo se il foglio non ha già la riga di oggi
-  const today = localDateKey(now);
+  // bodyWeight (settings) = ultimo peso noto, senza data → impostazione, non una pesata di oggi
   const kg = toNumber(s.bodyWeight);
-  if (kg !== null && kg > 0 && !weightDates.has(today)) {
-    out.push(change("bodyWeight", today, { date: today, kg }, now));
-  }
+  if (kg !== null && kg > 0) out.push(change("settings", "bodyWeight", { value: kg }, now));
 
   return sanitizeChanges(mergeChanges(out), st);
 }
@@ -207,9 +206,14 @@ export function recordsFromBackup(backup, plans, stats, opts = {}) {
   const st = newStats(stats);
   const data = (backup && isObj(backup.data)) ? backup.data : {};
   const wi = indexWorkout(plans && plans.workout);
-  const di = indexDiet(plans && plans.diet);
+  const variants = indexDiet(plans && plans.diet);
   const out = [];
   const ignore = (k) => { st.ignoredKeys[k] = (st.ignoredKeys[k] || 0) + 1; };
+  // Chiavi per-giorno lette insieme (spunte dieta, scheda, sessione) → elaborate dopo il giro.
+  const days = new Map();
+  const day = (date) => { if (!days.has(date)) days.set(date, {}); return days.get(date); };
+  const cardio = new Map(); // data → attività di quel giorno
+  const schedaImportedOn = importDate(data.schedaData_at);
 
   for (const [key, raw] of Object.entries(data)) {
     if (isNeverMigrated(key)) { ignore(key); continue; }
@@ -238,27 +242,24 @@ export function recordsFromBackup(backup, plans, stats, opts = {}) {
             }, at));
           });
           break;
-        case "dietaCheck_":
-          for (const [mk, on] of Object.entries(isObj(val) ? val : {})) {
-            if (!on) continue;
-            const mealId = di.meals.get(mk);
-            if (!mealId) { st.discarded.mealCheck++; continue; }
-            out.push(change("mealCheck", `${date}:${mealId}`, { date, mealId, done: true }, at));
-          }
+        case "dietaCheck_": day(date).meals = val; break;
+        case "integ_": day(date).supps = val; break;
+        case "schedaProg_": day(date).prog = val; break;
+        case "gym_":
+          if (val === true) day(date).gym = true;
+          else if (val !== false) ignore(prefix);
           break;
-        case "integ_":
-          for (const [type, on] of Object.entries(isObj(val) ? val : {})) {
-            if (!on) continue;
-            const supplementId = di.supps.get(type);
-            if (!supplementId) { st.discarded.supplementCheck++; continue; }
-            out.push(change("supplementCheck", `${date}:${supplementId}`, { date, supplementId, done: true }, at));
-          }
+        case "gymStart_": day(date).gymStart = val; break;
+        case "gymSaved_": // fonte dei nomi per schedaProg_ senza `names`, non migrato di per sé
+          day(date).gymSaved = val;
+          ignore(prefix);
           break;
-        case "schedaProg_":
-          out.push(...setLogsFromProg(date, val, wi, st));
+        case "restDay_":
+          if (val === true) out.push(change("dayState", date, { date, rest: true }, at));
+          else if (val !== false) ignore(prefix);
           break;
         default:
-          ignore(prefix); // gym_, muscleSets_, gymStart_, gymSaved_, restDay_, …
+          ignore(prefix); // muscleSets_, nudgeDismissed_, …
       }
       continue;
     }
@@ -281,6 +282,17 @@ export function recordsFromBackup(backup, plans, stats, opts = {}) {
         }
         break;
       case "exNotes": out.push(...exNotesChanges(val, now)); break;
+      case "activities":
+        // { id: Date.now(), type, min, km, note, when } → dayState.cardio del giorno di `id`
+        for (const a of Array.isArray(val) ? val : []) {
+          if (!isObj(a) || !Number.isSafeInteger(a.id) || a.id <= 0) { st.discarded.cardio++; continue; }
+          const date = localDateKey(a.id);
+          if (!isDate(date)) { st.discarded.cardio++; continue; }
+          const { when, ...entry } = a; // `when` è un'etichetta ("Oggi"), non un dato
+          if (!cardio.has(date)) cardio.set(date, []);
+          cardio.get(date).push(entry);
+        }
+        break;
       case "prMap":
         for (const [name, rec] of Object.entries(isObj(val) ? val : {})) {
           const k = nameKey(name);
@@ -296,34 +308,122 @@ export function recordsFromBackup(backup, plans, stats, opts = {}) {
       default: ignore(key);
     }
   }
+  for (const [date, list] of cardio) out.push(change("dayState", date, { date, cardio: list }, noon(date)));
+  for (const [date, d] of days) {
+    out.push(...dietChecks(date, d.meals, d.supps, variants, st));
+    out.push(...setLogsFromProg(date, d.prog, d.gymSaved, wi, st, schedaImportedOn));
+    if (d.gym) {
+      const ws = workoutSessionChange(date, d.prog, d.gymStart, wi);
+      if (ws) out.push(ws); else st.discarded.workoutSession++;
+    } else if (d.gymStart !== undefined) {
+      ignore("gymStart_"); // sessione iniziata ma mai chiusa: nessun workoutSession
+    }
+  }
   out.push(excludedFoodsChange(now));
   return sanitizeChanges(mergeChanges(out), st);
 }
 
+// Data locale (YYYY-MM-DD) di schedaData_at (ISO dalla PWA, oppure ms), null se illeggibile.
+function importDate(v) {
+  const ms = typeof v === "number" ? v : typeof v === "string" ? Date.parse(v) : NaN;
+  return Number.isFinite(ms) && ms > 0 ? localDateKey(ms) : null;
+}
+
+// Una variante dieta per giorno (Ruling 15): quella che contiene più spunte del giorno
+// (pasti `dietaCheck_` + integratori `integ_`; spareggio: ordine delle varianti nel piano).
+// Tutte le spunte vanno su quella variante; quelle che lì non esistono sono scartate e contate.
+// Nessuna variante contiene almeno una spunta → nessuna scelta, tutto scartato.
+function dietChecks(date, meals, supps, variants, st) {
+  const on = (obj) => Object.entries(isObj(obj) ? obj : {}).filter(([, v]) => v).map(([k]) => k);
+  const mealKeys = on(meals), suppKeys = on(supps);
+  if (!mealKeys.length && !suppKeys.length) return [];
+  let best = null, bestHits = 0;
+  for (const v of variants) {
+    const hits = mealKeys.filter((k) => v.meals.has(k)).length + suppKeys.filter((k) => v.supps.has(k)).length;
+    if (hits > bestHits) { best = v; bestHits = hits; }
+  }
+  if (!best) {
+    st.discarded.mealCheck += mealKeys.length;
+    st.discarded.supplementCheck += suppKeys.length;
+    return [];
+  }
+  const at = noon(date);
+  const out = [change("dayState", date, { date, dietVariant: best.key }, at)];
+  for (const k of mealKeys) {
+    const mealId = best.meals.get(k);
+    if (!mealId) { st.discarded.mealCheck++; continue; }
+    out.push(change("mealCheck", `${date}:${mealId}`, { date, mealId, done: true }, at));
+  }
+  for (const k of suppKeys) {
+    const supplementId = best.supps.get(k);
+    if (!supplementId) { st.discarded.supplementCheck++; continue; }
+    out.push(change("supplementCheck", `${date}:${supplementId}`, { date, supplementId, done: true }, at));
+  }
+  return out;
+}
+
+// gym_<data> = true → workoutSession del giorno con più serie spuntate in schedaProg_
+// (Giorno N → giorno N-1 del piano; spareggio: N più basso). null se non deducibile.
+function workoutSessionChange(date, prog, gymStart, wi) {
+  const completion = isObj(prog) && isObj(prog.completion) ? prog.completion : {};
+  const perDay = new Map();
+  for (const [id, sets] of Object.entries(completion)) {
+    const m = /^Giorno (\d+)#\d+$/.exec(id);
+    if (!m || !Array.isArray(sets)) continue;
+    const n = sets.filter(Boolean).length;
+    if (n) perDay.set(Number(m[1]), (perDay.get(Number(m[1])) || 0) + n);
+  }
+  let bestN = null;
+  for (const [n, count] of perDay) {
+    if (bestN === null || count > perDay.get(bestN) || (count === perDay.get(bestN) && n < bestN)) bestN = n;
+  }
+  const d = bestN === null ? null : wi.days[bestN - 1];
+  if (!d) return null;
+  const start = Number(gymStart);
+  return change("workoutSession", `${date}:${d.id}`, {
+    date, dayId: d.id, dayName: d.name,
+    startedAt: gymStart != null && Number.isSafeInteger(start) && start > 0 ? start : null,
+    done: true,
+  }, noon(date));
+}
+
 // schedaProg_<data> = { completion:{exId:[bool]}, substitutions:{exId:nome}, pesos:{exId:[str]}, names:{exId:nome minuscolo}, sig }
 // exId = "Giorno N#pos" (schedaState.jsx) → giorno N-1, esercizio pos del piano migrato.
-function setLogsFromProg(date, prog, wi, st) {
+// Nome dell'esercizio fatto quel giorno (Ruling 16): names[exId] → gymSaved_ della stessa data → nessuno.
+//   con nome: uguale all'esercizio del piano in quella posizione → id del piano, altrimenti name:<nome>;
+//   senza nome: scheda reimportata (schedaData_at) dopo quel giorno → scartato (setLogPositional),
+//   altrimenti mappato per posizione e contato in stats.positional { count, from, to }.
+function setLogsFromProg(date, prog, gymSaved, wi, st, schedaImportedOn) {
   const out = [];
   if (!isObj(prog)) return out;
   const completion = isObj(prog.completion) ? prog.completion : {};
   const subs = isObj(prog.substitutions) ? prog.substitutions : {};
   const pesos = isObj(prog.pesos) ? prog.pesos : {};
   const names = isObj(prog.names) ? prog.names : {};
+  const saved = isObj(gymSaved) ? gymSaved : {};
   const at = noon(date);
 
   for (const [id, sets] of Object.entries(completion)) {
     if (!Array.isArray(sets)) continue;
+    const done = sets.filter(Boolean).length;
     const m = /^Giorno (\d+)#(\d+)$/.exec(id);
     const ex = m ? ((wi.days[Number(m[1]) - 1] || {}).exercises || [])[Number(m[2])] : null;
-    const saved = hasValue(names[id]) ? nameKey(names[id]) : null;
+    const name = hasValue(names[id]) ? nameKey(names[id]) : savedName(saved, id, subs[id]);
 
     let exerciseId, exerciseName, planId;
-    if (ex && (saved === null || saved === nameKey(ex.name))) {
+    if (ex && (name === null || name === nameKey(ex.name))) {
+      if (name === null) {
+        if (schedaImportedOn !== null && schedaImportedOn > date) { st.discarded.setLogPositional += done; continue; }
+        const p = st.positional;
+        p.count += done;
+        if (done && (p.from === null || date < p.from)) p.from = date;
+        if (done && (p.to === null || date > p.to)) p.to = date;
+      }
       exerciseId = ex.id; exerciseName = ex.name; planId = wi.plan.id;
-    } else if (saved !== null) {
-      exerciseId = `name:${saved}`; exerciseName = saved; planId = null; // la scheda è cambiata dopo quella sessione
+    } else if (name !== null) {
+      exerciseId = `name:${name}`; exerciseName = name; planId = null; // la scheda è cambiata dopo quella sessione
     } else {
-      sets.forEach((on) => { if (on) st.discarded.setLog++; });
+      st.discarded.setLog += done;
       continue;
     }
     sets.forEach((on, setIndex) => {
@@ -337,6 +437,21 @@ function setLogsFromProg(date, prog, wi, st) {
     });
   }
   return out;
+}
+
+// gymSaved_<data> = { "Giorno N#pos#serie": "nome|peso" } (screens/scheda.jsx, chiusura sessione).
+// Il nome è quello dell'esercizio fatto: con una sostituzione è il sostituto, che non dice quale
+// esercizio del piano c'era in quella posizione → in quel caso nessun nome.
+function savedName(saved, id, substitution) {
+  for (const [k, v] of Object.entries(saved)) {
+    if (!k.startsWith(`${id}#`) || !/^\d+$/.test(k.slice(id.length + 1)) || typeof v !== "string") continue;
+    const cut = v.lastIndexOf("|");
+    const n = nameKey(cut >= 0 ? v.slice(0, cut) : v);
+    if (!n) continue;
+    if (hasValue(substitution) && n === nameKey(substitution)) return null;
+    return n;
+  }
+  return null;
 }
 
 // ── merge ───────────────────────────────────────────────────────────────────

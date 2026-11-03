@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createD1 } from "./d1-sqlite.mjs";
 import worker from "../src/worker.mjs";
 import { REPO_ROOT } from "../migrate/load-parser.mjs";
-import { runMigration, noonOf } from "../migrate/migrate.mjs";
+import { runMigration, noonOf, makeBatches, BATCH_MAX_BYTES } from "../migrate/migrate.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const schema = readFileSync(join(HERE, "..", "schema.sql"), "utf8");
@@ -42,7 +42,7 @@ async function setup(sheet = sheetData()) {
       if (body === undefined) return new Response(JSON.stringify({ success: false, error: "azione sconosciuta" }), { status: 200 });
       return new Response(JSON.stringify(body), { status: 200 });
     }
-    apiCalls.push({ method: init.method, url: u });
+    apiCalls.push({ method: init.method, url: u, bytes: Buffer.byteLength(init.body || "", "utf8") });
     return worker.fetch(new Request(url, init), env);
   };
   const logs = [];
@@ -71,7 +71,9 @@ test("dry-run: nessuna richiesta a /v1/sync, DB vuoto, conteggi coerenti", async
   assert.equal(live + tomb, r.total);
   assert.equal(r.counts.workoutPlan.live, 1);
   assert.equal(r.counts.dietPlan.live, 1);
-  assert.equal(r.counts.bodyWeight.live, 4); // 3 righe + peso di oggi dalle settings
+  assert.equal(r.counts.bodyWeight.live, 3); // solo le righe: settings.bodyWeight è un'impostazione (M1)
+  assert.ok(r.changes.some((c) => c.collection === "settings" && c.id === "bodyWeight"));
+  assert.deepEqual(r.truncation, []);
   assert.equal(r.counts.dayState.live, 2);
   assert.deepEqual(r.planSource, { workout: "scheda.txt del repo", diet: "dieta.txt del repo" });
   assert.ok(r.plans.workout.days > 0 && r.plans.workout.exercises > 0);
@@ -247,4 +249,100 @@ test("--push/--verify senza api o token → errore chiaro", async () => {
   await assert.rejects(t.run({ push: true, api: undefined }), /--api e --token-file/);
   await assert.rejects(t.run({ verify: true, token: undefined }), /--api e --token-file/);
   assert.equal(t.sheetCalls.length, 0);
+});
+
+// ── fix wave finale ─────────────────────────────────────────────────────────
+test("M3: foglio con esattamente il massimo di righe del legacy → avviso 'possibile storico troncato'", async () => {
+  const sheet = sheetData();
+  sheet.checkIn = manyWeights(30).map((w) => ({ date: w.date, sleep: 3, energy: 3, ailments: "" }));
+  sheet.pesoCorporeo = manyWeights(90);
+  sheet.pesi["band squat"] = manyWeights(12).map((w) => ({ date: w.date, setN: 1, peso: 10, rip: 10 }));
+  const t = await setup(sheet);
+  const r = await t.run();
+  assert.equal(r.truncation.length, 3);
+  const text = t.logs.join("\n");
+  assert.match(text, /possibile storico troncato: check-in: 30 righe/);
+  assert.match(text, /possibile storico troncato: peso corporeo: 90 righe/);
+  assert.match(text, /possibile storico troncato: serie di "band squat": 12 righe/);
+  // una riga in meno o in più → nessun avviso
+  sheet.checkIn.pop(); sheet.pesoCorporeo.push({ date: "2030-01-01", weight: 70 }); sheet.pesi["band squat"].pop();
+  const t2 = await setup(sheet);
+  assert.deepEqual((await t2.run()).truncation, []);
+  assert.doesNotMatch(t2.logs.join("\n"), /troncato/);
+});
+
+test("M4: makeBatches rispetta 500 change e 1,5 MB, senza lotti vuoti né change persi", () => {
+  const small = Array.from({ length: 1201 }, (_, i) => ({ collection: "settings", id: `k${i}`, data: { v: i }, updatedAt: 1 }));
+  assert.deepEqual(makeBatches(small).map((b) => b.length), [500, 500, 201]);
+  const big = Array.from({ length: 60 }, (_, i) => ({ collection: "bodyMeasure", id: `b${i}`, data: { note: "é".repeat(30000) }, updatedAt: 1 }));
+  const batches = makeBatches(big);
+  assert.ok(batches.length > 1);
+  assert.deepEqual(batches.flat(), big);
+  for (const b of batches) {
+    const body = JSON.stringify({ deviceId: "migration", cursor: 123456789, changes: b });
+    assert.ok(Buffer.byteLength(body, "utf8") <= BATCH_MAX_BYTES, `${Buffer.byteLength(body)} byte`);
+  }
+  assert.deepEqual(makeBatches([]), []);
+});
+
+test("M4: --push con record grossi → più richieste sotto 1,5 MB anche con meno di 500 change", async () => {
+  const t = await setup();
+  const data = { bodyMeasures: Array.from({ length: 80 }, (_, i) => ({
+    date: new Date(Date.UTC(2025, 0, 1 + i)).toISOString().slice(0, 10), nota: "x".repeat(40000),
+  })) };
+  const r = await t.run({ backupJson: { _lfhBackup: 1, data }, push: true, verify: true });
+  assert.ok(r.total < 500);
+  assert.ok(r.push.batches > 1);
+  assert.equal(t.apiCalls.filter((c) => c.bytes > 1000).length, r.push.batches);
+  assert.ok(t.apiCalls.every((c) => c.bytes <= BATCH_MAX_BYTES));
+  assert.equal(r.push.applied, r.total);
+  assert.equal(r.verify.ok, true);
+});
+
+test("M5: --verify confronta il contenuto: data diverso, record mancante o eliminato → ✘ ed exit 1", async () => {
+  const t = await setup();
+  const ok = await t.run({ push: true, verify: true });
+  assert.deepEqual(ok.verify.diffs, []);
+  // stessi conteggi ma contenuto diverso: la verifica a soli conteggi passerebbe
+  await t.DB.prepare(`UPDATE records SET data = '{"value":99}' WHERE collection = 'settings' AND id = 'weightGoal'`).run();
+  await t.DB.prepare("UPDATE records SET deleted = 1, data = NULL WHERE collection = 'bodyWeight' AND id = '2026-10-28'").run();
+  await t.DB.prepare("UPDATE records SET id = 'altro' WHERE collection = 'dayState' AND id = '2026-10-26'").run();
+  const bad = await t.run({ verify: true });
+  assert.equal(bad.ok, false);
+  assert.deepEqual(bad.verify.diffs.map((d) => `${d.key} ${d.problem}`).sort(), [
+    "bodyWeight/2026-10-28 eliminato sul server",
+    "dayState/2026-10-26 manca sul server",
+    "settings/weightGoal contenuto diverso",
+  ]);
+  assert.ok(bad.verify.rows.find((x) => x.collection === "settings").ok); // conteggio uguale, contenuto no
+  const text = t.logs.join("\n");
+  assert.match(text, /✘ settings\/weightGoal: contenuto diverso/);
+  assert.match(text, /Verifica FALLITA: 3 record diversi/);
+});
+
+test("M5: al massimo 20 differenze stampate, poi un riepilogo", async () => {
+  const sheet = sheetData();
+  sheet.pesoCorporeo = manyWeights(30);
+  const t = await setup(sheet);
+  await t.run({ push: true });
+  await t.DB.prepare(`UPDATE records SET data = '{"kg":1}' WHERE collection = 'bodyWeight'`).run();
+  const logs = [];
+  const r = await t.run({ verify: true, log: (s) => logs.push(s) });
+  assert.equal(r.verify.diffs.length, 30);
+  assert.equal(logs.filter((l) => /contenuto diverso/.test(l)).length, 20);
+  assert.ok(logs.some((l) => /e altre 10 differenze/.test(l)));
+});
+
+test("dry-run: stampa le serie mappate per posizione e quelle scartate per scheda reimportata", async () => {
+  const t = await setup();
+  const backupJson = { _lfhBackup: 1, data: {
+    schedaData_at: "2026-10-15T18:00:00.000Z",
+    "schedaProg_2026-10-01": { completion: { "Giorno 1#0": [true, true] } },
+    "schedaProg_2026-10-20": { completion: { "Giorno 1#0": [true] } },
+  } };
+  const r = await t.run({ backupJson });
+  assert.equal(r.stats.discarded.setLogPositional, 2);
+  const text = t.logs.join("\n");
+  assert.match(text, /reimportata dopo quel giorno.*: 2/);
+  assert.match(text, /mappate per posizione.*: 1, dal 2026-10-20 al 2026-10-20/);
 });

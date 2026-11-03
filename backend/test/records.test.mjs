@@ -42,14 +42,17 @@ test("foglio: peso → bodyWeight (id = data, kg numero)", () => {
   assert.equal(get(r, "bodyWeight", "2026-10-26").updatedAt, noon("2026-10-26"));
 });
 
-test("foglio: settings.bodyWeight vale per oggi solo se manca la riga di oggi", () => {
-  // oggi (2026-10-30) ha già una riga nel foglio → la setting non la sovrascrive
+test("foglio: settings.bodyWeight → settings bodyWeight { value }, mai una pesata datata oggi (M1)", () => {
   assert.equal(get(fromSheet(), "bodyWeight", "2026-10-30").data.kg, 77.6);
-  // un altro "oggi" senza riga → la setting crea il giorno
-  const r = recordsFromSheet(sheet, plans, { now: new Date("2026-11-02T10:00:00").getTime() });
-  const bw = get(r, "bodyWeight", "2026-11-02");
-  assert.equal(bw.data.kg, 77.2);
-  assert.equal(bw.updatedAt, new Date("2026-11-02T10:00:00").getTime());
+  const now = new Date("2026-11-02T10:00:00").getTime();
+  const r = recordsFromSheet(sheet, plans, { now });
+  assert.equal(get(r, "bodyWeight", "2026-11-02"), undefined);
+  assert.equal(all(r, "bodyWeight").length, 3); // solo le righe del foglio
+  assert.deepEqual(get(r, "settings", "bodyWeight"), { collection: "settings", id: "bodyWeight", data: { value: 77.2 }, updatedAt: now });
+  // non numerico o <= 0 → nessuna impostazione
+  for (const bad of ["abc", "0", -3, ""]) {
+    assert.equal(get(recordsFromSheet({ settings: { bodyWeight: bad } }, plans, { now }), "settings", "bodyWeight"), undefined, String(bad));
+  }
 });
 
 test("foglio: serie → setLog con exerciseId del piano se il nome coincide, altrimenti name:<minuscolo>", () => {
@@ -58,7 +61,7 @@ test("foglio: serie → setLog con exerciseId del piano se il nome coincide, alt
   const s0 = get(r, "setLog", `2026-10-26:${chest.id}:0`);
   assert.deepEqual(s0.data, {
     date: "2026-10-26", exerciseId: chest.id, exerciseName: "band chest press", planId: "wp1",
-    setIndex: 0, weight: "20", reps: 12, done: true, substitutedWith: null,
+    setIndex: 0, weight: "20", reps: null, done: true, substitutedWith: null,
   });
   assert.equal(get(r, "setLog", `2026-10-26:${chest.id}:1`).data.weight, "22.5");
   const curl = get(r, "setLog", "2026-10-28:name:dumbbell curl:0");
@@ -66,6 +69,22 @@ test("foglio: serie → setLog con exerciseId del piano se il nome coincide, alt
   assert.equal(curl.data.planId, null);
   assert.equal(curl.data.done, true);
   assert.equal(all(r, "setLog").length, 4);
+  // M2: peso 0 nel foglio = peso mancante → ""; reps sempre null (il foglio ha le ripetizioni del piano)
+  const pushup = plans.workout.data.days[0].exercises[0];
+  assert.equal(get(r, "setLog", `2026-10-26:${pushup.id}:0`).data.weight, "");
+  assert.ok(all(r, "setLog").every((c) => c.data.reps === null));
+});
+
+test("foglio: peso \"0\"/0/\"0,0\" → weight \"\"; altri pesi come stringa (M2)", () => {
+  const sh = { pesi: { "band squat": [
+    { date: "2026-10-26", setN: 1, peso: "0", rip: 5 },
+    { date: "2026-10-26", setN: 2, peso: 0, rip: 5 },
+    { date: "2026-10-26", setN: 3, peso: "0,0", rip: 5 },
+    { date: "2026-10-26", setN: 4, peso: 0.5, rip: 5 },
+  ] } };
+  const r = all(recordsFromSheet(sh, plans, { now: NOW }), "setLog");
+  assert.deepEqual(r.map((c) => c.data.weight), ["", "", "", "0.5"]);
+  assert.deepEqual(r.map((c) => c.data.reps), [null, null, null, null]);
 });
 
 test("foglio: settings → weightGoal/spesaFreq/excludedFoods, spesa, note esercizio", () => {
@@ -75,7 +94,7 @@ test("foglio: settings → weightGoal/spesaFreq/excludedFoods, spesa, note eserc
   assert.deepEqual(get(r, "settings", "excludedFoods").data.value,
     ["pasta di ceci", "pasta di lenticchie", "pasta di piselli", "bevanda di mandorla"]);
   assert.equal(get(r, "settings", "weightGoal").updatedAt, NOW);
-  assert.deepEqual(all(r, "settings").map((c) => c.id).sort(), ["excludedFoods", "spesaFreq", "weightGoal"]);
+  assert.deepEqual(all(r, "settings").map((c) => c.id).sort(), ["bodyWeight", "excludedFoods", "spesaFreq", "weightGoal"]);
   // spesaChecked2 ha la precedenza sul legacy spesaChecked
   assert.deepEqual(get(r, "shoppingCheck", "proteine-0").data, { checked: true });
   assert.deepEqual(get(r, "shoppingCheck", "carbo-1").data, { checked: false });
@@ -96,6 +115,7 @@ test("backup: checkIn_/hydration_/notes_ della stessa data → UN dayState", () 
   const r = fromBackup();
   assert.deepEqual(get(r, "dayState", "2026-10-27").data, {
     date: "2026-10-27", checkIn: { sleep: 4, energy: 5, ailments: "" }, hydration: 6, notes: "Buona sessione",
+    dietVariant: "riposo",
   });
   assert.equal(get(r, "dayState", "2026-10-29").data.checkIn.ailments, "schiena");
   assert.equal(get(r, "dayState", "2026-10-27").updatedAt, noon("2026-10-27"));
@@ -175,8 +195,11 @@ test("backup: chiavi escluse mai migrate; non mappate in stats.ignoredKeys raggr
   for (const bad of ["gsk_FAKE", "groqApiKey", "errorLog", "sheetsQueue", "settingsPending", "settingsEdits", "schedaData", "onboardingDone"]) {
     assert.ok(!json.includes(bad), bad);
   }
-  assert.equal(stats.ignoredKeys["gym_"], 1);
-  assert.equal(stats.ignoredKeys["gymSaved_"], 1);
+  assert.equal(stats.ignoredKeys["gym_"], undefined); // gym_/gymStart_/restDay_/activities ora migrati
+  assert.equal(stats.ignoredKeys["gymStart_"], undefined);
+  assert.equal(stats.ignoredKeys["restDay_"], undefined);
+  assert.equal(stats.ignoredKeys["activities"], undefined);
+  assert.equal(stats.ignoredKeys["gymSaved_"], 1); // usato solo come fonte dei nomi
   assert.equal(stats.ignoredKeys["muscleSets_"], 1);
   assert.equal(stats.ignoredKeys["bodyWeight"], 1);
   assert.equal(stats.ignoredKeys["groqApiKey"], 1);
@@ -316,4 +339,213 @@ test("foglio: peso mancante nella riga serie → weight stringa vuota, non 'null
 
 test("fixture: backup e foglio completi passano validateSyncBody", () => {
   assert.ok(passesValidate(mergeChanges(fromSheet(), fromBackup())));
+});
+
+// ── fix wave finale ─────────────────────────────────────────────────────────
+const variant = (key) => plans.diet.data.variants.find((v) => v.key === key);
+const mealOf = (key, name) => variant(key).meals.find((m) => m.name === name);
+const suppOf = (key, k) => variant(key).supplements.find((s) => s.key === k);
+const bk = (data) => ({ _lfhBackup: 1, data });
+
+test("I1: un giorno ore21 → tutte le spunte sotto la variante ore21, dietVariant nel dayState", () => {
+  const stats = {};
+  const r = recordsFromBackup(bk({
+    "dietaCheck_2026-10-28": { "08:00|Colazione": true, "13:00|Pranzo": true, "16:30|Merenda": true, "19:30|Post-workout": true, "10:30|Spuntino": false },
+    "integ_2026-10-28": { vitac: true, mgk: true, ps: false },
+  }), plans, stats, { now: NOW });
+  const ids = [...all(r, "mealCheck"), ...all(r, "supplementCheck")].map((c) => c.id);
+  assert.equal(ids.length, 6);
+  assert.ok(ids.every((id) => id.startsWith(`2026-10-28:${variant("ore21").id}/`)), ids.join());
+  assert.ok(get(r, "mealCheck", `2026-10-28:${mealOf("ore21", "Post-workout").id}`));
+  assert.ok(get(r, "supplementCheck", `2026-10-28:${suppOf("ore21", "mgk").id}`));
+  assert.deepEqual(get(r, "dayState", "2026-10-28").data, { date: "2026-10-28", dietVariant: "ore21" });
+  assert.equal(stats.discarded.mealCheck, 0);
+  assert.equal(stats.discarded.supplementCheck, 0);
+});
+
+test("I1: Colazione+Pranzo+Post-workout+vitac+mgk sono anche in ore17/ore22 → spareggio per ordine del piano", () => {
+  const r = recordsFromBackup(bk({
+    "dietaCheck_2026-10-28": { "08:00|Colazione": true, "13:00|Pranzo": true, "19:30|Post-workout": true },
+    "integ_2026-10-28": { vitac: true, mgk: true },
+  }), plans, {}, { now: NOW });
+  assert.equal(get(r, "dayState", "2026-10-28").data.dietVariant, "ore17"); // prima delle tre a pari merito
+  const ids = [...all(r, "mealCheck"), ...all(r, "supplementCheck")].map((c) => c.id);
+  assert.equal(ids.length, 5);
+  assert.ok(ids.every((id) => id.startsWith(`2026-10-28:${variant("ore17").id}/`)));
+});
+
+test("I1: spunte che la variante scelta non ha → scartate e contate; nessuna variante utile → niente dietVariant", () => {
+  const stats = {};
+  const r = recordsFromBackup(bk({
+    // riposo (Spuntino + Merenda 16:30 + Cena + vitac = 4) pari con ore21 (Spuntino + Merenda + Post-workout + vitac = 4)
+    // → riposo per ordine; Post-workout (non in riposo) e boh (in nessuna) scartati
+    "dietaCheck_2026-10-28": { "10:30|Spuntino": true, "16:30|Merenda": true, "20:00|Cena": true, "19:30|Post-workout": true },
+    "integ_2026-10-28": { vitac: true, boh: true },
+    // solo spunte inesistenti in tutte le varianti
+    "dietaCheck_2026-10-29": { "04:00|Fantasma": true },
+    "integ_2026-10-29": { boh: true },
+    // solo spunte false: nessun record
+    "dietaCheck_2026-10-30": { "08:00|Colazione": false },
+  }), plans, stats, { now: NOW });
+  assert.equal(get(r, "dayState", "2026-10-28").data.dietVariant, "riposo");
+  assert.equal(all(r, "mealCheck").length, 3);
+  assert.equal(all(r, "supplementCheck").length, 1);
+  assert.equal(get(r, "dayState", "2026-10-29"), undefined);
+  assert.equal(get(r, "dayState", "2026-10-30"), undefined);
+  assert.equal(stats.discarded.mealCheck, 2); // Post-workout (28) + Fantasma (29)
+  assert.equal(stats.discarded.supplementCheck, 2); // boh (28) + boh (29)
+});
+
+test("I1: la variante si sceglie per giorno; il dayState si fonde con check-in del backup e del foglio", () => {
+  const b = bk({
+    "checkIn_2026-10-28": { sleep: 2, energy: 2, ailments: "" },
+    "dietaCheck_2026-10-28": { "16:30|Merenda": true, "19:30|Post-workout": true },
+    "dietaCheck_2026-10-27": { "18:00|Merenda": true },
+  });
+  const r = mergeChanges(fromSheet(), recordsFromBackup(b, plans, {}, { now: NOW }));
+  assert.equal(all(r, "dayState").filter((c) => c.id === "2026-10-28").length, 1);
+  assert.equal(get(r, "dayState", "2026-10-28").data.dietVariant, "ore21");
+  assert.deepEqual(get(r, "dayState", "2026-10-28").data.checkIn, { sleep: 2, energy: 2, ailments: "" });
+  assert.equal(get(r, "dayState", "2026-10-27").data.dietVariant, "ore22");
+});
+
+const prog = (completion, extra = {}) => ({ completion, substitutions: {}, pesos: {}, ...extra });
+
+test("I2: schedaProg_ senza names → nome da gymSaved_ della stessa data", () => {
+  const [pushup, chest] = plans.workout.data.days[0].exercises;
+  const stats = {};
+  const r = recordsFromBackup(bk({
+    "schedaProg_2026-10-20": prog({ "Giorno 1#0": [true], "Giorno 1#1": [true, true], "Giorno 1#2": [true] }),
+    "gymSaved_2026-10-20": {
+      "Giorno 1#0#0": "PUSH-UP (bodyweight) |0",          // stesso esercizio del piano (case/trim) → id del piano
+      "Giorno 1#1#1": "Panca piana|60",                    // un altro esercizio → name:
+      "Giorno 1#10#0": "Non c'entra|1",                    // prefisso simile ma exId diverso: ignorato
+    },
+    // gymSaved di un altro giorno non conta
+    "gymSaved_2026-10-21": { "Giorno 1#2#0": "Altro|1" },
+  }), plans, stats, { now: NOW });
+  assert.equal(get(r, "setLog", `2026-10-20:${pushup.id}:0`).data.planId, "wp1");
+  assert.deepEqual(all(r, "setLog").filter((c) => c.data.exerciseId === "name:panca piana").map((c) => c.data.setIndex), [0, 1]);
+  assert.equal(get(r, "setLog", `2026-10-20:${chest.id}:0`), undefined);
+  // Giorno 1#2 senza nome in nessuna fonte → mappato per posizione (nessun schedaData_at)
+  const third = plans.workout.data.days[0].exercises[2];
+  assert.equal(get(r, "setLog", `2026-10-20:${third.id}:0`).data.planId, "wp1");
+  assert.deepEqual(stats.positional, { count: 1, from: "2026-10-20", to: "2026-10-20" });
+  assert.equal(stats.discarded.setLogPositional, 0);
+});
+
+test("I2: names ha la precedenza su gymSaved_; il nome del sostituto in gymSaved_ non identifica l'esercizio", () => {
+  const chest = plans.workout.data.days[0].exercises[1];
+  const stats = {};
+  const r = recordsFromBackup(bk({
+    "schedaProg_2026-10-20": prog({ "Giorno 1#0": [true], "Giorno 1#1": [true] }, {
+      names: { "Giorno 1#0": "band squat" },
+      substitutions: { "Giorno 1#1": "Chest press con manubri" },
+    }),
+    "gymSaved_2026-10-20": { "Giorno 1#0#0": "Push-up (bodyweight)|0", "Giorno 1#1#0": "chest press con manubri|20" },
+  }), plans, stats, { now: NOW });
+  assert.ok(get(r, "setLog", "2026-10-20:name:band squat:0"));
+  const s = get(r, "setLog", `2026-10-20:${chest.id}:0`); // sostituto → senza nome → per posizione
+  assert.equal(s.data.substitutedWith, "Chest press con manubri");
+  assert.equal(stats.positional.count, 1);
+});
+
+test("I2: senza nome e scheda reimportata dopo quel giorno → scartato (setLogPositional); prima → per posizione con intervallo", () => {
+  const stats = {};
+  const r = recordsFromBackup(bk({
+    schedaData_at: "2026-10-15T18:00:00.000Z",
+    "schedaProg_2026-10-01": prog({ "Giorno 1#0": [true, true, false] }),
+    "schedaProg_2026-10-10": prog({ "Giorno 2#0": [true] }),
+    "schedaProg_2026-10-20": prog({ "Giorno 1#0": [true] }),
+    "schedaProg_2026-10-25": prog({ "Giorno 3#1": [true, true] }),
+  }), plans, stats, { now: NOW });
+  assert.equal(stats.discarded.setLogPositional, 3);
+  assert.deepEqual(stats.positional, { count: 3, from: "2026-10-20", to: "2026-10-25" });
+  assert.deepEqual(all(r, "setLog").map((c) => c.data.date).sort(), ["2026-10-20", "2026-10-25", "2026-10-25"]);
+  assert.equal(stats.ignoredKeys.schedaData_at, 1); // letto, ma mai migrato
+
+  // schedaData_at in ms, e illeggibile (= nessuna informazione → per posizione)
+  const ms = {};
+  recordsFromBackup(bk({ schedaData_at: new Date("2026-10-15T10:00:00").getTime(), "schedaProg_2026-10-10": prog({ "Giorno 1#0": [true] }) }), plans, ms, { now: NOW });
+  assert.equal(ms.discarded.setLogPositional, 1);
+  const junk = {};
+  recordsFromBackup(bk({ schedaData_at: "boh", "schedaProg_2026-10-10": prog({ "Giorno 1#0": [true] }) }), plans, junk, { now: NOW });
+  assert.equal(junk.positional.count, 1);
+});
+
+test("I3: activities → dayState.cardio per data locale dell'id (senza `when`); id non numerico scartato", () => {
+  const t1 = new Date("2026-10-28T07:15:00").getTime(), t2 = new Date("2026-10-28T19:00:00").getTime();
+  const t3 = new Date("2026-10-30T23:30:00").getTime();
+  const stats = {};
+  const r = recordsFromBackup(bk({
+    "checkIn_2026-10-28": { sleep: 4, energy: 4, ailments: "" },
+    activities: [
+      { id: t3, type: "elliptical", min: 20, km: 0, note: "", when: "Oggi" },
+      { id: t2, type: "walk", min: 40, km: 3.2, note: "sera", when: "Oggi" },
+      { id: t1, type: "walk", min: 15, km: 1, note: "", when: "Ieri" },
+      { id: "1761000000000", type: "walk", min: 5 },
+      { id: 1.5, type: "walk", min: 5 },
+      { type: "walk", min: 5 },
+      null,
+    ],
+  }), plans, stats, { now: NOW });
+  assert.deepEqual(get(r, "dayState", "2026-10-28").data, {
+    date: "2026-10-28", checkIn: { sleep: 4, energy: 4, ailments: "" },
+    cardio: [
+      { id: t2, type: "walk", min: 40, km: 3.2, note: "sera" },
+      { id: t1, type: "walk", min: 15, km: 1, note: "" },
+    ],
+  });
+  assert.deepEqual(get(r, "dayState", "2026-10-30").data.cardio, [{ id: t3, type: "elliptical", min: 20, km: 0, note: "" }]);
+  assert.equal(stats.discarded.cardio, 4);
+  assert.equal(all(r, "dayState").length, 2);
+});
+
+test("I3: restDay_ vero → dayState.rest; falso → niente", () => {
+  const stats = {};
+  const r = recordsFromBackup(bk({ "restDay_2026-10-28": true, "restDay_2026-10-29": false, "restDay_2026-10-30": "true" }), plans, stats, { now: NOW });
+  assert.deepEqual(get(r, "dayState", "2026-10-28").data, { date: "2026-10-28", rest: true });
+  assert.equal(get(r, "dayState", "2026-10-29"), undefined);
+  assert.equal(get(r, "dayState", "2026-10-30").data.rest, true); // stringa JSON "true" letta come true
+  assert.equal(stats.ignoredKeys.restDay_, undefined);
+});
+
+test("I3: gym_ vero → workoutSession del giorno con più serie spuntate, startedAt da gymStart_", () => {
+  const [d0, d1] = plans.workout.data.days;
+  const start = new Date("2026-10-28T18:05:00").getTime();
+  const stats = {};
+  const r = recordsFromBackup(bk({
+    "gym_2026-10-28": true,
+    "gymStart_2026-10-28": start,
+    "schedaProg_2026-10-28": prog({ "Giorno 1#0": [true, false], "Giorno 2#0": [true, true], "Giorno 2#1": [true] }),
+    // pari merito (1 e 1) → giorno più basso; senza gymStart_ → startedAt null
+    "gym_2026-10-29": true,
+    "schedaProg_2026-10-29": prog({ "Giorno 2#0": [true], "Giorno 1#0": [true] }),
+    // non deducibile: nessuna serie spuntata / giorno fuori dal piano / nessun schedaProg_
+    "gym_2026-10-30": true, "schedaProg_2026-10-30": prog({ "Giorno 1#0": [false] }),
+    "gym_2026-10-31": true, "schedaProg_2026-10-31": prog({ "Giorno 9#0": [true] }),
+    "gym_2026-11-01": true,
+    // gym_ falso → nessuna sessione; gymStart_ rimasto senza sessione chiusa → ignorato
+    "gym_2026-11-02": false, "gymStart_2026-11-02": start,
+  }), plans, stats, { now: NOW });
+  assert.deepEqual(get(r, "workoutSession", `2026-10-28:${d1.id}`).data,
+    { date: "2026-10-28", dayId: d1.id, dayName: d1.name, startedAt: start, done: true });
+  assert.equal(get(r, "workoutSession", `2026-10-28:${d1.id}`).updatedAt, noon("2026-10-28"));
+  assert.deepEqual(get(r, "workoutSession", `2026-10-29:${d0.id}`).data,
+    { date: "2026-10-29", dayId: d0.id, dayName: d0.name, startedAt: null, done: true });
+  assert.equal(all(r, "workoutSession").length, 2);
+  assert.equal(stats.discarded.workoutSession, 3);
+  assert.equal(stats.ignoredKeys.gymStart_, 1);
+  assert.equal(stats.ignoredKeys.gym_, undefined);
+  assert.ok(passesValidate(r));
+});
+
+test("fixture: sessione, riposo e cardio del backup di esempio", () => {
+  const r = fromBackup();
+  const d0 = plans.workout.data.days[0];
+  assert.deepEqual(get(r, "workoutSession", `2026-10-27:${d0.id}`).data,
+    { date: "2026-10-27", dayId: d0.id, dayName: d0.name, startedAt: 1793093400000, done: true });
+  const d29 = get(r, "dayState", "2026-10-29").data;
+  assert.equal(d29.rest, true);
+  assert.deepEqual(d29.cardio, [{ id: 1793275200000, type: "walk", min: 30, km: 2.5, note: "parco" }]);
 });

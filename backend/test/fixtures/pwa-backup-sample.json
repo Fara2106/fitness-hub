@@ -58,8 +58,15 @@
       },
       "sig": "Giorno 1:push-up (bodyweight)/3"
     },
-    "gym_2026-10-27": { "sets": [] },
-    "gymSaved_2026-10-27": 3,
+    "gym_2026-10-27": true,
+    "gymStart_2026-10-27": 1793093400000,
+    "gymSaved_2026-10-27": { "Giorno 1#1#0": "Chest press con manubri|20", "Giorno 1#2#0": "Esercizio di una vecchia scheda|15" },
+    "restDay_2026-10-29": true,
+    "restDay_2026-10-28": false,
+    "activities": [
+      { "id": 1793275200000, "type": "walk", "min": 30, "km": 2.5, "note": "parco", "when": "Oggi" },
+      { "id": "non-numerico", "type": "walk", "min": 10, "km": 0, "note": "", "when": "Oggi" }
+    ],
     "muscleSets_2026-10-27": { "Petto": 6 },
     "groqApiKey": "gsk_FAKE",
     "errorLog": [ { "msg": "x" } ],
