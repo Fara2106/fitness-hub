@@ -50,3 +50,10 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 );
 CREATE INDEX IF NOT EXISTS idx_login_attempts_key_at ON login_attempts (key, at);
 CREATE INDEX IF NOT EXISTS idx_login_attempts_at ON login_attempts (at);
+-- Codici di attivazione monouso: stesso testo di migrations/0004_activation.sql (per i DB nuovi).
+CREATE TABLE IF NOT EXISTS activation_codes (
+  id TEXT PRIMARY KEY,                      -- SHA-256 hex del codice normalizzato: il codice in chiaro non si salva mai
+  owner TEXT NOT NULL,                      -- ownerId dell'account che il codice crea
+  expires_at INTEGER NOT NULL,              -- ms; valido finché expires_at > adesso
+  used_at INTEGER                           -- ms dell'attivazione; NULL = non ancora usato
+);

@@ -13,6 +13,7 @@ import { createD1 } from "./d1-sqlite.mjs";
 import worker, { resolveOwner } from "../src/worker.mjs";
 import {
   PBKDF2_ITERATIONS, SESSION_TTL_MS, PW_VER, hashPassword, verifyPassword, createAccount, setAppleFetch,
+  ACTIVATION_TTL_MS, generateActivationCode, normalizeActivationCode, activationCodeId, createActivationCode,
 } from "../src/auth.mjs";
 import { main as cli, feedSecret, remoteArgs, withSqlFile } from "../admin/account.mjs";
 
@@ -785,5 +786,309 @@ test("local-server --account + CLI login: sessione in un file 600, mai a video",
   } finally {
     srv.child.kill();
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- codice di attivazione: l'app nativa (senza token legacy) crea l'account del proprietario (Task 18B) ----------
+
+const m0004 = readFileSync(new URL("../migrations/0004_activation.sql", import.meta.url), "utf8");
+const CODE_RE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{5}-[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{5}$/;
+const normCode = (c) => c.replace(/[-\s]/g, "").toUpperCase();
+// Backend senza account e senza token legacy (come l'app nativa la prima volta), con un codice per OWNER.
+async function newEnvWithInvite({ expiresIn = 30 * 60 * 1000, extra = {} } = {}) {
+  const DB = createD1();
+  await DB.exec(schema);
+  const { code } = await createActivationCode(DB, { owner: OWNER, now: Date.now() - (30 * 60 * 1000 - expiresIn) });
+  return { code, env: { DB, PASSWORD_PEPPER: PEPPER, PRIMARY_OWNER: OWNER, LEGACY_TOKEN_ENABLED: "false", REGISTRATION_OPEN: "false", APPLE_SIGNIN_ENABLED: "false", APPLE_BUNDLE_ID: BUNDLE, ...extra } };
+}
+const activate = (env, { code, email = EMAIL, password = PASSWORD, ip, deviceName = "iPhone 18 Pro", origin } = {}) =>
+  call(env, "/v1/auth/activate", { body: { code, email, password, deviceName }, ip, origin });
+const codeRow = (env) => env.DB.prepare("SELECT * FROM activation_codes").first();
+const BAD_CODE = { error: "codice non valido o scaduto" };
+
+test("codice di attivazione: 10 caratteri senza 0/O/1/I/L, mostrato XXXXX-XXXXX; normalizzato senza trattino né maiuscole", async () => {
+  const seen = new Set();
+  for (let i = 0; i < 200; i++) {
+    const c = generateActivationCode();
+    assert.match(c, CODE_RE);
+    seen.add(c);
+  }
+  assert.equal(seen.size, 200, "codici casuali");
+  assert.equal(normalizeActivationCode("  abcde-fghjk "), "ABCDEFGHJK");
+  assert.equal(normalizeActivationCode("ABCDEFGHJK"), "ABCDEFGHJK");
+  assert.equal(normalizeActivationCode(42), "");
+  // nel DB solo SHA-256 hex del codice normalizzato
+  assert.equal(await activationCodeId("abcde-fghjk"), sha256Hex("ABCDEFGHJK"));
+  const db = createD1();
+  await db.exec(schema);
+  const now = Date.now();
+  const r = await createActivationCode(db, { owner: OWNER, now });
+  assert.match(r.code, CODE_RE);
+  assert.equal(r.expiresAt, now + ACTIVATION_TTL_MS);
+  assert.equal(ACTIVATION_TTL_MS, 30 * 60 * 1000);
+  const row = await db.prepare("SELECT * FROM activation_codes").first();
+  assert.deepEqual(row, { id: sha256Hex(normCode(r.code)), owner: OWNER, expires_at: now + ACTIVATION_TTL_MS, used_at: null });
+});
+
+test("activate: codice valido → account del proprietario del codice + sessione, una volta sola", async () => {
+  const { env, code } = await newEnvWithInvite();
+  // formato tollerante: minuscole, senza trattino, spazi ai lati
+  const r = await activate(env, { code: `  ${normCode(code).toLowerCase()} `, email: "  Lorenzo@Example.TEST " });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(Object.keys(r.body).sort(), ["email", "expiresAt", "ownerId", "session"]);
+  assert.deepEqual([r.body.ownerId, r.body.email], [OWNER, "lorenzo@example.test"]);
+  assert.match(r.body.session, /^[A-Za-z0-9_-]{43}$/);
+  assert.ok(r.body.expiresAt > Date.now() + SESSION_TTL_MS - 60000);
+  const acc = await env.DB.prepare("SELECT * FROM accounts").first();
+  assert.deepEqual([acc.id, acc.email, acc.pw_iter, acc.pw_ver, acc.disabled], [OWNER, "lorenzo@example.test", PBKDF2_ITERATIONS, PW_VER, 0]);
+  assert.equal(await verifyPassword(PASSWORD, acc, PEPPER), true, "stesso hash/pepper della CLI e del claim");
+  const used = await codeRow(env);
+  assert.ok(Number.isInteger(used.used_at) && used.used_at <= Date.now(), "codice segnato come usato");
+  const sess = await env.DB.prepare("SELECT * FROM sessions WHERE id = ?").bind(sha256Hex(r.body.session)).first();
+  assert.equal(sess.device_name, "iPhone 18 Pro");
+  assert.deepEqual([(await me(env, r.body.session)).body.ownerId, (await sync(env, r.body.session)).status], [OWNER, 200]);
+  assert.equal((await login(env, "lorenzo@example.test")).status, 200, "poi si accede con email e password");
+  // seconda volta (anche con un'altra email) → 401, niente di nuovo
+  const again = await activate(env, { code, email: "altra@example.test" });
+  assert.deepEqual([again.status, again.body], [401, BAD_CODE]);
+  assert.equal(await countOf(env, "accounts"), 1);
+  assert.equal(await countOf(env, "sessions"), 2);
+});
+
+test("activate: codice scaduto, riusato, sbagliato o malformato → stesso 401; nessun account", async () => {
+  const expired = await newEnvWithInvite({ expiresIn: -1 });
+  const rExp = await activate(expired.env, { code: expired.code });
+  const { env, code } = await newEnvWithInvite();
+  const rWrong = await activate(env, { code: "ABCDE-FGHJK", ip: "10.9.0.2" });
+  const rShort = await activate(env, { code: "XYZ", ip: "10.9.0.3" });
+  const rEmpty = await activate(env, { code: "", ip: "10.9.0.4" });
+  for (const r of [rExp, rWrong, rShort, rEmpty]) assert.deepEqual([r.status, r.body], [401, BAD_CODE]);
+  assert.equal(await countOf(expired.env, "accounts"), 0);
+  assert.equal((await codeRow(expired.env)).used_at, null, "un codice scaduto non si consuma");
+  assert.equal(await countOf(env, "accounts"), 0);
+  assert.equal((await activate(env, { code, ip: "10.9.0.5" })).status, 200, "i tentativi sbagliati non consumano il codice giusto");
+  const reused = await activate(env, { code, email: "x@example.test", ip: "10.9.0.6" });
+  assert.deepEqual([reused.status, reused.body], [401, BAD_CODE]);
+  // un codice che scade fra un istante è ancora valido; uno appena scaduto no (expires_at > now)
+  const edge = await newEnvWithInvite({ expiresIn: 5000 });
+  assert.equal((await activate(edge.env, { code: edge.code })).status, 200);
+});
+
+test("activate: account già esistente per quel proprietario → 409 e il codice NON si consuma", async () => {
+  const { env, code } = await newEnvWithInvite();
+  await createAccount(env.DB, { id: OWNER, email: "gia@example.test", password: PASSWORD, pepper: PEPPER, now: Date.now() });
+  const r = await activate(env, { code });
+  assert.equal(r.status, 409);
+  assert.deepEqual(r.body, { error: "account già esistente" });
+  assert.equal((await codeRow(env)).used_at, null);
+  assert.equal(await countOf(env, "accounts"), 1);
+  assert.equal(await countOf(env, "sessions"), 0);
+  assert.equal((await login(env, "gia@example.test", "una-password-diversa")).status, 401, "password invariata");
+});
+
+test("activate: il lotto atomico — INSERT rifiutato dal DB (email già usata) → 409, codice NON consumato, poi riusabile", async () => {
+  const { env, code } = await newEnvWithInvite();
+  // un ALTRO account con la stessa email: il controllo sull'owner passa, l'INSERT nel lotto viola UNIQUE(email)
+  await createAccount(env.DB, { id: "altro-owner", email: EMAIL, password: PASSWORD, pepper: PEPPER, now: Date.now() });
+  const r = await activate(env, { code });
+  assert.deepEqual([r.status, r.body], [409, { error: "account già esistente" }]);
+  assert.equal((await codeRow(env)).used_at, null, "il lotto è tornato indietro: codice ancora valido");
+  assert.equal(await countOf(env, "accounts"), 1);
+  assert.equal(await countOf(env, "sessions"), 0);
+  const ok = await activate(env, { code, email: "nuova@example.test", ip: "10.9.1.1" });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.ownerId, OWNER);
+  assert.ok((await codeRow(env)).used_at > 0);
+});
+
+test("activate: attivazioni concorrenti con lo stesso codice → esattamente un account (mai 500)", async () => {
+  for (let round = 0; round < 3; round++) {
+    const { env, code } = await newEnvWithInvite();
+    const rs = await Promise.all([
+      activate(env, { code, email: "uno@example.test", ip: "203.0.113.21" }),
+      activate(env, { code, email: "due@example.test", ip: "203.0.113.22" }),
+      activate(env, { code: normCode(code), email: "tre@example.test", ip: "203.0.113.23" }),
+    ]);
+    const statuses = rs.map((r) => r.status);
+    assert.equal(statuses.filter((s) => s === 200).length, 1, JSON.stringify(rs.map((r) => [r.status, r.body])));
+    assert.ok(statuses.every((s) => s === 200 || s === 401 || s === 409), JSON.stringify(statuses));
+    assert.equal(await countOf(env, "accounts"), 1);
+    assert.equal(await countOf(env, "sessions"), 1);
+    const winner = rs.find((r) => r.status === 200).body;
+    assert.equal((await env.DB.prepare("SELECT email FROM accounts").first("email")), winner.email);
+    assert.equal((await me(env, winner.session)).body.ownerId, OWNER);
+  }
+});
+
+test("activate: il codice in chiaro non finisce mai nel DB (né nei tentativi)", async () => {
+  const { env, code } = await newEnvWithInvite();
+  await activate(env, { code: "ABCDE-FGHJK", ip: "10.9.2.1" });                       // tentativo sbagliato
+  assert.equal((await activate(env, { code, ip: "10.9.2.2" })).status, 200);
+  const dump = [];
+  for (const t of ["activation_codes", "accounts", "sessions", "login_attempts", "records", "meta"]) {
+    dump.push(JSON.stringify((await env.DB.prepare(`SELECT * FROM ${t}`).all()).results));
+  }
+  const all = dump.join("\n").toUpperCase();
+  for (const c of [code, normCode(code), "ABCDE-FGHJK", "ABCDEFGHJK"]) assert.ok(!all.includes(c), `codice in chiaro nel DB: ${c}`);
+  assert.equal((await codeRow(env)).id, sha256Hex(normCode(code)));
+});
+
+test("activate: input (400), pepper obbligatorio (500), limite tentativi per IP e per codice (429) prima di verificare", async () => {
+  const { env, code } = await newEnvWithInvite();
+  assert.equal((await activate(env, { code, password: "corta" })).status, 400);
+  assert.match((await activate(env, { code, password: "corta" })).body.error, /10 caratteri/);
+  assert.equal((await activate(env, { code, email: "non-una-email" })).status, 400);
+  assert.equal((await call(env, "/v1/auth/activate", { body: { email: EMAIL, password: PASSWORD } })).status, 400, "codice mancante");
+  assert.equal((await activate(env, { code: "X".repeat(65) })).status, 400, "codice troppo lungo");
+  assert.equal((await call(env, "/v1/auth/activate", { method: "GET" })).status, 405);
+  assert.equal((await codeRow(env)).used_at, null);
+  for (const PASSWORD_PEPPER of [undefined, "", "corto"]) {
+    const np = await newEnvWithInvite({ extra: { PASSWORD_PEPPER } });
+    const r = await activate(np.env, { code: np.code });
+    assert.deepEqual([r.status, r.body], [500, { error: "configurazione mancante" }]);
+    assert.equal(await countOf(np.env, "accounts"), 0);
+    assert.equal((await codeRow(np.env)).used_at, null);
+  }
+  // 5 tentativi per IP in 15 minuti: il sesto → 429 anche col codice giusto, e il codice resta valido
+  const lim = await newEnvWithInvite();
+  for (let i = 0; i < 5; i++) assert.equal((await activate(lim.env, { code: `WRONG-CODE${i}`, ip: "198.51.100.20" })).status, 401);
+  const blocked = await activate(lim.env, { code: lim.code, ip: "198.51.100.20" });
+  assert.equal(blocked.status, 429);
+  assert.equal(blocked.headers.get("Retry-After"), "900");
+  assert.equal((await codeRow(lim.env)).used_at, null);
+  // per codice: 5 tentativi sullo stesso codice da IP diversi → il sesto è bloccato
+  const per = await newEnvWithInvite();
+  for (let i = 0; i < 5; i++) assert.equal((await activate(per.env, { code: per.code, password: "corta", ip: `198.51.101.${i}` })).status, 400);
+  const keys = (await per.env.DB.prepare("SELECT key FROM login_attempts").all()).results.map((r) => r.key);
+  assert.equal(keys.length, 0, "gli errori di input (400) non si addebitano");
+  for (let i = 0; i < 5; i++) {
+    await per.env.DB.prepare("INSERT INTO login_attempts (key, at) VALUES (?, ?)").bind(`code:${sha256Hex(normCode(per.code)).slice(0, 8)}`, Date.now()).run();
+  }
+  const byCode = await activate(per.env, { code: per.code, ip: "198.51.101.99" });
+  assert.equal(byCode.status, 429, "limite per codice");
+  assert.equal(await countOf(per.env, "accounts"), 0);
+  // il successo azzera IP e codice
+  const okEnv = await newEnvWithInvite();
+  await activate(okEnv.env, { code: "ABCDE-FGHJK", ip: "198.51.102.1" });
+  assert.equal((await activate(okEnv.env, { code: okEnv.code, ip: "198.51.102.1" })).status, 200);
+  assert.equal(await okEnv.env.DB.prepare("SELECT COUNT(*) AS n FROM login_attempts WHERE key = ?").bind("ip:198.51.102.1").first("n"), 0);
+  // la chiave del codice usa solo un prefisso dell'hash (mai il codice)
+  const k = (await lim.env.DB.prepare("SELECT DISTINCT key FROM login_attempts WHERE key LIKE 'code:%'").all()).results.map((r) => r.key);
+  assert.ok(k.length >= 1 && k.every((x) => /^code:[0-9a-f]{8}$/.test(x)), JSON.stringify(k));
+});
+
+test("activate: vale senza token legacy e senza sessione; CORS per la PWA", async () => {
+  const { env, code } = await newEnvWithInvite();
+  const pre = await worker.fetch(req("/v1/auth/activate", { method: "OPTIONS", origin: PWA }), env);
+  assert.equal(pre.status, 204);
+  const r = await activate(env, { code, origin: PWA });
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get("Access-Control-Allow-Origin"), PWA);
+});
+
+test("migrazione 0004_activation.sql: idempotente, solo la tabella nuova, inclusa in schema.sql", async () => {
+  assert.ok(!/\bBEGIN\b|\bCOMMIT\b/i.test(m0004.replace(/--.*$/gm, "")));
+  assert.ok(schema.includes(m0004.slice(m0004.indexOf("CREATE TABLE IF NOT EXISTS activation_codes"))), "schema.sql deve contenere 0004");
+  const db = createD1();
+  await db.exec(schema.slice(0, schema.indexOf("CREATE TABLE IF NOT EXISTS activation_codes")));   // DB com'è oggi in produzione
+  await createAccount(db, { id: "x", email: "a@example.test", password: PASSWORD, pepper: PEPPER, now: 1 });
+  const before = (await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()).results.map((r) => r.name);
+  assert.ok(!before.includes("activation_codes"));
+  await db.exec(m0004);
+  await db.exec(m0004);
+  const after = (await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()).results.map((r) => r.name);
+  assert.deepEqual(after, [...before, "activation_codes"].sort());
+  assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM accounts").first("n"), 1);
+});
+
+test("CLI invite --local: stampa il codice UNA volta, salva solo l'hash; rifiuta se l'account esiste già", async () => {
+  const dir = mkdtempSync(`${tmpdir()}/lfh-inv-`);
+  const file = `${dir}/db.sqlite`;
+  try {
+    let r = await runCli(["invite", "--owner", "non valido!", "--local", file]);
+    assert.equal(r.code, 2);
+    r = await runCli(["invite", "--owner", OWNER, "--local", file]);
+    assert.equal(r.code, 0, r.err);
+    const codes = r.out.match(/[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{5}-[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{5}/g);
+    assert.equal(codes.length, 1, r.out);
+    const code = codes[0];
+    assert.equal(r.out.split(code).length - 1, 1, "il codice compare una volta sola");
+    assert.ok(!r.err.includes(code) && !r.err.includes(normCode(code)));
+    assert.match(r.out, /30 minuti/);
+    let sqlite = new DatabaseSync(file);
+    const rows = sqlite.prepare("SELECT * FROM activation_codes").all();
+    sqlite.close();
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, sha256Hex(normCode(code)));
+    assert.equal(rows[0].owner, OWNER);
+    assert.ok(Math.abs(rows[0].expires_at - (Date.now() + 30 * 60 * 1000)) < 60000);
+    // un nuovo invito sostituisce quello non usato: vale solo l'ultimo
+    const r2 = await runCli(["invite", "--owner", OWNER, "--local", file]);
+    assert.equal(r2.code, 0, r2.err);
+    const code2 = r2.out.match(/[A-Z2-9]{5}-[A-Z2-9]{5}/)[0];
+    const env = { DB: createD1(file), PASSWORD_PEPPER: PEPPER, REGISTRATION_OPEN: "false" };
+    assert.equal((await activate(env, { code, ip: "10.7.0.1" })).status, 401, "il codice precedente non vale più");
+    const ok = await activate(env, { code: code2, ip: "10.7.0.2" });
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    assert.equal(ok.body.ownerId, OWNER);
+    // account esistente → rifiuto chiaro, nessun codice stampato né salvato
+    r = await runCli(["invite", "--owner", OWNER, "--local", file]);
+    assert.equal(r.code, 1);
+    assert.match(r.err, /esiste già un account/);
+    assert.ok(!/[A-Z2-9]{5}-[A-Z2-9]{5}/.test(r.out + r.err));
+    sqlite = new DatabaseSync(file);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM activation_codes").get().n, 1);
+    sqlite.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI invite --remote: controllo account via --command, hash via file; il codice mai nell'SQL", async () => {
+  const seen = [];
+  const runRemote = async (sql, opts) => { seen.push({ sql, secret: !!(opts && opts.secret) }); return { ok: true, results: [], changes: 1 }; };
+  const r = await runCli(["invite", "--owner", OWNER, "--remote"], [], { runRemote });
+  assert.equal(r.code, 0, r.err);
+  const code = r.out.match(/[A-Z2-9]{5}-[A-Z2-9]{5}/)[0];
+  assert.deepEqual(seen.map((q) => [q.sql.split(" ")[0], q.secret]), [["SELECT", false], ["DELETE", true]]);
+  assert.match(seen[0].sql, /FROM accounts WHERE id = /);
+  assert.ok(seen[1].sql.includes(sha256Hex(normCode(code))), "l'hash va nel file");
+  for (const q of seen) assert.ok(!q.sql.toUpperCase().includes(normCode(code)) && !q.sql.includes(code), "codice in chiaro nell'SQL");
+  // lo stesso SQL su un DB locale: il codice attiva l'account
+  const db = createD1();
+  await db.exec(schema);
+  await db.exec(seen[1].sql);
+  assert.equal((await activate({ DB: db, PASSWORD_PEPPER: PEPPER }, { code })).status, 200);
+  // account già presente in remoto → rifiuto, nessuna scrittura
+  seen.length = 0;
+  const withAccount = async (sql, opts) => { seen.push({ sql, secret: !!(opts && opts.secret) }); return { ok: true, results: [{ id: OWNER }], changes: 0 }; };
+  const r2 = await runCli(["invite", "--owner", OWNER, "--remote"], [], { runRemote: withAccount });
+  assert.equal(r2.code, 1);
+  assert.match(r2.err, /esiste già un account/);
+  assert.equal(seen.length, 1);
+});
+
+test("local-server --invite: stampa `invite <CODE>` dopo ready, anche senza --token/--account; il codice attiva via HTTP", async () => {
+  const srv = await startServer(["--port", "0", "--invite", "--owner", OWNER]);
+  try {
+    await new Promise((r) => setTimeout(r, 200));
+    const lines = srv.out().trim().split("\n");
+    assert.match(lines[0], /^ready http:/);
+    const m = lines[1] && lines[1].match(/^invite ([A-Z2-9]{5}-[A-Z2-9]{5})$/);
+    assert.ok(m, srv.out());
+    const res = await fetch(`${srv.url}/v1/auth/activate`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: m[1], email: EMAIL, password: PASSWORD, deviceName: "Simulatore" }),
+    });
+    const body = await res.json();
+    assert.equal(res.status, 200, JSON.stringify(body));
+    assert.equal(body.ownerId, OWNER);
+    const again = await fetch(`${srv.url}/v1/auth/activate`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: m[1], email: EMAIL, password: PASSWORD }),
+    });
+    assert.equal(again.status, 401);
+  } finally {
+    srv.child.kill();
   }
 });

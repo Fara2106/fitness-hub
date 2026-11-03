@@ -1,11 +1,12 @@
 // Worker HTTP: accesso (sessioni degli account, token legacy durante il passaggio), CORS, validazione,
-// /v1/sync, /v1/me, /v1/auth/* e /v1/health.
+// /v1/sync, /v1/me, /v1/auth/* (anche activate col codice monouso) e /v1/health.
 import { applyChanges, pullSince, currentRecords, readMeta } from "./store.mjs";
 import { validateSyncBody, PULL_LIMIT } from "./validate.mjs";
 import {
   lookupSession, createSession, revokeSession, findAccountByEmail, verifyPassword, hashPassword, passwordProblem,
   normalizeEmail, isValidEmail, emailKey, ipKey, chargeAttempt, clearAttempts, verifyAppleToken, pepperBytes,
   rehashIfNeeded, createAccount, ConfigError, LOGIN_WINDOW_MS,
+  normalizeActivationCode, activationCodeId, codeKey, activationOwner, activateAccount,
 } from "./auth.mjs";
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -213,6 +214,43 @@ async function handleClaim(request, env, cors) {
   return issueSession(env, cors, account, deviceNameOf(body.deviceName), now);
 }
 
+// POST /v1/auth/activate {code, email, password, deviceName} (Task 18B): l'app nativa, che non ha il token legacy,
+// crea l'account del proprietario del codice monouso (generato con `admin/account.mjs invite`). Nessun Bearer.
+// Il tentativo si addebita (IP + prefisso dell'hash del codice, 5 in 15 minuti) PRIMA del PBKDF2 e di ogni lettura.
+// Codice sbagliato, scaduto o già usato → stesso 401. Account già esistente → 409 e il codice NON si consuma.
+// Account e codice usato nascono nello stesso lotto (activateAccount): due attivazioni concorrenti → un solo account.
+const BAD_CODE = { error: "codice non valido o scaduto" };
+async function handleActivate(request, env, cors) {
+  const body = await readAuthBody(request, cors);
+  if (body instanceof Response) return body;
+  if (typeof body.code !== "string" || body.code.length > 64) return json({ error: "codice obbligatorio" }, 400, cors);
+  const email = normalizeEmail(body.email);
+  if (!isValidEmail(email)) return json({ error: "email non valida" }, 400, cors);
+  const problem = passwordProblem(body.password);
+  if (problem) return json({ error: problem }, 400, cors);
+  const pepper = requirePepper(env);
+  const now = Date.now();
+  const id = await activationCodeId(body.code);
+  const keys = [ipKey(clientIp(request)), codeKey(id)];
+  if ((await chargeAttempt(env.DB, keys, now)).limited) return tooMany(cors);
+  if (normalizeActivationCode(body.code).length === 0) return json(BAD_CODE, 401, cors);
+  const owner = await activationOwner(env.DB, id, now);
+  if (!owner) return json(BAD_CODE, 401, cors);
+  if (await env.DB.prepare("SELECT id FROM accounts WHERE id = ?").bind(owner).first()) {
+    return json({ error: "account già esistente" }, 409, cors);
+  }
+  let result;
+  try {
+    result = await activateAccount(env.DB, { id, email, password: body.password, pepper, now });
+  } catch (e) {
+    if (isUniqueViolation(e)) return json({ error: "account già esistente" }, 409, cors);
+    throw e;
+  }
+  if (!result.consumed) return json(BAD_CODE, 401, cors);
+  await clearAttempts(env.DB, keys);
+  return issueSession(env, cors, result.account, deviceNameOf(body.deviceName), now);
+}
+
 // Rotte che richiedono una SESSIONE (il token legacy non è una sessione: 401).
 async function requireSession(request, env, cors) {
   const a = await authenticate(request, env);
@@ -307,6 +345,7 @@ const AUTH_ROUTES = {
   "/v1/auth/login": handleLogin,
   "/v1/auth/register": handleRegister,
   "/v1/auth/claim": handleClaim,
+  "/v1/auth/activate": handleActivate,
   "/v1/auth/logout": handleLogout,
   "/v1/auth/password": handlePassword,
   "/v1/auth/apple": handleApple,

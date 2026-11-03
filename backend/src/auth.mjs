@@ -170,10 +170,89 @@ export async function lookupSession(db, token, now) {
 export const revokeSession = (db, sessionId) =>
   db.prepare("UPDATE sessions SET revoked = 1 WHERE id = ?").bind(sessionId).run();
 
+// --- codici di attivazione (Task 18B) -----------------------------------------------------------------
+
+// Codice monouso con cui l'app nativa (che non ha il token legacy) crea l'account del proprietario.
+// 10 caratteri da un alfabeto senza simboli ambigui (niente 0/O/1/I/L): 31^10 ≈ 8·10^14 combinazioni,
+// valido 30 minuti, una volta sola, con il limite ai tentativi per IP e per codice. Nel DB solo SHA-256 hex
+// del codice normalizzato (maiuscole, senza trattino né spazi): il codice in chiaro si stampa una volta e basta.
+export const ACTIVATION_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+export const ACTIVATION_LENGTH = 10;
+export const ACTIVATION_TTL_MS = 30 * 60 * 1000;
+
+// CSPRNG con rifiuto dei byte oltre il multiplo più grande di 31 (nessuna distorsione). → "XXXXX-XXXXX".
+export function generateActivationCode() {
+  const n = ACTIVATION_ALPHABET.length;
+  const max = 256 - (256 % n);
+  let out = "";
+  while (out.length < ACTIVATION_LENGTH) {
+    for (const b of randomBytes(16)) {
+      if (b < max && out.length < ACTIVATION_LENGTH) out += ACTIVATION_ALPHABET[b % n];
+    }
+  }
+  return `${out.slice(0, 5)}-${out.slice(5)}`;
+}
+
+// Accettato con o senza trattino, in minuscolo o maiuscolo, con spazi: si confronta la forma normalizzata.
+export const normalizeActivationCode = (code) => (typeof code === "string" ? code.replace(/[-\s]/g, "").toUpperCase() : "");
+export const activationCodeId = (code) => sha256Hex(normalizeActivationCode(code));
+// Chiave del limite tentativi per codice: solo un prefisso dell'hash (mai il codice).
+export const codeKey = (id) => `code:${id.slice(0, 8)}`;
+
+// Statement che salvano un nuovo codice per `owner` (gli eventuali codici non usati di quell'owner si cancellano:
+// vale solo l'ultimo). Restituiti come [sql, params] perché la CLI --remote li scrive in un file SQL.
+export async function activationCodeStatements(owner, now) {
+  const code = generateActivationCode();
+  const id = await activationCodeId(code);
+  const expiresAt = now + ACTIVATION_TTL_MS;
+  return {
+    code, expiresAt,
+    statements: [
+      ["DELETE FROM activation_codes WHERE owner = ? AND used_at IS NULL", [owner]],
+      ["INSERT INTO activation_codes (id, owner, expires_at, used_at) VALUES (?, ?, ?, NULL)", [id, owner, expiresAt]],
+    ],
+  };
+}
+
+// Crea un codice per `owner` (test, local-server, CLI --local) → { code, expiresAt }.
+export async function createActivationCode(db, { owner, now }) {
+  const { code, expiresAt, statements } = await activationCodeStatements(owner, now);
+  await db.batch(statements.map(([sql, params]) => db.prepare(sql).bind(...params)));
+  return { code, expiresAt };
+}
+
+// Codice valido (esiste, non usato, non scaduto) → owner, altrimenti null.
+export const activationOwner = (db, id, now) =>
+  db.prepare("SELECT owner FROM activation_codes WHERE id = ? AND used_at IS NULL AND expires_at > ?").bind(id, now).first("owner");
+
+// Crea l'account e consuma il codice in UN lotto atomico. L'INSERT prende l'id dal codice e inserisce solo se il
+// codice è ancora valido; l'UPDATE lo segna usato con le stesse condizioni. Nello stesso lotto le due condizioni
+// vedono lo stesso stato: codice valido → account + codice usato; codice nel frattempo usato/scaduto → nessuna riga
+// (→ { consumed: false }, 401). Se l'INSERT viola la PRIMARY KEY (account già esistente) o l'email UNIQUE, il lotto
+// fallisce tutto: eccezione e codice NON consumato (→ 409).
+export async function activateAccount(db, { id, email, password, pepper, now }) {
+  const problem = passwordProblem(password);
+  if (problem) throw new Error(problem);
+  const e = normalizeEmail(email);
+  if (!isValidEmail(e)) throw new Error("email non valida");
+  const h = await hashPassword(password, pepper);
+  const out = await db.batch([
+    db.prepare(
+      `INSERT INTO accounts (id, email, pw_hash, pw_salt, pw_iter, pw_ver, apple_sub, created_at, disabled)
+       SELECT owner, ?, ?, ?, ?, ?, NULL, ?, 0 FROM activation_codes WHERE id = ? AND used_at IS NULL AND expires_at > ?`
+    ).bind(e, h.hash, h.salt, h.iter, h.ver, now, id, now),
+    db.prepare("UPDATE activation_codes SET used_at = ? WHERE id = ? AND used_at IS NULL AND expires_at > ?").bind(now, id, now),
+    db.prepare("SELECT owner FROM activation_codes WHERE id = ?").bind(id),
+  ]);
+  const consumed = out[1].meta.changes === 1;
+  return consumed ? { consumed, account: { id: out[2].results[0].owner, email: e } } : { consumed };
+}
+
 // --- limite ai tentativi ------------------------------------------------------------------------------
 
 export const emailKey = (email) => `email:${normalizeEmail(email)}`;
 export const ipKey = (ip) => `ip:${ip || "unknown"}`;
+// `email:` → 20; `ip:` e `code:` (codici di attivazione) → 5.
 const limitOf = (key) => (key.startsWith("email:") ? LOGIN_MAX_EMAIL : LOGIN_MAX_IP);
 
 // Addebita il tentativo PRIMA di verificare, in un unico lotto atomico: pota le righe vecchie, inserisce una riga

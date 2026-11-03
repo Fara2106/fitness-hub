@@ -7,6 +7,7 @@
 //   node backend/admin/account.mjs revoke         --email <e> [--session <prefisso id>] (--local … | --remote)
 //   node backend/admin/account.mjs login          --email <e> --api <url> [--device-name <n>] [--out <file>]
 //   node backend/admin/account.mjs init-pepper    [--pepper-file <file>]
+//   node backend/admin/account.mjs invite         --owner <ownerId>             (--local <db.sqlite> | --remote)
 //
 // La password si legge SOLO dal terminale, senza eco (due volte per create/reset-password, devono coincidere,
 // almeno 10 caratteri). Non si accetta come argomento né da variabili d'ambiente e non viene mai stampata.
@@ -16,6 +17,9 @@
 // subito dopo), mai negli argomenti; le sole letture/revoche senza segreti passano da --command. Mai stampati.
 // --local: un file SQLite (test e sviluppo; lo schema si crea se manca).
 // login: POST /v1/auth/login su --api e scrive il token di sessione in ~/.config/fitness-hub/session (600).
+// invite: codice di attivazione monouso (30 minuti) con cui l'app crea l'account di --owner (POST /v1/auth/activate).
+// Rifiuta se l'account esiste già. Il codice si stampa UNA volta su stdout e mai altrove; nel DB va solo il suo
+// SHA-256 (in remoto via file, come gli hash delle password). Un nuovo invito annulla quelli non usati.
 import { parseArgs } from "node:util";
 import { readFileSync, writeFileSync, mkdirSync, chmodSync, realpathSync, statSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -23,7 +27,9 @@ import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
-import { hashPassword, passwordProblem, normalizeEmail, isValidEmail, pepperBytes, toHex, randomBytes } from "../src/auth.mjs";
+import {
+  hashPassword, passwordProblem, normalizeEmail, isValidEmail, pepperBytes, toHex, randomBytes, activationCodeStatements,
+} from "../src/auth.mjs";
 
 const BACKEND_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DB_NAME = "fitness-hub-db";
@@ -35,6 +41,7 @@ const USAGE = `uso:
   account.mjs revoke         --email <e> [--session <prefisso>] (--local <db> | --remote)
   account.mjs login          --email <e> --api <url> [--device-name <nome>] [--out <file>]
   account.mjs init-pepper    [--pepper-file <file>]
+  account.mjs invite         --owner <ownerId> (--local <db> | --remote)
 Opzione comune: --pepper-file <file> (default ~/.config/fitness-hub/pepper, permessi 600).
 La password si digita nel terminale (senza eco): mai come argomento o variabile d'ambiente.`;
 
@@ -350,7 +357,31 @@ async function cmdLogin(values, io, out) {
   out(`accesso riuscito: ${body.email} (owner ${body.ownerId}); sessione salvata in ${file} (scade ${iso(body.expiresAt)})`);
 }
 
-const COMMANDS = { "init-pepper": cmdInitPepper, create: cmdCreate, "reset-password": cmdResetPassword, sessions: cmdSessions, revoke: cmdRevoke, login: cmdLogin };
+// Statement parametrici → SQL letterale (stessa quotatura di `lit`), per il file di wrangler e per --local.
+const inline = ([sql, params]) => {
+  let i = 0;
+  return sql.replace(/\?/g, () => lit(params[i++]));
+};
+
+async function cmdInvite(values, io, out) {
+  if (!values.owner || !OWNER_RE.test(values.owner)) throw new UsageError("--owner deve essere un id (lettere, cifre, trattini)");
+  const target = await openTarget(values, io);
+  try {
+    const { results } = await target.run([`SELECT id FROM accounts WHERE id = ${lit(values.owner)}`]);
+    if (results.length) {
+      throw new Failure(`esiste già un account per l'owner ${values.owner}: nessun codice creato (per entrare usa Accedi; password dimenticata → reset-password)`);
+    }
+    const { code, expiresAt, statements } = await activationCodeStatements(values.owner, Date.now());
+    await target.run(statements.map(inline), { secret: true });
+    const at = new Date(expiresAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+    out(`codice di attivazione per l'owner ${values.owner}: ${code}`);
+    out(`valido 30 minuti (fino alle ${at}), una volta sola: nell'app "Prima volta? Crea il tuo account". Un nuovo invito annulla questo.`);
+  } finally {
+    target.close();
+  }
+}
+
+const COMMANDS = { "init-pepper": cmdInitPepper, create: cmdCreate, "reset-password": cmdResetPassword, sessions: cmdSessions, revoke: cmdRevoke, login: cmdLogin, invite: cmdInvite };
 
 // → exit code (0 ok, 1 errore, 2 uso). `io` = { stdin, stdout, stderr, allowNonTty?, runRemote?, fetch? }.
 export async function main(argv, io = {}) {
@@ -372,7 +403,7 @@ export async function main(argv, io = {}) {
       },
       strict: true,
     });
-    if (cmd !== "init-pepper") {
+    if (cmd !== "init-pepper" && cmd !== "invite") {
       values.email = normalizeEmail(values.email);
       if (!isValidEmail(values.email)) throw new UsageError("--email mancante o non valida");
     }

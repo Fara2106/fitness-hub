@@ -12,7 +12,7 @@ e tombstone per le eliminazioni. Zero dipendenze runtime.
   sbagliato, scaduto o revocato). Con `LEGACY_TOKEN_ENABLED = "true"` anche il token `SYNC_TOKEN` vale, per il
   proprietario `PRIMARY_OWNER` (variabile in `wrangler.toml`, un UUID: è un identificatore, non un segreto). Se in quel
   caso `PRIMARY_OWNER` manca, `/v1/me` e `/v1/sync` rispondono 500 "configurazione mancante" senza scrivere nulla.
-- `POST /v1/auth/login | logout | password | register | claim | apple | apple/link`: vedi "Account e sessioni" e `CONTRACT.md` (Accesso).
+- `POST /v1/auth/login | logout | password | register | claim | activate | apple | apple/link`: vedi "Account e sessioni" e `CONTRACT.md` (Accesso).
 - `POST /v1/sync` con `Authorization: Bearer <sessione>`
   - richiesta: `{ deviceId, cursor, changes: Change[] }` (al massimo 500 change, `data` al massimo 64 KB)
   - risposta: `{ cursor, more, changes: Record[], applied, stale, conflicts: Record[], epoch, reset }`
@@ -78,6 +78,7 @@ Tabelle (`migrations/0003_accounts.sql`, incluse anche in `schema.sql`):
   `ip:<CF-Connecting-IP>`, conta): oltre **20 per email** o **5 per IP** in 15 minuti → `429` senza verificare nulla
   (e la riga appena inserita si toglie, così martellare non allunga il blocco). Le richieste concorrenti sono
   serializzate dal lotto: non aggirano il limite. Il successo cancella le righe di quell'email e di quell'IP.
+  `/v1/auth/activate` usa `ip:` e `code:<8 hex>` (5 ciascuna).
 - **Claim dalla PWA (Task 9C)**: `POST /v1/auth/claim {email, password, deviceName}` con `Authorization: Bearer
   <SYNC_TOKEN>` crea l'account di `PRIMARY_OWNER` una volta sola, così Lorenzo sceglie la password sul suo iPhone
   (niente Terminale, nessuno la vede). Vale solo con `LEGACY_TOKEN_ENABLED = "true"` e il token legacy esatto (confronto a
@@ -86,6 +87,18 @@ Tabelle (`migrations/0003_accounts.sql`, incluse anche in `schema.sql`):
   (`createAccount`: email valida, password 10–1024 caratteri → `400`), stesso hash col pepper (senza → `500`), stesso
   addebito del login prima dell'hash (`429`). Risposta come il login: `{ session, ownerId, email, expiresAt }`.
   Spegnendo il token legacy (`LEGACY_TOKEN_ENABLED = "false"`) il claim non esiste più.
+- **Codice di attivazione dall'app (Task 18B)**: l'app nativa non ha il token legacy, quindi l'account del proprietario
+  si crea con un **codice monouso**: `node admin/account.mjs invite --owner <PRIMARY_OWNER> --remote` (vedi la CLI) e poi,
+  nell'app, "Prima volta? Crea il tuo account" → `POST /v1/auth/activate {code, email, password, deviceName}` (nessun
+  Bearer). Codice: 10 caratteri da `ABCDEFGHJKMNPQRSTUVWXYZ23456789` (niente 0/O/1/I/L), generati con CSPRNG, mostrati
+  `XXXXX-XXXXX` e accettati con o senza trattino, maiuscole o minuscole, spazi ai lati; valido **30 minuti, una volta
+  sola**. Nel DB (`activation_codes`, migrazione `0004_activation.sql`) va solo lo SHA-256 hex del codice normalizzato.
+  Il tentativo si addebita (chiavi `ip:<IP>` e `code:<primi 8 hex dell'hash>`, 5 in 15 minuti → `429`) prima di leggere
+  il codice e prima del PBKDF2. Codice sbagliato, scaduto o già usato → **stesso** `401 "codice non valido o scaduto"`;
+  account già esistente per quell'owner (o email già usata) → `409` e il codice **non** si consuma. Account e "codice
+  usato" nascono in **un solo lotto D1** (`INSERT … SELECT` dal codice valido + `UPDATE … WHERE used_at IS NULL AND
+  expires_at > now`): due attivazioni concorrenti → un solo account; un INSERT rifiutato annulla tutto il lotto.
+  Stesse regole di password/email/pepper del claim (`400`/`500`). Risposta come il login.
 - Un `5xx` (o l'errore Cloudflare 1102 "CPU superata") su `/v1/auth/*` vuol dire **"riprova"**, non "password
   sbagliata": la password sbagliata è sempre e solo `401 credenziali non valide`.
 
@@ -111,7 +124,13 @@ node backend/admin/account.mjs reset-password --email <e> --remote      # revoca
 node backend/admin/account.mjs sessions       --email <e> --remote      # elenco (id abbreviato a 8 caratteri)
 node backend/admin/account.mjs revoke         --email <e> [--session <prefisso>] --remote
 node backend/admin/account.mjs login          --email <e> --api https://fitness-hub-api.lorefara97.workers.dev
+node backend/admin/account.mjs invite         --owner <PRIMARY_OWNER> --remote   # codice di attivazione per l'app
 ```
+
+`invite` rifiuta (exit 1, nessun codice) se esiste già un account per quell'owner; altrimenti cancella gli eventuali
+codici non usati di quell'owner, salva l'hash del nuovo e stampa il codice **una volta sola** su stdout (mai in log o
+file). In remoto il controllo dell'account passa da `--command` (solo l'owner) e la scrittura dell'hash da `--file`,
+come gli hash delle password.
 
 `--remote` usa `npx wrangler d1 execute fitness-hub-db --remote --json --yes` (dalla cartella `backend/`, senza shell):
 gli statement con hash e salt passano come `--file` (file 600 in una cartella temporanea 700, cancellata subito dopo),
@@ -137,6 +156,22 @@ npx wrangler deploy                                    # 5. LEGACY_TOKEN_ENABLED
 Il pepper non si cambia: cambiarlo invalida tutte le password (servirebbe `reset-password`). Se si perde il file sul Mac
 ma il secret è nel Worker, il login continua a funzionare; per creare o resettare account serve di nuovo lo stesso valore.
 
+### Messa in produzione del codice di attivazione (migrazione `0004_activation.sql`)
+
+Solo una tabella nuova (`IF NOT EXISTS`, idempotente). La migrazione va **prima** del deploy (il nuovo Worker legge
+`activation_codes`); il pepper è già nel Worker dal Task 9A.
+
+```bash
+cd backend
+npx wrangler d1 time-travel info fitness-hub-db                                         # 1. annota il bookmark
+npx wrangler d1 execute fitness-hub-db --remote --file=migrations/0004_activation.sql   # 2.
+npx wrangler deploy                                                                     # 3.
+node admin/account.mjs invite --owner <PRIMARY_OWNER> --remote                          # 4. solo quando si crea l'account dall'app
+```
+
+Il codice vale 30 minuti: lanciare `invite` solo quando l'app è pronta a usarlo. Se l'account esiste già (creato col
+claim della PWA o con `create`), `invite` rifiuta: si entra con Accedi.
+
 ## Server locale per i test (`dev/local-server.mjs`)
 
 Il Worker vero con D1 su `node:sqlite` (riusa `test/d1-sqlite.mjs`), su `http://127.0.0.1` soltanto. Lo usano i test
@@ -144,13 +179,15 @@ d'integrazione e gli UI test dell'app Swift, mai il backend di produzione.
 
 ```bash
 node backend/dev/local-server.mjs --port 8787 [--token <token-di-test>] [--account <email>:<password>] \
-  [--db <file>] [--seed <records.json>] [--owner <id>]
+  [--db <file>] [--seed <records.json>] [--owner <id>] [--invite]
 ```
 
 `--token` accende il token legacy (`LEGACY_TOKEN_ENABLED`) verso `--owner`. Il pepper è uno fisso e pubblico di test
 (`--pepper-file` per sceglierne un altro). `--account` crea all'avvio un **account di
 test** con id = `--owner` (se non esiste già nel `--db`): la password sta sulla riga di comando, quindi **solo per test
-locali, mai con credenziali vere né contro la produzione**. Serve almeno uno dei due.
+locali, mai con credenziali vere né contro la produzione**. `--invite` (solo test, per gli UI test dell'app) crea
+all'avvio un codice di attivazione per `--owner` e, subito dopo la riga `ready`, stampa `invite <XXXXX-XXXXX>`. Serve
+almeno uno fra `--token`, `--account` e `--invite`.
 
 `--port 0` sceglie una porta libera; `--db` persiste su file (default in memoria); `--seed` è un array JSON di `Change`
 applicati all'avvio come device `seed` (passano dal Worker, quindi stessa validazione e stesso LWW); `--owner` cambia il

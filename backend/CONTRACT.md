@@ -100,6 +100,14 @@ e appartiene a un **account**: l'id dell'account È l'`ownerId` dei record (l'ac
   email, expiresAt }`: crea l'account di `PRIMARY_OWNER` dalla PWA ancora collegata col token, **una volta sola**.
   `409` se l'account esiste già (anche un claim concorrente), `401` senza il token legacy giusto o con
   `LEGACY_TOKEN_ENABLED` spento, `400` email/password non valide (minimo 10 caratteri), `429` come il login.
+- `POST /v1/auth/activate` (senza Bearer) `{ code, email, password, deviceName }` → `200 { session, ownerId, email,
+  expiresAt }`: l'app nativa crea l'account del proprietario del **codice di attivazione monouso** (generato con
+  `admin/account.mjs invite`, valido 30 minuti, una volta sola). `code`: 10 caratteri da
+  `ABCDEFGHJKMNPQRSTUVWXYZ23456789`, mostrato `XXXXX-XXXXX`, accettato con o senza trattino e senza distinzione di
+  maiuscole (spazi ai lati ignorati). `401 { error: "codice non valido o scaduto" }` per codice sbagliato, scaduto o già
+  usato (stesso messaggio); `409 { error: "account già esistente" }` se l'account di quell'owner (o quell'email) esiste
+  già, e il codice resta valido; `400` codice mancante, email non valida o password sotto i 10 caratteri; `429` (con
+  `Retry-After`) oltre 5 tentativi in 15 minuti per IP o per codice; `500` = riprova (mai "codice sbagliato").
 - `POST /v1/auth/register` → `403` finché `REGISTRATION_OPEN` non è `"true"` (registrazione chiusa).
 - `POST /v1/auth/apple` `{ identityToken, nonce, deviceName }` e `POST /v1/auth/apple/link` (Bearer) `{ identityToken, nonce }`:
   `404` finché `APPLE_SIGNIN_ENABLED` non è `"true"`. `nonce` = nonce grezzo del client; nella richiesta ad Apple il client
