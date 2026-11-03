@@ -31,6 +31,7 @@ export const BUNDLE_FILES = [
   "defaults.jsx",
   "parser.jsx",
   "planconv.jsx",
+  "recordmap.jsx",
   // Components
   "i18n.jsx",
   "icons.jsx",

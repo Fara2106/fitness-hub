@@ -554,6 +554,184 @@ console.log("\nSuite PlanConv — piani strutturati ⇄ parseScheda/parseDieta, 
   } catch (e) { ok("storage.jsx sotto vm — " + e.message.split("\n")[0], false); }
 }
 
+// ---- Suite RecordMap (recordmap.jsx: chiavi locali ⇄ record del backend v2) ----
+// Parità con backend/migrate/records.mjs: backend/test/recordmap-parity.test.mjs.
+console.log("\nSuite RecordMap — gruppi, round-trip chiavi ⇄ record, spunte tolte, finestre, variante dieta, muscleSets");
+{
+  const rm = { window: {}, console };
+  vm.createContext(rm);
+  let loaded = true;
+  try {
+    for (const f of ["parser.jsx", "planconv.jsx", "schedaState.jsx", "recordmap.jsx"]) {
+      vm.runInContext(transform(join(ROOT, f)), rm, { filename: f });
+    }
+  } catch (e) { loaded = false; ok("parser/planconv/schedaState/recordmap si caricano sotto vm — " + e.message.split("\n")[0], false); }
+  const RM = rm.window.RecordMap, PC = rm.window.PlanConv;
+  ok("recordmap.jsx espone window.RecordMap", !!RM && ["groupsForKey", "buildGroup", "keysForRecord", "rebuildKeys"].every(k => typeof RM[k] === "function"));
+  if (loaded && RM) {
+    const J = (x) => JSON.parse(JSON.stringify(x));
+    // JSON con chiavi ordinate: confronto indipendente dall'ordine delle proprietà
+    const canon = (x) => JSON.stringify(x, (k, v) => (v && typeof v === "object" && !Array.isArray(v)) ? Object.keys(v).sort().reduce((o, kk) => { o[kk] = v[kk]; return o; }, {}) : v);
+    const same = (a, b) => canon(a) === canon(b);
+    const OPT = { name: "Piano", validFrom: "2026-01-01" };
+    const wp = J(PC.workoutPlanFromText(readFileSync(join(ROOT, "scheda.txt"), "utf8"), { ...OPT, id: "wp" }));
+    const dp = J(PC.dietPlanFromText(readFileSync(join(ROOT, "dieta.txt"), "utf8"), { ...OPT, id: "dp" }));
+    const TODAY = "2026-10-30", D = "2026-10-27";
+    const ctx = { workout: { id: wp.id, data: wp.data }, diet: { id: dp.id, data: dp.data }, today: TODAY };
+    const getter = (store) => (k, def) => (Object.prototype.hasOwnProperty.call(store, k) ? store[k] : def);
+    const groupsOf = (store) => [...new Set(Object.keys(store).flatMap(k => J(RM.groupsForKey(k, store[k], ctx))))];
+    const buildAll = (store) => groupsOf(store).flatMap(g => J(RM.buildGroup(g, getter(store), ctx)).records);
+    const cacheOf = (records) => {
+      const m = new Map(records.map(r => [r.collection + "/" + r.id, { ...r, deleted: false, updatedAt: 1 }]));
+      return {
+        getRecord: (c, id) => m.get(c + "/" + id) || null,
+        listRecords: (c) => [...m.values()].filter(r => r.collection === c),
+      };
+    };
+    const rebuildFrom = (records, keys) => { const c = cacheOf(records); return J(RM.rebuildKeys(keys, c.getRecord, c.listRecords, ctx)); };
+    const find = (list, c, id) => list.find(r => r.collection === c && r.id === id);
+
+    const ore17 = dp.data.variants.find(v => v.key === "ore17"), riposo = dp.data.variants.find(v => v.key === "riposo");
+    const mk = (m) => `${m.time}|${m.name}`;
+    const day0 = wp.data.days[0];
+    const sig = rm.window.schedaPlanSig(J(PC.toLegacyScheda(wp.data)).days);
+    const actId = new Date(`${D}T18:30:00`).getTime();
+
+    // Storage "canonico" (come lo scrive la PWA) per il round-trip.
+    const store = {
+      [`checkIn_${D}`]: { sleep: 4, energy: 5, ailments: "spalla" },
+      [`hydration_${D}`]: 6,
+      [`notes_${D}`]: "Buona sessione",
+      [`restDay_${D}`]: true,
+      [`dietaVariant_${D}`]: "ore17",
+      [`dietaCheck_${D}`]: { [mk(ore17.meals[0])]: true, [mk(ore17.meals[1])]: false },
+      [`integ_${D}`]: { [ore17.supplements[0].key]: true, [ore17.supplements[1].key]: false },
+      [`schedaProg_${D}`]: {
+        completion: { "Giorno 1#0": [true, true, false], "Giorno 1#1": [false, true, false] },
+        substitutions: { "Giorno 1#1": "Chest press con manubri" },
+        pesos: { "Giorno 1#0": ["20", "22.5", ""], "Giorno 1#3": ["5", "5"] },
+        names: { "Giorno 1#0": day0.exercises[0].name.toLowerCase(), "Giorno 1#1": day0.exercises[1].name.toLowerCase(), "Giorno 1#3": day0.exercises[3].name.toLowerCase() },
+        sig,
+      },
+      [`gym_${D}`]: true,
+      [`gymStart_${D}`]: 1793093400000,
+      [`coachChat_${D}`]: [{ role: "assistant", text: "Ciao!" }, { role: "user", text: "Cosa mangio?" }, { role: "error", text: "⚠️ rete" }],
+      weightLog: [{ date: "2026-10-20", weight: 78.4 }, { date: "2026-10-27", weight: 78.2 }],
+      bodyMeasures: [{ date: "2026-10-20", vita: 84 }, { date: "2026-10-27", vita: 83.5, braccio: 35 }],
+      activities: [{ type: "walk", min: 30, km: 2.5, note: "parco", id: actId, when: "Oggi" }],
+      exNotes: { "band squat": "Piedi larghi" },
+      prMap: { "Band chest press": { peso: 25, date: D } },
+      spesaChecked: { "proteine-0": true, "verdura-2": false },
+      spesaExtra: [{ id: 1761000000000, name: "Caffè" }, { id: 1761000000500, name: "Tè" }],
+      spesaFreq: 2, weightGoal: 75, bodyWeight: 78, lang: "en", theme: "dark",
+    };
+    const built = buildAll(store);
+    const keys = [...new Set(built.flatMap(r => J(RM.keysForRecord(r, ctx))))];
+    const back = rebuildFrom(built, keys);
+    const ROUND = [`checkIn_${D}`, `hydration_${D}`, `notes_${D}`, `restDay_${D}`, `dietaVariant_${D}`, `dietaCheck_${D}`, `integ_${D}`,
+      `schedaProg_${D}`, `gym_${D}`, `gymStart_${D}`, `coachChat_${D}`, "weightLog", "bodyMeasures", "activities", "exNotes", "prMap",
+      "spesaChecked", "spesaExtra", "spesaFreq", "weightGoal", "bodyWeight", "lang", "theme"];
+    const bad = ROUND.filter(k => !same(back[k], store[k]));
+    ok("round-trip: buildGroup → keysForRecord → rebuildKeys ricostruisce tutte le chiavi" + (bad.length ? " (diverse: " + bad.join(", ") + ")" : ""), bad.length === 0);
+    ok("round-trip: nessun record doppio fra gruppi", new Set(built.map(r => r.collection + "/" + r.id)).size === built.length);
+
+    // muscleSets_ dai setLog + muscoli del piano (forma di handleSaveSession in scheda.jsx)
+    const GROUP = { petto: "Petto", schiena: "Schiena", spalle: "Spalle", trapezi: "Spalle", quadricipiti: "Gambe", femorali: "Gambe", glutei: "Gambe", polpacci: "Gambe", bicipiti: "Braccia", tricipiti: "Braccia", addome: "Core" };
+    const expMs = {};
+    J(PC.toLegacyScheda(wp.data)).days[0].exercises.forEach((ex, i) => {
+      const n = (store[`schedaProg_${D}`].completion[`Giorno 1#${i}`] || []).filter(Boolean).length;
+      if (!n) return;
+      const g = GROUP[ex.muscles[0] || ""] || "Altro";
+      expMs[g] = (expMs[g] || 0) + n;
+    });
+    ok("muscleSets_: ricostruito dai setLog + muscoli del piano come scheda.jsx", keys.includes(`muscleSets_${D}`) && JSON.stringify(back[`muscleSets_${D}`]) === JSON.stringify(expMs) && expMs.Petto === 3);
+    ok("muscleSets_: senza sessione chiusa la chiave resta com'è (assente dal risultato)", !(`muscleSets_${D}` in rebuildFrom(built.filter(r => r.collection !== "workoutSession"), [`muscleSets_${D}`])));
+
+    // id e forme
+    const ex0 = day0.exercises[0];
+    ok("setLog: id `${date}:${exerciseId}:${setIndex}` e data come records.mjs", same(find(built, "setLog", `${D}:${ex0.id}:1`).data,
+      { date: D, exerciseId: ex0.id, exerciseName: ex0.name, planId: "wp", setIndex: 1, weight: "22.5", reps: null, done: true, substitutedWith: null }));
+    ok("setLog: serie non spuntata registrata → done:false (non assente)", find(built, "setLog", `${D}:${ex0.id}:2`).data.done === false);
+    ok("setLog: solo peso digitato → setLog done:false col peso", find(built, "setLog", `${D}:${day0.exercises[3].id}:0`).data.weight === "5");
+    ok("setLog: sostituzione su ogni serie dell'esercizio", find(built, "setLog", `${D}:${day0.exercises[1].id}:0`).data.substitutedWith === "Chest press con manubri");
+    ok("workoutSession: id `${date}:${dayId}`, startedAt da gymStart_", same(find(built, "workoutSession", `${D}:${day0.id}`).data,
+      { date: D, dayId: day0.id, dayName: day0.name, startedAt: 1793093400000, done: true }));
+    ok("dayState: un record con checkIn/hydration/notes/rest/dietVariant/cardio (senza `when`)", same(find(built, "dayState", D).data, {
+      date: D, checkIn: store[`checkIn_${D}`], hydration: 6, notes: "Buona sessione", rest: true, dietVariant: "ore17",
+      cardio: [{ type: "walk", min: 30, km: 2.5, note: "parco", id: actId }] }));
+    ok("settings: le cinque chiavi incluso bodyWeight → { value }", ["spesaFreq", "weightGoal", "bodyWeight", "lang", "theme"].every(k => same(find(built, "settings", k).data, { value: store[k] })));
+
+    // spunte tolte → update done:false / checked:false, mai assenti
+    const ore17meal1 = find(built, "mealCheck", `${D}:${ore17.meals[1].id}`);
+    ok("spunta tolta: dietaCheck_ false → mealCheck done:false", !!ore17meal1 && ore17meal1.data.done === false);
+    ok("spunta tolta: integ_ false → supplementCheck done:false", find(built, "supplementCheck", `${D}:${ore17.supplements[1].id}`).data.done === false);
+    ok("spunta tolta: spesaChecked false → shoppingCheck checked:false", find(built, "shoppingCheck", "verdura-2").data.checked === false);
+    const allOff = J(RM.buildGroup(`meals:${D}`, getter({ [`dietaCheck_${D}`]: { [mk(riposo.meals[0])]: false } }), ctx));
+    ok("spunta tolta senza dietaVariant_ né altre spunte → resta mappata (done:false)", allOff.records.length === 1 && allOff.records[0].data.done === false && !allOff.window);
+
+    // variante dieta del giorno
+    const ticks = { [mk(riposo.meals[0])]: true };
+    const withV = J(RM.buildGroup(`meals:${D}`, getter({ [`dietaCheck_${D}`]: ticks, [`dietaVariant_${D}`]: "ore17" }), ctx)).records;
+    const ore17Same = ore17.meals.find(m => mk(m) === mk(riposo.meals[0]));
+    ok("dietaVariant_ presente → spunte sulla variante indicata", !!ore17Same && withV.length === 1 && withV[0].data.mealId === ore17Same.id);
+    const noV = J(RM.buildGroup(`meals:${D}`, getter({ [`dietaCheck_${D}`]: ticks }), ctx)).records;
+    ok("dietaVariant_ assente → scelta della migrazione (più spunte, poi ordine del piano)", noV.length === 1 && noV[0].data.mealId === riposo.meals[0].id);
+    ok("dietaVariant_ assente → dayState.dietVariant = variante scelta", J(RM.buildGroup(`day:${D}`, getter({ [`dietaCheck_${D}`]: ticks }), ctx)).records[0].data.dietVariant === "riposo");
+    ok("dietaVariant_ → ricalcola day/meals/supps", JSON.stringify(J(RM.groupsForKey(`dietaVariant_${D}`))) === JSON.stringify([`day:${D}`, `meals:${D}`, `supps:${D}`]));
+
+    // finestre locali
+    const wl = [];
+    for (let i = 0; i < 90; i++) { const d = new Date(2026, 7, 5 + i, 12); wl.push({ date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`, weight: 80 - i / 10 }); }
+    const wg = J(RM.buildGroup("weights", getter({ weightLog: wl }), ctx));
+    ok("finestra: weightLog 90 voci dal 2026-08-05 → window { bodyWeight, minId 2026-08-05 }", wg.records.length === 90 && same(wg.window, { collection: "bodyWeight", minId: "2026-08-05" }));
+    ok("finestra: bodyMeasures → window bodyMeasure dalla data più vecchia", same(J(RM.buildGroup("measures", getter(store), ctx)).window, { collection: "bodyMeasure", minId: "2026-10-20" }));
+    const longWl = rebuildFrom(wl.concat([{ date: "2026-11-03", weight: 70 }]).map(e => ({ collection: "bodyWeight", id: e.date, data: { date: e.date, kg: e.weight } })), ["weightLog"]).weightLog;
+    ok("rebuild weightLog: ultime 90 in ordine di data", longWl.length === 90 && longWl[0].date === "2026-08-06" && longWl[89].date === "2026-11-03");
+    const oldDay = J(RM.buildGroup("day:2026-07-31", getter({ "checkIn_2026-07-31": { sleep: 1, energy: 1 } }), ctx));
+    ok("orizzonte sweep: gruppo di un giorno < oggi−90 → nessun record e nessun tombstone", oldDay.records.length === 0 && oldDay.window.collection === "dayState" && oldDay.window.minId > "2026-07-31");
+    ok("orizzonte sweep: oggi−90 è ancora dentro", J(RM.buildGroup("day:2026-08-01", getter({ "checkIn_2026-08-01": { sleep: 1, energy: 1 } }), ctx)).records.length === 1);
+
+    // activities: 60 giorni (Ruling 5) e lista piena
+    const ag = J(RM.groupsForKey("activities", [], ctx));
+    ok("activities → day:<data> degli ultimi 60 giorni fino a ctx.today", ag.length === 60 && ag[0] === `day:${TODAY}` && ag[59] === "day:2026-09-01");
+    const full = [];
+    for (let i = 0; i < 50; i++) full.push({ type: "walk", min: 10, km: 1, note: "", id: new Date(2026, 9, 29 - Math.floor(i / 2), 9).getTime() - i, when: "Oggi" });
+    const oldest = J(RM.buildGroup("day:2026-10-05", getter({ activities: full, "checkIn_2026-10-05": { sleep: 3, energy: 3 } }), ctx));
+    ok("activities piena (50): il giorno più vecchio in lista non viene riscritto (cardio monco)", oldest.records.length === 0 && oldest.window.minId > "2026-10-05");
+    ok("activities piena (50): i giorni più recenti sì", J(RM.buildGroup("day:2026-10-29", getter({ activities: full }), ctx)).records[0].data.cardio.length === 2);
+    const acts = rebuildFrom(full.map((a, i) => ({ collection: "dayState", id: "x" + i, data: { date: "x", cardio: [{ type: a.type, min: a.min, km: a.km, note: a.note, id: a.id }] } }))
+      .concat([{ collection: "dayState", id: "2026-10-30", data: { date: "2026-10-30", cardio: [{ type: "run", min: 5, km: 1, note: "", id: new Date(2026, 9, 30, 9).getTime() }] } }]), ["activities"]).activities;
+    ok("rebuild activities: 50 più recenti, più recente prima, con when", acts.length === 50 && acts[0].type === "run" && acts.every((a, i) => i === 0 || acts[i - 1].id >= a.id) && acts.every(a => a.when === "Oggi"));
+
+    // piani mancanti / record di altri piani
+    const noPlan = { ...ctx, workout: null, diet: null };
+    const np = J(RM.buildGroup(`sets:${D}`, getter(store), noPlan));
+    ok("senza piano scheda: sets → nessun record e nessun tombstone", np.records.length === 0 && np.window.collection === "setLog" && np.window.minId > `${D}:~`);
+    ok("senza piano dieta: meals → nessun tombstone", J(RM.buildGroup(`meals:${D}`, getter(store), noPlan)).window.collection === "mealCheck");
+    const cNo = cacheOf(built);
+    ok("senza piano: rebuild lascia schedaProg_/dietaCheck_ com'erano (chiavi assenti)", (() => { const o = J(RM.rebuildKeys([`schedaProg_${D}`, `dietaCheck_${D}`], cNo.getRecord, cNo.listRecords, noPlan)); return !(`schedaProg_${D}` in o) && !(`dietaCheck_${D}` in o); })());
+    const foreign = built.concat([{ collection: "setLog", id: `${D}:name:curl:0`, data: { date: D, exerciseId: "name:curl", exerciseName: "curl", planId: null, setIndex: 0, weight: "8", reps: null, done: true, substitutedWith: null } }]);
+    ok("rebuild schedaProg_: setLog fuori dal piano attivo (name:) saltati", same(rebuildFrom(foreign, [`schedaProg_${D}`])[`schedaProg_${D}`], store[`schedaProg_${D}`]));
+    const renamed = J(RM.buildGroup(`sets:${D}`, getter({ [`schedaProg_${D}`]: { completion: { "Giorno 1#0": [true] }, names: { "Giorno 1#0": "dips" } } }), ctx)).records;
+    ok("sets: nome registrato ≠ piano → exerciseId name:<nome>, planId null", renamed.length === 1 && renamed[0].id === `${D}:name:dips:0` && renamed[0].data.planId === null);
+    const later = { ...ctx, workout: { id: "wp", data: { ...wp.data, validFrom: "2026-10-28" } } };
+    ok("sets: senza nome e piano valido da dopo quella data → scartato", J(RM.buildGroup(`sets:${D}`, getter({ [`schedaProg_${D}`]: { completion: { "Giorno 1#0": [true] } } }), later)).records.length === 0);
+
+    // keysForRecord / rebuild di tombstone
+    ok("keysForRecord: tombstone (data null) → data dall'id", JSON.stringify(J(RM.keysForRecord({ collection: "mealCheck", id: `${D}:dp/v0/m0`, data: null, deleted: true }, ctx))) === JSON.stringify([`dietaCheck_${D}`]));
+    ok("keysForRecord: piani e settings non locali → nessuna chiave", J(RM.keysForRecord({ collection: "workoutPlan", id: "wp", data: wp.data }, ctx)).length === 0 &&
+      J(RM.keysForRecord({ collection: "settings", id: "excludedFoods", data: { value: [] } }, ctx)).length === 0);
+    ok("DIRECT = workoutPlan, dietPlan", RM.DIRECT.has("workoutPlan") && RM.DIRECT.has("dietPlan") && RM.DIRECT.size === 2);
+    const gone = built.filter(r => r.collection !== "dayState" && r.collection !== "coachMessage").concat([{ collection: "settings", id: "theme", data: null, deleted: true }]);
+    const goneOut = rebuildFrom(gone, [`checkIn_${D}`, `coachChat_${D}`]);
+    ok("rebuild: record assente → chiave da rimuovere (undefined)", `checkIn_${D}` in RM.rebuildKeys([`checkIn_${D}`], cacheOf(gone).getRecord, cacheOf(gone).listRecords, ctx) && goneOut[`checkIn_${D}`] === undefined && goneOut[`coachChat_${D}`] === undefined);
+    ok("rebuild: setting tombstone → undefined", (() => { const c = cacheOf([]); const o = RM.rebuildKeys(["theme"], (cc, id) => (cc === "settings" && id === "theme" ? { collection: "settings", id: "theme", data: null, deleted: true } : null), c.listRecords, ctx); return "theme" in o && o.theme === undefined; })());
+    ok("groupsForKey: chiavi non sincronizzate → []", ["groqApiKey", "syncToken", `muscleSets_${D}`, `nudgeDismissed_${D}`, "schedaData"].every(k => J(RM.groupsForKey(k)).length === 0));
+    ok("buildGroup: gruppo sconosciuto → errore", (() => { try { RM.buildGroup("boh", getter({}), ctx); return false; } catch (_) { return true; } })());
+    ok("dayState vuoto (restDay_ false e nient'altro) → nessun record", J(RM.buildGroup(`day:${D}`, getter({ [`restDay_${D}`]: false }), ctx)).records.length === 0);
+  }
+}
+
 // ---- Suite bundle: app.compiled.js allineato ai sorgenti (no drift) ----
 // Il browser carica SOLO app.compiled.js: se un .jsx viene modificato senza
 // rigenerare il bundle (`npm run build`), l'app servirebbe codice vecchio.
