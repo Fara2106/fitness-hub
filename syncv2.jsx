@@ -414,7 +414,7 @@
         if (outbox[k] === s) delete outbox[k]; // cambiata nel frattempo → resta in coda (updatedAt più alto)
       });
       if (batch.length) persistOutbox();
-      // rebaseline nel frattempo: niente cursore, cache o chiavi da questo giro (riparte da un primo sync).
+      // rebaseline nel frattempo: da questo giro niente cursore, pull né chiavi (riparte da un primo sync).
       if (g !== gen) return { ok: false, error: "rebaseline", pushed, pulled, adopted };
 
       // epoch cambiato (DB azzerato o ripristinato, Ruling 9) → come un primo sync: fuori dal primo sync
