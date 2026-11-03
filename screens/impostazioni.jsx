@@ -237,7 +237,8 @@ const FileImporter = ({ label, icon, kind, accept = "", validate }) => {
         setTimeout(() => setStatus(null), 4000);
         return;
       }
-      window.SyncV2.putRecords(res.changes);
+      try { window.SyncV2.putRecords(res.changes); }
+      catch (_) { setStatus({ type: "err", msg: t("Errore salvataggio") }); return; }
       // Testo grezzo tenuto solo sul device per "Esporta (.txt)" qui sotto.
       if (window.storage) window.storage.set(cfg.textKey, text);
       setPlan(readPlan());

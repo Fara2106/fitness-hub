@@ -992,7 +992,15 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
     if (!st) return;
     const has = (k) => keys.indexOf(k) !== -1;
     let curDays = days;
-    if (has("plan_workout")) { curDays = _buildSchedule(); setDays(curDays); }
+    if (has("plan_workout")) {
+      curDays = _buildSchedule();
+      setDays(curDays);
+      // Player aperto: il cursore resta dentro gli esercizi del giorno nel nuovo piano.
+      const day = curDays.find(d => d.key === scheda) || curDays[0];
+      const n = ((day && day.exercises) || []).length;
+      setCursor(c => Math.max(0, Math.min(c, n - 1)));
+      if (!n) setMode("list");
+    }
     if (has("plan_workout") || has(window.schedaProgKey(dayK))) {
       // Piano cambiato in giornata → stessa pulizia del mount (sanitizeSchedaProg):
       // le spunte non passano a un altro esercizio nella stessa posizione.

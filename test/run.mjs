@@ -1152,6 +1152,64 @@ await (async () => {
       ok("epoch cambiato: la coda è stata inviata, non persa", find(srv, "dayState", `${TODAY}:notes`).data.value === "nota 2" && A.outbox().length === 0);
     }
 
+    // ── Ruling 12: piano cambiato in giornata su B → le serie fatte su A restano sul server ──
+    // Scenario riprodotto in review: A spunta 2 serie di Giorno 1#0 e sincronizza; B importa un
+    // piano che sostituisce quell'esercizio (vecchio archiviato); A riceve il piano, la Scheda
+    // pulisce i progressi (sanitizeSchedaProg, scrittura NON silenziosa come scheda.jsx) e sincronizza.
+    {
+      const env = await backend();
+      const A = device(env), B = device(env, { t: T0 + 5 });
+      await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN);
+      const W = A.sb.window;
+      const days = W.getSchedule().days;
+      const exK = W.exId("Giorno 1", 0);
+      W.writeSchedaProg(A.S, TODAY, { completion: { [exK]: [true, true, false] }, pesos: { [exK]: ["", "", ""] } },
+        { names: { [exK]: W.schedaNameAt(days, exK).name }, sig: W.schedaPlanSig(days) });
+      await tick(); A.clock.t += 1000; await A.sync();
+      const oldEx = wp.data.days[0].exercises[0].id;
+      const doneIds = [0, 1].map(i => `${TODAY}:${oldEx}:${i}`);
+      let srv = await serverRecords(env);
+      ok("piano cambiato: prima, le 2 serie fatte di A sono sul server", doneIds.every(id => { const r = find(srv, "setLog", id); return r && !r.deleted && r.data.done === true; }));
+
+      const txt2 = readFileSync(join(ROOT, "scheda.txt"), "utf8").replace("Push-up (bodyweight)", "Panca piana manubri");
+      const np = J(PC.workoutPlanFromText(txt2, { id: "workout-new", name: "Nuova", validFrom: TODAY }));
+      const prevPlan = B.S.get("plan_workout");
+      B.SV.putRecords([{ collection: "workoutPlan", id: np.id, data: np.data },
+        { collection: "workoutPlan", id: prevPlan.id, data: { ...prevPlan.data, status: "archived", validTo: TODAY } }]);
+      B.clock.t += 2000; await B.sync();
+      A.clock.t += 5000; await A.sync();
+      ok("piano cambiato: A riceve il nuovo piano", A.S.get("plan_workout").id === "workout-new");
+
+      const n0 = A.net.requests.length;
+      const curDays = W.getSchedule().days;
+      const res = W.sanitizeSchedaProg(W.readSchedaProg(A.S, TODAY), curDays, W.schedaPlanSig(curDays));
+      ok("piano cambiato: la Scheda scarta le spunte dell'esercizio sostituito", res.changed && !(res.prog.completion || {})[exK]);
+      A.S.set(W.schedaProgKey(TODAY), res.prog);
+      await tick(); A.clock.t += 1000; await A.sync();
+      ok("piano cambiato: nessun tombstone setLog inviato da A", !A.sent(n0).some(c => c.collection === "setLog" && c.deleted));
+      srv = await serverRecords(env);
+      ok("piano cambiato: le serie fatte restano sul server (done, non cancellate)",
+        doneIds.every(id => { const r = find(srv, "setLog", id); return r && !r.deleted && r.data.done === true; }));
+      ok("piano cambiato: restano anche in listRecords (storico locale) su A e B",
+        [A, B].every(d => doneIds.every(id => d.SV.listRecords("setLog").some(r => r.id === id && !r.deleted && r.data.done === true))));
+      ok("piano cambiato: v2grp sets non contiene più gli id del vecchio esercizio",
+        !(A.S.get(`v2grp:sets:${TODAY}`) || []).some(k => k.includes(oldEx)));
+      // Un giro successivo (altra modifica del giorno) non li considera nemmeno.
+      const ex2 = W.exId("Giorno 1", 1);
+      W.writeSchedaProg(A.S, TODAY, { completion: { [ex2]: [true, false] } }, { names: { [ex2]: W.schedaNameAt(curDays, ex2).name }, sig: W.schedaPlanSig(curDays) });
+      await tick(); A.clock.t += 1000; const n1 = A.net.requests.length; await A.sync();
+      ok("piano cambiato: modifiche successive → ancora nessun tombstone", !A.sent(n1).some(c => c.deleted) &&
+        doneIds.every(id => !find(B.SV.listRecords("setLog"), "setLog", id).deleted));
+      // Il comportamento normale resta: serie di un esercizio DEL piano attivo tolta dai progressi → tombstone.
+      const p3 = W.readSchedaProg(A.S, TODAY);
+      const comp3 = { ...p3.completion }; delete comp3[ex2];
+      A.S.set(W.schedaProgKey(TODAY), { ...p3, completion: comp3, pesos: {}, substitutions: {} });
+      await tick();
+      ok("esercizio del piano attivo tolto dai progressi → tombstone come prima",
+        Object.entries(A.S.get("v2outbox") || {}).some(([k, c]) => k.startsWith("setLog/") && k.includes(np.data.days[0].exercises[1].id) && c.deleted));
+      await A.sync();
+    }
+
     // ── finestre locali: weightLog oltre 90 voci, sweep silenzioso, cardio, noTouch ──
     {
       const env = await backend();

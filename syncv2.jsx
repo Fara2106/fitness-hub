@@ -22,7 +22,7 @@
 //
 // Push: storage.onChange non silenzioso → RecordMap.groupsForKey → buildGroup → diff con cache+coda →
 // change in v2outbox (updatedAt = max(now, precedente + 1)); tombstone solo per id che il gruppo aveva
-// prodotto (v2grp), ora assenti e dentro la `window` del gruppo. Risultato "noTouch" (records [] e
+// prodotto (v2grp), ora assenti, dentro la `window` del gruppo e non protetti (RecordMap.isProtected). Risultato "noTouch" (records [] e
 // minId "￿") = non toccare nulla. Invio debounced 1,5 s, a lotti ≤ 500 change e ≤ 1,5 MB.
 // Pull: record in cache; per i record di ALTRI device keysForRecord → rebuildKeys (vista cache + coda:
 // le modifiche in coda vincono) → storage.set/remove silenziosi, solo chiavi con data ≥ oggi−90; piani →
@@ -218,6 +218,10 @@
     S.keys().forEach((k) => groupsOfKey(k, c).forEach((g) => out.add(g)));
     return out;
   }
+  // Ruling 12: id dichiarati protetti dal gruppo (RecordMap.isProtected) → mai tombstone, e fuori
+  // dall'indice v2grp (così nemmeno un giro successivo li considera "prodotti l'ultima volta").
+  const isProt = (res, col, id) => { try { return !!RM().isProtected && RM().isProtected(res, col, id); } catch (_) { return false; } };
+  const indexIds = (res) => res.records.filter((r) => !isProt(res, r.collection, r.id)).map((r) => keyOf(r.collection, r.id));
   function setGroupIndex(groupId, ids) {
     const prev = S.get(GRP + groupId, null);
     if (!Array.isArray(prev) || prev.join("\n") !== ids.join("\n")) S.set(GRP + groupId, ids, SILENT);
@@ -231,19 +235,19 @@
     const win = res.window || null;
     const prevRaw = S.get(GRP + groupId, null);
     const prev = Array.isArray(prevRaw) ? prevRaw : [];
-    const now = [];
     let n = 0;
     for (const r of res.records) {
-      now.push(keyOf(r.collection, r.id));
       const eff = effective(r.collection, r.id);
       if (eff && !eff.deleted && canon(eff.data) === canon(r.data)) continue;
       if (enqueue(r.collection, r.id, r.data, false)) n++;
     }
-    const nowSet = new Set(now);
+    const now = indexIds(res);
+    const nowSet = new Set(res.records.map((r) => keyOf(r.collection, r.id)));
     for (const k of prev) {
       if (nowSet.has(k)) continue;
       const [col, id] = splitKey(k);
       if (win && col === win.collection && id < win.minId) continue; // uscito dalla finestra locale
+      if (isProt(res, col, id)) continue;                              // storico protetto (Ruling 12)
       const eff = effective(col, id);
       if (!eff || eff.deleted) continue;
       if (enqueue(col, id, null, true)) n++;
@@ -326,7 +330,7 @@
   function refreshGroupIndex(keys, c) {
     const groups = new Set();
     keys.forEach((k) => groupsOfKey(k, c).forEach((g) => groups.add(g)));
-    groups.forEach((g) => { const res = build(g, c); if (!noTouch(res)) setGroupIndex(g, res.records.map((r) => keyOf(r.collection, r.id))); });
+    groups.forEach((g) => { const res = build(g, c); if (!noTouch(res)) setGroupIndex(g, indexIds(res)); });
   }
 
   // Record adottati (pull/conflicts) → piani + chiavi locali. I record scritti da questo device non
@@ -462,6 +466,7 @@
         if (now.has(k)) return;
         const [col, id] = splitKey(k);
         if (win && col === win.collection && id < win.minId) return;
+        if (isProt(after, col, id)) return;                              // Ruling 12
         const eff = effective(col, id);
         if (eff && !eff.deleted) enqueue(col, id, null, true);
       });
@@ -495,7 +500,7 @@
       r1.adopted.forEach((r) => { if (!RM().DIRECT.has(r.collection)) { try { keys.push(...RM().keysForRecord(r, null)); } catch (_) {} } });
       changed.push(...applyKeys(keys, c, null));
       c = ctx();
-      localGroups(c).forEach((g) => { const res = build(g, c); if (!noTouch(res)) setGroupIndex(g, res.records.map((r) => keyOf(r.collection, r.id))); });
+      localGroups(c).forEach((g) => { const res = build(g, c); if (!noTouch(res)) setGroupIndex(g, indexIds(res)); });
       S.set(K.cursor, cur.cursor, SILENT);
       if (cur.epoch != null) S.set(K.epoch, cur.epoch, SILENT);
       firstDone = true;

@@ -2338,10 +2338,15 @@ window.buildDefaultNotifConfig = function () {
   function setsGroup(date, get, ctx) {
     const wi = workoutIndex(ctx && ctx.workout);
     if (!wi) return noTouch("setLog");
+    const protect = {
+      collection: "setLog",
+      planExerciseIds: [...wi.byId.keys()]
+    };
     const prog = get(`schedaProg_${date}`, null);
     const records = [];
     if (!isObj(prog)) return {
-      records
+      records,
+      protect
     };
     const completion = isObj(prog.completion) ? prog.completion : {};
     const subs = isObj(prog.substitutions) ? prog.substitutions : {};
@@ -2386,8 +2391,17 @@ window.buildDefaultNotifConfig = function () {
       }
     }
     return {
-      records
+      records,
+      protect
     };
+  }
+  function isProtected(res, collection, id) {
+    const p = res && res.protect;
+    if (!p || p.collection !== collection) return false;
+    const s = String(id),
+      cut = s.lastIndexOf(":");
+    if (cut <= 11) return false;
+    return !p.planExerciseIds.includes(s.slice(11, cut));
   }
   function savedName(saved, exKey, substitution) {
     for (const [k, v] of Object.entries(saved)) {
@@ -2734,6 +2748,7 @@ window.buildDefaultNotifConfig = function () {
     buildGroup,
     keysForRecord,
     rebuildKeys,
+    isProtected,
     DIRECT,
     MUSCLE_GROUP
   };
@@ -3006,6 +3021,14 @@ window.buildDefaultNotifConfig = function () {
     S.keys().forEach(k => groupsOfKey(k, c).forEach(g => out.add(g)));
     return out;
   }
+  const isProt = (res, col, id) => {
+    try {
+      return !!RM().isProtected && RM().isProtected(res, col, id);
+    } catch (_) {
+      return false;
+    }
+  };
+  const indexIds = res => res.records.filter(r => !isProt(res, r.collection, r.id)).map(r => keyOf(r.collection, r.id));
   function setGroupIndex(groupId, ids) {
     const prev = S.get(GRP + groupId, null);
     if (!Array.isArray(prev) || prev.join("\n") !== ids.join("\n")) S.set(GRP + groupId, ids, SILENT);
@@ -3016,19 +3039,19 @@ window.buildDefaultNotifConfig = function () {
     const win = res.window || null;
     const prevRaw = S.get(GRP + groupId, null);
     const prev = Array.isArray(prevRaw) ? prevRaw : [];
-    const now = [];
     let n = 0;
     for (const r of res.records) {
-      now.push(keyOf(r.collection, r.id));
       const eff = effective(r.collection, r.id);
       if (eff && !eff.deleted && canon(eff.data) === canon(r.data)) continue;
       if (enqueue(r.collection, r.id, r.data, false)) n++;
     }
-    const nowSet = new Set(now);
+    const now = indexIds(res);
+    const nowSet = new Set(res.records.map(r => keyOf(r.collection, r.id)));
     for (const k of prev) {
       if (nowSet.has(k)) continue;
       const [col, id] = splitKey(k);
       if (win && col === win.collection && id < win.minId) continue;
+      if (isProt(res, col, id)) continue;
       const eff = effective(col, id);
       if (!eff || eff.deleted) continue;
       if (enqueue(col, id, null, true)) n++;
@@ -3132,7 +3155,7 @@ window.buildDefaultNotifConfig = function () {
     keys.forEach(k => groupsOfKey(k, c).forEach(g => groups.add(g)));
     groups.forEach(g => {
       const res = build(g, c);
-      if (!noTouch(res)) setGroupIndex(g, res.records.map(r => keyOf(r.collection, r.id)));
+      if (!noTouch(res)) setGroupIndex(g, indexIds(res));
     });
   }
   function applyAdopted(records, skip) {
@@ -3332,6 +3355,7 @@ window.buildDefaultNotifConfig = function () {
         if (now.has(k)) return;
         const [col, id] = splitKey(k);
         if (win && col === win.collection && id < win.minId) return;
+        if (isProt(after, col, id)) return;
         const eff = effective(col, id);
         if (eff && !eff.deleted) enqueue(col, id, null, true);
       });
@@ -3375,7 +3399,7 @@ window.buildDefaultNotifConfig = function () {
       c = ctx();
       localGroups(c).forEach(g => {
         const res = build(g, c);
-        if (!noTouch(res)) setGroupIndex(g, res.records.map(r => keyOf(r.collection, r.id)));
+        if (!noTouch(res)) setGroupIndex(g, indexIds(res));
       });
       S.set(K.cursor, cur.cursor, SILENT);
       if (cur.epoch != null) S.set(K.epoch, cur.epoch, SILENT);
@@ -8581,14 +8605,6 @@ const Dashboard = ({
     if (window.storage) window.storage.set("restDay_" + today, next);
     setRestDay(next);
   };
-  const [dataRev, setDataRev] = React.useState(0);
-  useSyncedData(k => k === "weightLog" || k === "prMap" || k === "plan_workout" || k === "plan_diet" || /^(restDay_|dietaVariant_|gym_|muscleSets_|checkIn_|hydration_)\d{4}-\d{2}-\d{2}$/.test(k), keys => {
-    const st = window.storage;
-    if (!st) return;
-    if (keys.indexOf("restDay_" + today) !== -1) setRestDay(!!st.get("restDay_" + today, false));
-    if (keys.indexOf("weightLog") !== -1) setWeightLog(st.get("weightLog", []) || []);
-    setDataRev(n => n + 1);
-  });
   const daysCount = (window.getSchedule ? (window.getSchedule().days || []).length : 0) || 3;
   const _rawSession = window.getTodaySession ? window.getTodaySession() : null;
   const todaySession = restDay ? null : _rawSession;
@@ -8597,6 +8613,14 @@ const Dashboard = ({
   const latestWeight = sparkData[sparkData.length - 1]?.weight || bodyWeight;
   const weightDelta = sparkData.length >= 2 ? sparkData[sparkData.length - 1].weight - sparkData[0].weight : 0;
   const [newWeight, setNewWeight] = React.useState("");
+  const [dataRev, setDataRev] = React.useState(0);
+  useSyncedData(k => k === "weightLog" || k === "prMap" || k === "plan_workout" || k === "plan_diet" || /^(restDay_|dietaVariant_|gym_|muscleSets_|checkIn_|hydration_)\d{4}-\d{2}-\d{2}$/.test(k), keys => {
+    const st = window.storage;
+    if (!st) return;
+    if (keys.indexOf("restDay_" + today) !== -1) setRestDay(!!st.get("restDay_" + today, false));
+    if (keys.indexOf("weightLog") !== -1) setWeightLog(st.get("weightLog", []) || []);
+    setDataRev(n => n + 1);
+  });
   const saveWeight = () => {
     const val = parseFloat(newWeight);
     if (isNaN(val) || val <= 0) return;
@@ -10670,6 +10694,10 @@ const Scheda = ({
     if (has("plan_workout")) {
       curDays = _buildSchedule();
       setDays(curDays);
+      const day = curDays.find(d => d.key === scheda) || curDays[0];
+      const n = (day && day.exercises || []).length;
+      setCursor(c => Math.max(0, Math.min(c, n - 1)));
+      if (!n) setMode("list");
     }
     if (has("plan_workout") || has(window.schedaProgKey(dayK))) {
       const res = window.sanitizeSchedaProg(window.readSchedaProg(st, dayK), curDays, window.schedaPlanSig(curDays));
@@ -16370,7 +16398,15 @@ const FileImporter = ({
         setTimeout(() => setStatus(null), 4000);
         return;
       }
-      window.SyncV2.putRecords(res.changes);
+      try {
+        window.SyncV2.putRecords(res.changes);
+      } catch (_) {
+        setStatus({
+          type: "err",
+          msg: t("Errore salvataggio")
+        });
+        return;
+      }
       if (window.storage) window.storage.set(cfg.textKey, text);
       setPlan(readPlan());
       const okMsg = `${t("Importato")}${v.detail ? " · " + v.detail : ""}`;

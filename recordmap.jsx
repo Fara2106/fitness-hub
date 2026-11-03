@@ -2,7 +2,9 @@
 //
 //   window.RecordMap = {
 //     groupsForKey(key, value?, ctx?) → string[]            gruppi da ricalcolare quando cambia `key`
-//     buildGroup(groupId, get, ctx)   → { records: [{collection,id,data}], window?: {collection,minId} }
+//     buildGroup(groupId, get, ctx)   → { records: [{collection,id,data}], window?: {collection,minId},
+//                                         protect?: {collection, planExerciseIds} }
+//     isProtected(groupResult, collection, id) → boolean   id da non tombstonare mai (Ruling 12)
 //     keysForRecord(record, ctx)      → string[]            chiavi locali da ricostruire
 //     rebuildKeys(keys, getRecord, listRecords, ctx) → { [key]: value | undefined }
 //     DIRECT: Set(["workoutPlan","dietPlan"])               collezioni gestite direttamente dal motore
@@ -343,12 +345,15 @@
   // setLog da schedaProg_<data>: una serie per indice registrato (spuntata o no, o col peso).
   // Esercizio: names[exKey] → gymSaved_ della data → posizione nel piano attivo (records.mjs);
   // senza nome e piano attivo valido da dopo quella data → scartato.
+  // protect (Ruling 12): i setLog di esercizi che NON sono nel piano attivo (piano cambiato in
+  // giornata, o id `name:`) non si tombstonano mai: sono storico, la Scheda non li mostra più.
   function setsGroup(date, get, ctx) {
     const wi = workoutIndex(ctx && ctx.workout);
     if (!wi) return noTouch("setLog");
+    const protect = { collection: "setLog", planExerciseIds: [...wi.byId.keys()] };
     const prog = get(`schedaProg_${date}`, null);
     const records = [];
-    if (!isObj(prog)) return { records };
+    if (!isObj(prog)) return { records, protect };
     const completion = isObj(prog.completion) ? prog.completion : {};
     const subs = isObj(prog.substitutions) ? prog.substitutions : {};
     const pesos = isObj(prog.pesos) ? prog.pesos : {};
@@ -384,7 +389,17 @@
         }));
       }
     }
-    return { records };
+    return { records, protect };
+  }
+
+  // Ruling 12: un id è protetto (mai tombstone dal motore) se il gruppo lo dichiara in `protect`.
+  // setLog: id `${date}:${exerciseId}:${setIndex}` → protetto se exerciseId non è del piano attivo.
+  function isProtected(res, collection, id) {
+    const p = res && res.protect;
+    if (!p || p.collection !== collection) return false;
+    const s = String(id), cut = s.lastIndexOf(":");
+    if (cut <= 11) return false;
+    return !p.planExerciseIds.includes(s.slice(11, cut));
   }
 
   // gymSaved_<data> = { "Giorno N#pos#serie": "nome|peso" }: nome dell'esercizio fatto, salvo
@@ -633,6 +648,6 @@
     out[key] = daily;
   }
 
-  const RecordMap = { groupsForKey, buildGroup, keysForRecord, rebuildKeys, DIRECT, MUSCLE_GROUP };
+  const RecordMap = { groupsForKey, buildGroup, keysForRecord, rebuildKeys, isProtected, DIRECT, MUSCLE_GROUP };
   window.RecordMap = RecordMap;
 })();

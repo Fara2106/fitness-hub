@@ -338,6 +338,17 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
     setRestDay(next);
   };
 
+  const daysCount = (window.getSchedule ? (window.getSchedule().days || []).length : 0) || 3;
+  const _rawSession = window.getTodaySession ? window.getTodaySession() : null;
+  const todaySession = restDay ? null : _rawSession;
+
+  // Peso
+  const [weightLog, setWeightLog] = React.useState(() => window.storage ? window.storage.get("weightLog", []) : []);
+  const sparkData    = weightLog.slice(-14);
+  const latestWeight = sparkData[sparkData.length - 1]?.weight || bodyWeight;
+  const weightDelta  = sparkData.length >= 2 ? (sparkData[sparkData.length - 1].weight - sparkData[0].weight) : 0;
+  const [newWeight, setNewWeight] = React.useState("");
+
   // Dati arrivati dal sync (altro device): ricarica ciò che la Home tiene in stato
   // e ricalcola i riepiloghi letti da storage (dataRev). Il peso digitato nello
   // sheet (newWeight) non è in storage: non viene mai toccato.
@@ -353,16 +364,7 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
       setDataRev(n => n + 1);
     }
   );
-  const daysCount = (window.getSchedule ? (window.getSchedule().days || []).length : 0) || 3;
-  const _rawSession = window.getTodaySession ? window.getTodaySession() : null;
-  const todaySession = restDay ? null : _rawSession;
 
-  // Peso
-  const [weightLog, setWeightLog] = React.useState(() => window.storage ? window.storage.get("weightLog", []) : []);
-  const sparkData    = weightLog.slice(-14);
-  const latestWeight = sparkData[sparkData.length - 1]?.weight || bodyWeight;
-  const weightDelta  = sparkData.length >= 2 ? (sparkData[sparkData.length - 1].weight - sparkData[0].weight) : 0;
-  const [newWeight, setNewWeight] = React.useState("");
   const saveWeight = () => {
     const val = parseFloat(newWeight);
     if (isNaN(val) || val <= 0) return;
