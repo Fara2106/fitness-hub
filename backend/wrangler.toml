@@ -1,0 +1,9 @@
+name = "fitness-hub-api"
+main = "src/worker.mjs"
+compatibility_date = "2026-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "fitness-hub-db"
+# Segnaposto: viene compilato nel Task 6 con l'id reale del database D1.
+database_id = "TODO-task6"
