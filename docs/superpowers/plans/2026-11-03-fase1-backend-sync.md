@@ -4,7 +4,7 @@
 
 **Goal:** Un nuovo backend (Worker `fitness-hub-api` + database D1) con API di sync offline-first a token e una migrazione idempotente che porta dentro scheda, dieta e dati attuali. (Niente proxy del Coach: l'IA gira sul dispositivo, decisione di Lorenzo del 2026-11-03.)
 
-**Architecture:** Store generico a record (`collection`, `id`, `data` JSON) con numero di sequenza server per il cursore di pull e last-writer-wins per record. La logica vive in moduli ES puri (store, http, coach, converter) testati in Node con `node:sqlite` dietro un adattatore che imita l'API D1. Il Worker attuale `fitness-hub-proxy` (Sheets) resta acceso e intatto fino alla fase 2.
+**Architecture:** Store generico a record (`collection`, `id`, `data` JSON) con numero di sequenza server per il cursore di pull e last-writer-wins per record. La logica vive in moduli ES puri (store, http, converter) testati in Node con `node:sqlite` dietro un adattatore che imita l'API D1. Il Worker attuale `fitness-hub-proxy` (Sheets) resta acceso e intatto fino alla fase 2.
 
 **Tech Stack:** JavaScript ES modules, Cloudflare Workers + D1, `wrangler` 4.156.2 (via `npx`), test con `node --test` + `node:sqlite` (Node 26), zero dipendenze runtime.
 
