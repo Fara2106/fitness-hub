@@ -202,7 +202,8 @@ const Spesa = ({ device, spesaChecked, setSpesaChecked, spesaFreq, setSpesaFreq 
     } else {
       _setLocalChecked(next);
       if (window.storage) window.storage.set("spesaChecked", next);
-      if (window.sheetsAPI) window.sheetsAPI.saveSettings({ key: "spesaChecked2", value: JSON.stringify(next) }).catch(() => {});
+      if (window._markEdits) window._markEdits("spesaChecked2", _localChecked, next);
+      if (window._saveSettingRetry) window._saveSettingRetry("spesaChecked2", JSON.stringify(next));
     }
   };
 
@@ -212,7 +213,7 @@ const Spesa = ({ device, spesaChecked, setSpesaChecked, spesaFreq, setSpesaFreq 
     } else {
       _setLocalFreq(f);
       if (window.storage) window.storage.set("spesaFreq", f);
-      if (window.sheetsAPI) window.sheetsAPI.saveSettings({ key: "spesaFreq", value: String(f) }).catch(() => {});
+      if (window._saveSettingRetry) window._saveSettingRetry("spesaFreq", f);
     }
   };
 
@@ -229,6 +230,7 @@ const Spesa = ({ device, spesaChecked, setSpesaChecked, spesaFreq, setSpesaFreq 
   );
   const [newItem, setNewItem] = React.useState("");
   const saveExtra = (next) => {
+    if (window._markEdits) window._markEdits("spesaExtra", extra, next); // unione per voce tra device
     setExtra(next);
     if (window.storage) window.storage.set("spesaExtra", next);
     if (window._saveSettingRetry) window._saveSettingRetry("spesaExtra", JSON.stringify(next));

@@ -2,10 +2,12 @@
   "scripts": {
     "test": "node test/run.mjs",
     "build": "node dev/build.mjs",
-    "gen:defaults": "node dev/gen-defaults.mjs"
+    "gen:defaults": "node dev/gen-defaults.mjs",
+    "test:e2e": "node test/e2e/run.mjs"
   },
   "devDependencies": {
     "@babel/core": "^8.0.1",
-    "@babel/preset-react": "^8.0.1"
+    "@babel/preset-react": "^8.0.1",
+    "playwright-core": "^1.61.1"
   }
 }

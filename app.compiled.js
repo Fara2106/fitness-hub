@@ -2647,6 +2647,18 @@ const I18N_DICT = {
   "Sessione già salvata": {
     en: "Session already saved"
   },
+  "Qualcosa è andato storto qui": {
+    en: "Something went wrong here"
+  },
+  "I tuoi dati sono al sicuro. Il dettaglio è in Impostazioni → Diagnostica.": {
+    en: "Your data is safe. Details are in Settings → Diagnostics."
+  },
+  "Riprova": {
+    en: "Retry"
+  },
+  "Torna alla Home": {
+    en: "Back to Home"
+  },
   "sync cloud…": {
     en: "cloud sync…"
   },
@@ -3738,6 +3750,91 @@ const UIStatTile = ({
     marginLeft: 3
   }
 }, unit) : null), children);
+class UIErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = {
+      err: null
+    };
+  }
+  static getDerivedStateFromError(err) {
+    return {
+      err
+    };
+  }
+  componentDidCatch(err, info) {
+    try {
+      if (window._logError) window._logError("render", (err && err.message ? err.message : String(err)) + " @ " + (this.props.where || "?"), info && info.componentStack || err && err.stack);
+    } catch (_) {}
+  }
+  render() {
+    if (!this.state.err) return this.props.children;
+    return React.createElement(UIErrorFallback, {
+      onRetry: () => this.setState({
+        err: null
+      }),
+      onHome: this.props.onHome
+    });
+  }
+}
+const UIErrorFallback = ({
+  onRetry,
+  onHome
+}) => {
+  const t = useT();
+  return React.createElement("div", {
+    style: {
+      padding: "40px 20px",
+      display: "flex",
+      justifyContent: "center"
+    }
+  }, React.createElement("div", {
+    className: "ui-card",
+    style: {
+      maxWidth: 420,
+      width: "100%",
+      textAlign: "center",
+      padding: 24
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 34,
+      marginBottom: 8
+    }
+  }, "⚠️"), React.createElement("div", {
+    style: {
+      fontSize: 17,
+      fontWeight: 650,
+      marginBottom: 6
+    }
+  }, t("Qualcosa è andato storto qui")), React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 13.5,
+      lineHeight: 1.5,
+      marginBottom: 18
+    }
+  }, t("I tuoi dati sono al sicuro. Il dettaglio è in Impostazioni → Diagnostica.")), React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 10
+    }
+  }, React.createElement("button", {
+    className: "btn",
+    style: {
+      flex: 1,
+      padding: 12
+    },
+    onClick: onRetry
+  }, t("Riprova")), onHome && React.createElement("button", {
+    className: "btn primary",
+    style: {
+      flex: 1,
+      padding: 12
+    },
+    onClick: onHome
+  }, t("Torna alla Home")))));
+};
 const UIPortal = ({
   children
 }) => window.ReactDOM && ReactDOM.createPortal && typeof document !== "undefined" ? ReactDOM.createPortal(React.createElement("div", {
@@ -3874,6 +3971,7 @@ window.UIButton = UIButton;
 window.UIStatTile = UIStatTile;
 window.UISheet = UISheet;
 window.UIPortal = UIPortal;
+window.UIErrorBoundary = UIErrorBoundary;
 window.UIEmpty = UIEmpty;
 window.UISkeleton = UISkeleton;
 window.UIAnimatedNumber = UIAnimatedNumber;
@@ -8157,6 +8255,7 @@ const Scheda = ({
     setExNotes(prev => {
       const next = Object.assign({}, prev);
       if (text) next[key] = text;else delete next[key];
+      if (window._markEdits) window._markEdits("exNotes", prev, next);
       if (window.storage) window.storage.set("exNotes", next);
       clearTimeout(exNotesPushTid.current);
       exNotesPushTid.current = setTimeout(() => {
@@ -10842,10 +10941,8 @@ const Spesa = ({
     } else {
       _setLocalChecked(next);
       if (window.storage) window.storage.set("spesaChecked", next);
-      if (window.sheetsAPI) window.sheetsAPI.saveSettings({
-        key: "spesaChecked2",
-        value: JSON.stringify(next)
-      }).catch(() => {});
+      if (window._markEdits) window._markEdits("spesaChecked2", _localChecked, next);
+      if (window._saveSettingRetry) window._saveSettingRetry("spesaChecked2", JSON.stringify(next));
     }
   };
   const setFreq = f => {
@@ -10854,10 +10951,7 @@ const Spesa = ({
     } else {
       _setLocalFreq(f);
       if (window.storage) window.storage.set("spesaFreq", f);
-      if (window.sheetsAPI) window.sheetsAPI.saveSettings({
-        key: "spesaFreq",
-        value: String(f)
-      }).catch(() => {});
+      if (window._saveSettingRetry) window._saveSettingRetry("spesaFreq", f);
     }
   };
   const toggle = k => {
@@ -10870,6 +10964,7 @@ const Spesa = ({
   const [extra, setExtra] = React.useState(() => window.storage ? window.storage.get("spesaExtra", []) : []);
   const [newItem, setNewItem] = React.useState("");
   const saveExtra = next => {
+    if (window._markEdits) window._markEdits("spesaExtra", extra, next);
     setExtra(next);
     if (window.storage) window.storage.set("spesaExtra", next);
     if (window._saveSettingRetry) window._saveSettingRetry("spesaExtra", JSON.stringify(next));
@@ -15190,7 +15285,15 @@ const StatusBar = () => React.createElement("div", {
     background: "var(--statusbar-bg, var(--bg))"
   }
 });
-const Screen = ({
+const Screen = props => React.createElement(UIErrorBoundary, {
+  key: props.which,
+  where: props.which,
+  onHome: props.which === "dashboard" ? null : () => props.set(st => ({
+    ...st,
+    screen: "dashboard"
+  }))
+}, React.createElement(ScreenInner, props));
+const ScreenInner = ({
   which,
   device,
   state,
@@ -15346,6 +15449,89 @@ function _setPending(key, value) {
   } else p[key] = value;
   window.storage.set("settingsPending", p);
 }
+const _MERGE = {
+  spesaChecked2: {
+    local: "spesaChecked",
+    list: false
+  },
+  spesaExtra: {
+    local: "spesaExtra",
+    list: true
+  },
+  exNotes: {
+    local: "exNotes",
+    list: false
+  }
+};
+function _toMap(val, list) {
+  if (!val || typeof val !== "object") return {};
+  if (!list) return val;
+  const m = {};
+  (Array.isArray(val) ? val : []).forEach(it => {
+    if (it && it.id != null) m[String(it.id)] = it;
+  });
+  return m;
+}
+function _fromMap(m, list) {
+  return list ? Object.values(m).sort((a, b) => Number(a.id) - Number(b.id)) : m;
+}
+function _edits() {
+  return window.storage && window.storage.get("settingsEdits", {}) || {};
+}
+function _markEdits(key, prev, next) {
+  const cfg = _MERGE[key];
+  if (!cfg || !window.storage) return;
+  const a = _toMap(prev, cfg.list),
+    b = _toMap(next, cfg.list);
+  const all = Object.assign({}, _edits());
+  const cur = all[key] || {
+    seq: 0,
+    e: {}
+  };
+  const e = Object.assign({}, cur.e);
+  let changed = false;
+  new Set([...Object.keys(a), ...Object.keys(b)]).forEach(id => {
+    if (JSON.stringify(a[id]) !== JSON.stringify(b[id])) {
+      e[id] = b[id] === undefined ? null : b[id];
+      changed = true;
+    }
+  });
+  if (!changed) return;
+  all[key] = {
+    seq: cur.seq + 1,
+    e
+  };
+  window.storage.set("settingsEdits", all);
+}
+window._markEdits = _markEdits;
+function _applyEdits(key, cloudVal) {
+  const cfg = _MERGE[key];
+  const m = Object.assign({}, _toMap(cloudVal, cfg.list));
+  const ed = (_edits()[key] || {}).e || {};
+  Object.entries(ed).forEach(([id, v]) => {
+    if (v === null) delete m[id];else m[id] = v;
+  });
+  return _fromMap(m, cfg.list);
+}
+function _pullMerged(key, cloudVal) {
+  const cfg = _MERGE[key];
+  const all = Object.assign({}, _edits());
+  const ed = all[key];
+  if (ed) {
+    const cm = _toMap(cloudVal, cfg.list);
+    const reflected = Object.entries(ed.e).every(([id, v]) => v === null ? !(id in cm) : JSON.stringify(cm[id]) === JSON.stringify(v));
+    const slot = _push[key];
+    if (reflected) {
+      if (!slot || slot.busy === 0) {
+        delete all[key];
+        window.storage.set("settingsEdits", all);
+      }
+    } else if (!slot || slot.busy === 0) {
+      _saveSettingRetry(key, JSON.stringify(_applyEdits(key, cloudVal)));
+    }
+  }
+  return _applyEdits(key, cloudVal);
+}
 function _saveSettingRetry(key, value, tries = 2) {
   if (!window.sheetsAPI) return Promise.resolve(false);
   const v = String(value);
@@ -15358,19 +15544,40 @@ function _saveSettingRetry(key, value, tries = 2) {
   });
   slot.latest = v;
   slot.busy++;
-  const attempt = n => window.sheetsAPI.saveSettings({
-    key,
-    value: v
-  }).then(() => {
-    slot.doneAt = Date.now();
-    if (_pendingSettings()[key] === v) _setPending(key, undefined);
-    console.log("[sync push]", key, "✓");
-    return true;
-  }).catch(e => {
-    if (n > 0) return new Promise(r => setTimeout(r, 800)).then(() => attempt(n - 1));
-    console.warn("[sync push err]", key, e);
-    return false;
-  });
+  const attempt = async n => {
+    let payload = v;
+    const cfg = _MERGE[key];
+    const ed = _edits()[key];
+    if (cfg && ed && Object.keys(ed.e).length && window.sheetsAPI.getSettings) {
+      const r = await _safe(window.sheetsAPI.getSettings(), 8000);
+      if (r.ok && r.value && typeof r.value === "object") {
+        const raw = r.value[key] || (key === "spesaChecked2" ? r.value.spesaChecked : null);
+        let cloud = null;
+        try {
+          cloud = raw ? JSON.parse(raw) : null;
+        } catch (_) {}
+        const merged = _applyEdits(key, cloud);
+        payload = JSON.stringify(merged);
+        window.storage.set(cfg.local, merged);
+        try {
+          window.dispatchEvent(new Event("lfh-merged"));
+        } catch (_) {}
+      }
+    }
+    return window.sheetsAPI.saveSettings({
+      key,
+      value: payload
+    }).then(() => {
+      slot.doneAt = Date.now();
+      if (_pendingSettings()[key] === v) _setPending(key, undefined);
+      console.log("[sync push]", key, "✓");
+      return true;
+    }).catch(e => {
+      if (n > 0) return new Promise(r => setTimeout(r, 800)).then(() => attempt(n - 1));
+      console.warn("[sync push err]", key, e);
+      return false;
+    });
+  };
   const run = slot.chain.then(() => slot.latest !== v ? true : attempt(tries));
   slot.chain = run.catch(() => {}).then(() => {
     slot.busy--;
@@ -15522,22 +15729,22 @@ async function _cloudSync(opts) {
         }
       });
       const spesaCloud = s.spesaChecked2 || s.spesaChecked;
-      if (spesaCloud && !skip("spesaChecked2")) {
+      if (spesaCloud) {
         try {
-          st.set("spesaChecked", JSON.parse(spesaCloud));
+          st.set("spesaChecked", _pullMerged("spesaChecked2", JSON.parse(spesaCloud)));
           console.log("[sync pull] spesaChecked ✓");
         } catch (_) {}
       }
       if (s.spesaFreq && !skip("spesaFreq")) st.set("spesaFreq", Number(s.spesaFreq) || 1);
-      if (s.spesaExtra && !skip("spesaExtra")) {
+      if (s.spesaExtra) {
         try {
-          st.set("spesaExtra", JSON.parse(s.spesaExtra));
+          st.set("spesaExtra", _pullMerged("spesaExtra", JSON.parse(s.spesaExtra)));
         } catch (_) {}
       }
       if (s.weightGoal && parseFloat(s.weightGoal) > 0 && !skip("weightGoal")) st.set("weightGoal", parseFloat(s.weightGoal));
-      if (s.exNotes && !skip("exNotes")) {
+      if (s.exNotes) {
         try {
-          st.set("exNotes", JSON.parse(s.exNotes));
+          st.set("exNotes", _pullMerged("exNotes", JSON.parse(s.exNotes)));
         } catch (_) {}
       }
       if (s.bodyWeight && parseFloat(s.bodyWeight) > 0 && !skip("bodyWeight")) {
@@ -15874,6 +16081,13 @@ const AppFrame = ({
     return () => window.removeEventListener("lfh-sw-update", onUpd);
   }, []);
   const syncNowRef = React.useRef(null);
+  React.useEffect(() => {
+    const onMerged = () => {
+      if (window.storage && window.storage.isReady()) applySynced();
+    };
+    window.addEventListener("lfh-merged", onMerged);
+    return () => window.removeEventListener("lfh-merged", onMerged);
+  }, []);
   const applySynced = () => {
     const s = initState();
     setStateRaw(prev => ({
@@ -15924,6 +16138,7 @@ const AppFrame = ({
         }).catch(() => {});
       }
       if (next.spesaChecked !== prev.spesaChecked) {
+        _markEdits("spesaChecked2", prev.spesaChecked, next.spesaChecked);
         window.storage.set("spesaChecked", next.spesaChecked);
         _saveSettingRetry("spesaChecked2", JSON.stringify(next.spesaChecked));
       }

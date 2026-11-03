@@ -166,6 +166,48 @@ const UIStatTile = ({ cap, value, unit, onClick, children }) => (
   </UICard>
 );
 
+// — Error boundary per schermata ————————————————————————————————————————
+// Senza, un errore di render in UNA schermata smontava tutta l'app (pagina
+// bianca, TabBar compresa). Ora al suo posto compare una card con Riprova /
+// Torna alla Home, e l'errore finisce in Impostazioni → Diagnostica.
+// Va montato con key = schermata: cambiando tab il boundary riparte pulito.
+class UIErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  componentDidCatch(err, info) {
+    try {
+      if (window._logError) window._logError("render",
+        (err && err.message ? err.message : String(err)) + " @ " + (this.props.where || "?"),
+        (info && info.componentStack) || (err && err.stack));
+    } catch (_) {}
+  }
+  render() {
+    if (!this.state.err) return this.props.children;
+    return <UIErrorFallback
+      onRetry={() => this.setState({ err: null })}
+      onHome={this.props.onHome} />;
+  }
+}
+
+const UIErrorFallback = ({ onRetry, onHome }) => {
+  const t = useT();
+  return (
+    <div style={{ padding: "40px 20px", display: "flex", justifyContent: "center" }}>
+      <div className="ui-card" style={{ maxWidth: 420, width: "100%", textAlign: "center", padding: 24 }}>
+        <div style={{ fontSize: 34, marginBottom: 8 }}>⚠️</div>
+        <div style={{ fontSize: 17, fontWeight: 650, marginBottom: 6 }}>{t("Qualcosa è andato storto qui")}</div>
+        <div className="muted" style={{ fontSize: 13.5, lineHeight: 1.5, marginBottom: 18 }}>
+          {t("I tuoi dati sono al sicuro. Il dettaglio è in Impostazioni → Diagnostica.")}
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="btn" style={{ flex: 1, padding: 12 }} onClick={onRetry}>{t("Riprova")}</button>
+          {onHome && <button className="btn primary" style={{ flex: 1, padding: 12 }} onClick={onHome}>{t("Torna alla Home")}</button>}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // — Portal per overlay a schermo intero (Player, riepilogo, timer, sheet…) —
 // Renderizzati DENTRO .lfh-scroll restavano intrappolati nel suo stacking
 // context (iOS): la TabBar, sorella successiva, gli passava sopra e copriva
@@ -249,6 +291,7 @@ window.UIButton   = UIButton;
 window.UIStatTile = UIStatTile;
 window.UISheet    = UISheet;
 window.UIPortal   = UIPortal;
+window.UIErrorBoundary = UIErrorBoundary;
 window.UIEmpty    = UIEmpty;
 window.UISkeleton = UISkeleton;
 window.UIAnimatedNumber = UIAnimatedNumber;

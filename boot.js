@@ -54,6 +54,9 @@
       flush();
     } catch (_) {}
   }
+  // Usato anche dall'error boundary React (ui.jsx): gli errori di render NON
+  // arrivano a window.onerror in produzione, li segnala lui.
+  window._logError = push;
   window.addEventListener("error", function (e) {
     if (!e || !e.message) return; // gli errori di caricamento risorse non arrivano qui (no bubble)
     var where = e.filename ? " @ " + String(e.filename).split("/").pop() + ":" + e.lineno : "";

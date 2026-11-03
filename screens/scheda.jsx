@@ -961,6 +961,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
     setExNotes(prev => {
       const next = Object.assign({}, prev);
       if (text) next[key] = text; else delete next[key];
+      if (window._markEdits) window._markEdits("exNotes", prev, next); // unione per voce tra device
       if (window.storage) window.storage.set("exNotes", next);
       clearTimeout(exNotesPushTid.current);
       exNotesPushTid.current = setTimeout(() => {

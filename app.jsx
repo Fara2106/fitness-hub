@@ -10,7 +10,19 @@ const StatusBar = () => (
 );
 
 // ── Screen renderer ────────────────────────────────────────────────────────
-const Screen = ({ which, device, state, set, globalCtx }) => {
+// Ogni schermata dentro un error boundary (key = schermata → reset al cambio
+// tab): un errore di render non porta più giù tutta l'app.
+const Screen = (props) => (
+  <UIErrorBoundary
+    key={props.which}
+    where={props.which}
+    onHome={props.which === "dashboard" ? null : () => props.set(st => ({ ...st, screen: "dashboard" }))}
+  >
+    <ScreenInner {...props} />
+  </UIErrorBoundary>
+);
+
+const ScreenInner = ({ which, device, state, set, globalCtx }) => {
   const onNav = (s) => set(st => ({ ...st, screen: s }));
   const pass  = { device, onNav, globalCtx };
 
@@ -126,6 +138,82 @@ function _setPending(key, value) {
   window.storage.set("settingsPending", p);
 }
 
+// ── Unione per voce tra device (spunte Spesa, articoli extra, note esercizi) ──
+// Prima ogni push mandava la mappa INTERA del device: spunte diverse fatte su
+// iPhone e iPad nello stesso momento si cancellavano a vicenda (vince l'ultimo
+// che scrive). Ora si ricorda QUALI voci sono cambiate in locale e non ancora
+// confermate ("settingsEdits"); alla push si rilegge il cloud e ci si
+// riapplicano sopra solo quelle; al pull idem. Stessa voce toccata su due
+// device → vince l'ultima modifica. Il formato nel foglio non cambia.
+const _MERGE = {
+  spesaChecked2: { local: "spesaChecked", list: false }, // { idArticolo: bool }
+  spesaExtra:    { local: "spesaExtra",   list: true  }, // [{ id, name }]
+  exNotes:       { local: "exNotes",      list: false }, // { esercizio: testo }
+};
+function _toMap(val, list) {
+  if (!val || typeof val !== "object") return {};
+  if (!list) return val;
+  const m = {};
+  (Array.isArray(val) ? val : []).forEach(it => { if (it && it.id != null) m[String(it.id)] = it; });
+  return m;
+}
+function _fromMap(m, list) {
+  return list ? Object.values(m).sort((a, b) => Number(a.id) - Number(b.id)) : m;
+}
+function _edits() {
+  return (window.storage && window.storage.get("settingsEdits", {})) || {};
+}
+// Registra le voci cambiate fra prev e next (null = voce rimossa).
+function _markEdits(key, prev, next) {
+  const cfg = _MERGE[key];
+  if (!cfg || !window.storage) return;
+  const a = _toMap(prev, cfg.list), b = _toMap(next, cfg.list);
+  const all = Object.assign({}, _edits());
+  const cur = all[key] || { seq: 0, e: {} };
+  const e = Object.assign({}, cur.e);
+  let changed = false;
+  new Set([...Object.keys(a), ...Object.keys(b)]).forEach(id => {
+    if (JSON.stringify(a[id]) !== JSON.stringify(b[id])) {
+      e[id] = b[id] === undefined ? null : b[id];
+      changed = true;
+    }
+  });
+  if (!changed) return;
+  all[key] = { seq: cur.seq + 1, e };
+  window.storage.set("settingsEdits", all);
+}
+window._markEdits = _markEdits;
+// Valore cloud (già parsato) + modifiche locali non confermate.
+function _applyEdits(key, cloudVal) {
+  const cfg = _MERGE[key];
+  const m = Object.assign({}, _toMap(cloudVal, cfg.list));
+  const ed = (_edits()[key] || {}).e || {};
+  Object.entries(ed).forEach(([id, v]) => { if (v === null) delete m[id]; else m[id] = v; });
+  return _fromMap(m, cfg.list);
+}
+
+// Pull di una chiave unibile: vista locale = cloud + modifiche non confermate.
+// Le modifiche si cancellano solo quando il cloud le contiene davvero; se due
+// device hanno scritto nello stesso istante e una voce è andata persa, la si
+// ri-pusha (convergenza garantita al pull successivo).
+function _pullMerged(key, cloudVal) {
+  const cfg = _MERGE[key];
+  const all = Object.assign({}, _edits());
+  const ed = all[key];
+  if (ed) {
+    const cm = _toMap(cloudVal, cfg.list);
+    const reflected = Object.entries(ed.e).every(([id, v]) =>
+      v === null ? !(id in cm) : JSON.stringify(cm[id]) === JSON.stringify(v));
+    const slot = _push[key];
+    if (reflected) {
+      if (!slot || slot.busy === 0) { delete all[key]; window.storage.set("settingsEdits", all); }
+    } else if (!slot || slot.busy === 0) {
+      _saveSettingRetry(key, JSON.stringify(_applyEdits(key, cloudVal)));
+    }
+  }
+  return _applyEdits(key, cloudVal);
+}
+
 function _saveSettingRetry(key, value, tries = 2) {
   if (!window.sheetsAPI) return Promise.resolve(false);
   const v = String(value);
@@ -133,8 +221,25 @@ function _saveSettingRetry(key, value, tries = 2) {
   const slot = _push[key] || (_push[key] = { chain: Promise.resolve(), latest: null, busy: 0, doneAt: 0 });
   slot.latest = v;
   slot.busy++;
-  const attempt = (n) =>
-    window.sheetsAPI.saveSettings({ key, value: v })
+  const attempt = async (n) => {
+    // Chiave unibile con modifiche locali → rileggi il cloud e manda l'unione.
+    // Se la lettura fallisce si manda il valore locale (comportamento storico).
+    let payload = v;
+    const cfg = _MERGE[key];
+    const ed = _edits()[key];
+    if (cfg && ed && Object.keys(ed.e).length && window.sheetsAPI.getSettings) {
+      const r = await _safe(window.sheetsAPI.getSettings(), 8000);
+      if (r.ok && r.value && typeof r.value === "object") {
+        const raw = r.value[key] || (key === "spesaChecked2" ? r.value.spesaChecked : null);
+        let cloud = null;
+        try { cloud = raw ? JSON.parse(raw) : null; } catch (_) {}
+        const merged = _applyEdits(key, cloud);
+        payload = JSON.stringify(merged);
+        window.storage.set(cfg.local, merged);
+        try { window.dispatchEvent(new Event("lfh-merged")); } catch (_) {}
+      }
+    }
+    return window.sheetsAPI.saveSettings({ key, value: payload })
       .then(() => {
         slot.doneAt = Date.now();
         if (_pendingSettings()[key] === v) _setPending(key, undefined);
@@ -146,6 +251,7 @@ function _saveSettingRetry(key, value, tries = 2) {
         console.warn("[sync push err]", key, e);
         return false; // resta pending → ri-push al prossimo pull riuscito
       });
+  };
   // Superato da un valore più recente prima del suo turno → lo manda quello.
   const run = slot.chain.then(() => (slot.latest !== v ? true : attempt(tries)));
   slot.chain = run.catch(() => {}).then(() => { slot.busy--; });
@@ -317,16 +423,18 @@ async function _cloudSync(opts) {
       // spesaChecked2: chiave cloud "pulita" (la vecchia "spesaChecked" aveva
       // righe duplicate nel foglio → lettura sempre stale). Pull retro-compatibile.
       const spesaCloud = s.spesaChecked2 || s.spesaChecked;
-      if (spesaCloud && !skip("spesaChecked2")) {
-        try { st.set("spesaChecked", JSON.parse(spesaCloud)); console.log("[sync pull] spesaChecked ✓"); } catch(_) {}
+      // Chiavi unibili (_MERGE): niente skip — la vista è sempre cloud + le
+      // modifiche locali non ancora confermate.
+      if (spesaCloud) {
+        try { st.set("spesaChecked", _pullMerged("spesaChecked2", JSON.parse(spesaCloud))); console.log("[sync pull] spesaChecked ✓"); } catch(_) {}
       }
       if (s.spesaFreq && !skip("spesaFreq"))  st.set("spesaFreq", Number(s.spesaFreq) || 1);
-      if (s.spesaExtra && !skip("spesaExtra")) {
-        try { st.set("spesaExtra", JSON.parse(s.spesaExtra)); } catch (_) {}
+      if (s.spesaExtra) {
+        try { st.set("spesaExtra", _pullMerged("spesaExtra", JSON.parse(s.spesaExtra))); } catch (_) {}
       }
       if (s.weightGoal && parseFloat(s.weightGoal) > 0 && !skip("weightGoal")) st.set("weightGoal", parseFloat(s.weightGoal));
-      if (s.exNotes && !skip("exNotes")) {
-        try { st.set("exNotes", JSON.parse(s.exNotes)); } catch (_) {}
+      if (s.exNotes) {
+        try { st.set("exNotes", _pullMerged("exNotes", JSON.parse(s.exNotes))); } catch (_) {}
       }
       // groqApiKey: NON sincronizzata (sicurezza) — la chiave resta solo sul device,
       // così non finisce nel foglio Settings esposto dal backend pubblico.
@@ -633,6 +741,13 @@ const AppFrame = ({ device: _deviceProp, initialScreen, chromeless }) => {
     return () => window.removeEventListener("lfh-sw-update", onUpd);
   }, []);
   const syncNowRef = React.useRef(null);
+  // Push "unita" (_MERGE): lo storage ora contiene anche le voci dell'altro
+  // device → riallinea subito lo stato (spunte Spesa) senza aspettare il pull.
+  React.useEffect(() => {
+    const onMerged = () => { if (window.storage && window.storage.isReady()) applySynced(); };
+    window.addEventListener("lfh-merged", onMerged);
+    return () => window.removeEventListener("lfh-merged", onMerged);
+  }, []);
 
   // Riallinea lo stato React condiviso a quanto la sync ha scritto in storage.
   const applySynced = () => {
@@ -687,6 +802,7 @@ const AppFrame = ({ device: _deviceProp, initialScreen, chromeless }) => {
         if (window.sheetsAPI) window.sheetsAPI.savePesoCorporeo({ date: t, weight: next.bodyWeight }).catch(() => {});
       }
       if (next.spesaChecked !== prev.spesaChecked) {
+        _markEdits("spesaChecked2", prev.spesaChecked, next.spesaChecked);
         window.storage.set("spesaChecked", next.spesaChecked);
         _saveSettingRetry("spesaChecked2", JSON.stringify(next.spesaChecked));
       }
