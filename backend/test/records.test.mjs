@@ -5,7 +5,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { REPO_ROOT } from "../migrate/load-parser.mjs";
 import { workoutPlanFromText, dietPlanFromText } from "../migrate/plans.mjs";
-import { recordsFromSheet, recordsFromBackup, mergeChanges } from "../migrate/records.mjs";
+import { recordsFromSheet, recordsFromBackup, mergeChanges, sanitizeChanges } from "../migrate/records.mjs";
+import { validateSyncBody } from "../src/validate.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const fixture = (n) => JSON.parse(readFileSync(join(HERE, "fixtures", n), "utf8"));
@@ -227,4 +228,92 @@ test("mergeChanges: foglio + backup si fondono senza duplicare collection/id", (
   assert.equal(new Set(ids).size, ids.length);
   // la PWA e il foglio hanno entrambi l'extra spesa: un solo record
   assert.equal(all(m, "shoppingExtra").length, 1);
+});
+
+// ── record non validi (fix round 1) ─────────────────────────────────────────
+const passesValidate = (changes) => validateSyncBody({ deviceId: "d", cursor: 0, changes }).ok;
+
+test("date non di calendario (mese 13, 02-30, prima del 1970): saltate e contate, output valido", () => {
+  const sh = {
+    checkIn: [{ date: "2026-13-45", sleep: 3, energy: 3 }, { date: "2026-02-30", sleep: 3, energy: 3 }],
+    pesoCorporeo: [{ date: "1969-12-31", weight: 70 }, { date: "2026-99-99", weight: 70 }],
+    pesi: { "band squat": [{ date: "2026-02-30", setN: 1, peso: 5, rip: 5 }] },
+    settings: {},
+  };
+  const stats = {};
+  const r = recordsFromSheet(sh, plans, { now: NOW, stats });
+  assert.equal(stats.discarded.invalid, 5);
+  assert.deepEqual(r.map((c) => c.collection), ["settings"]); // solo excludedFoods
+  assert.ok(passesValidate(r));
+
+  const b = { _lfhBackup: 1, data: {
+    "checkIn_2026-13-45": { sleep: 1, energy: 1 },
+    "dietaCheck_2026-02-30": { "13:00|Pranzo": true },
+    weightLog: [{ date: "2026-02-30", weight: 70 }],
+    bodyMeasures: [{ date: "1969-12-31", vita: 80 }],
+  } };
+  const bs = {};
+  const br = recordsFromBackup(b, plans, bs, { now: NOW });
+  assert.equal(bs.discarded.invalid, 4);
+  assert.deepEqual(br.map((c) => c.collection), ["settings"]);
+  assert.ok(passesValidate(br));
+});
+
+test("id troppo lunghi o chiave vuota: il converter non li emette e li conta", () => {
+  const long = "x".repeat(200);
+  const b = { _lfhBackup: 1, data: {
+    spesaChecked: { "": true, [long]: true, ok: true },
+    exNotes: { [long]: "nota" },
+    prMap: { [long]: { peso: 10 } },
+    spesaExtra: [{ id: long, name: "x" }],
+    "schedaProg_2026-10-27": { completion: { "Giorno 9#9": [true] }, names: { "Giorno 9#9": long }, pesos: {}, substitutions: {} },
+  } };
+  const stats = {};
+  const r = recordsFromBackup(b, plans, stats, { now: NOW });
+  assert.ok(!get(r, "shoppingCheck", ""));
+  assert.deepEqual(all(r, "shoppingCheck").map((c) => c.id), ["ok"]);
+  assert.equal(all(r, "exerciseNote").length + all(r, "personalRecord").length + all(r, "shoppingExtra").length + all(r, "setLog").length, 0);
+  assert.equal(stats.discarded.invalid, 5);
+  assert.equal(stats.invalidSamples.length, 5);
+  assert.ok(stats.invalidSamples.every((x) => x.length <= 80));
+  assert.ok(passesValidate(r));
+
+  // foglio: nome esercizio lunghissimo nel setLog
+  const ss = {};
+  const sr = recordsFromSheet({ pesi: { [long]: [{ date: "2026-10-26", setN: 1, peso: 5, rip: 5 }] } }, plans, { now: NOW, stats: ss });
+  assert.equal(all(sr, "setLog").length, 0);
+  assert.equal(ss.discarded.invalid, 1);
+});
+
+test("sanitizeChanges: data troppo grande, collezione/updatedAt/id errati scartati; output passa validateSyncBody", () => {
+  const good = { collection: "settings", id: "lang", data: { value: "it" }, updatedAt: 5 };
+  const bad = [
+    { collection: "settings", id: "big", data: { value: "x".repeat(70000) }, updatedAt: 5 },
+    { collection: "boh", id: "a", data: {}, updatedAt: 5 },
+    { collection: "settings", id: "nan", data: {}, updatedAt: NaN },
+    { collection: "settings", id: "neg", data: {}, updatedAt: -1 },
+    { collection: "settings", id: "", data: {}, updatedAt: 5 },
+    { collection: "settings", id: "nodata", data: null, updatedAt: 5 },
+  ];
+  const stats = {};
+  const out = sanitizeChanges([good, ...bad, ...bad, ...bad], stats);
+  assert.deepEqual(out, [good]);
+  assert.equal(stats.discarded.invalid, 18);
+  assert.equal(stats.invalidSamples.length, 10);
+  assert.equal(stats.invalidSamples[0], "settings/big");
+  assert.ok(passesValidate(out));
+  assert.deepEqual(sanitizeChanges([good]), [good]); // senza stats
+});
+
+test("foglio: peso mancante nella riga serie → weight stringa vuota, non 'null'/'undefined'", () => {
+  const sh = { pesi: { "band squat": [
+    { date: "2026-10-26", setN: 1, peso: null, rip: 5 },
+    { date: "2026-10-26", setN: 2, rip: 5 },
+  ] } };
+  const r = all(recordsFromSheet(sh, plans, { now: NOW }), "setLog");
+  assert.deepEqual(r.map((c) => c.data.weight), ["", ""]);
+});
+
+test("fixture: backup e foglio completi passano validateSyncBody", () => {
+  assert.ok(passesValidate(mergeChanges(fromSheet(), fromBackup())));
 });

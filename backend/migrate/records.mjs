@@ -4,6 +4,8 @@
 //   mergeChanges     : unisce più liste (stesso collection/id → merge superficiale)
 // Puro: nessun I/O. `opts.now` rende deterministici i timestamp delle voci senza data.
 
+import { validateChange } from "../src/validate.mjs";
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DAY_KEY_RE = /^(.+_)(\d{4}-\d{2}-\d{2})$/;
 
@@ -19,7 +21,13 @@ const isNeverMigrated = (k) => NEVER_MIGRATED.has(k) || /_src$/.test(k) || /_at$
 
 // ── helper ──────────────────────────────────────────────────────────────────
 const noon = (date) => new Date(`${date}T12:00:00`).getTime();
-const isDate = (s) => typeof s === "string" && DATE_RE.test(s);
+// Data di calendario vera (niente 2026-13-45, né 2026-02-30 che slitta a marzo)
+// con mezzogiorno locale finito e > 0 (niente date prima del 1970).
+const isDate = (s) => {
+  if (typeof s !== "string" || !DATE_RE.test(s)) return false;
+  const ms = noon(s);
+  return Number.isFinite(ms) && ms > 0 && localDateKey(ms) === s;
+};
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const nameKey = (s) => String(s == null ? "" : s).trim().toLowerCase();
 
@@ -84,8 +92,9 @@ function indexDiet(plan) {
 
 function newStats(stats) {
   const s = stats || {};
-  s.discarded = Object.assign({ mealCheck: 0, supplementCheck: 0, setLog: 0 }, s.discarded);
+  s.discarded = Object.assign({ mealCheck: 0, supplementCheck: 0, setLog: 0, invalid: 0 }, s.discarded);
   s.ignoredKeys = s.ignoredKeys || {};
+  s.invalidSamples = s.invalidSamples || [];
   return s;
 }
 
@@ -105,6 +114,7 @@ function shoppingCheckChanges(checked, now) {
   const out = [];
   if (!isObj(checked)) return out;
   for (const [key, v] of Object.entries(checked)) {
+    if (key === "") continue;
     out.push(change("shoppingCheck", key, { checked: !!v }, now));
   }
   return out;
@@ -125,13 +135,15 @@ const excludedFoodsChange = (now) => change("settings", "excludedFoods", { value
 // ── foglio Google ───────────────────────────────────────────────────────────
 export function recordsFromSheet(sheet, plans, opts = {}) {
   const now = opts.now ?? Date.now();
+  const st = newStats(opts.stats);
   const { checkIn, pesoCorporeo, pesi, settings } = sheet || {};
   const wi = indexWorkout(plans && plans.workout);
   const out = [];
 
   // getCheckIn → dayState.checkIn (stessa data: vince l'ultima riga, via mergeChanges)
   for (const r of Array.isArray(checkIn) ? checkIn : []) {
-    if (!r || !isDate(r.date)) continue;
+    if (!r) continue;
+    if (!isDate(r.date)) { st.discarded.invalid++; continue; }
     const sleep = Number(r.sleep) || 0, energy = Number(r.energy) || 0;
     if (!sleep && !energy) continue; // come la PWA: riga vuota ignorata
     out.push(change("dayState", r.date, {
@@ -142,7 +154,8 @@ export function recordsFromSheet(sheet, plans, opts = {}) {
   // getPesoCorporeo → bodyWeight
   const weightDates = new Set();
   for (const r of Array.isArray(pesoCorporeo) ? pesoCorporeo : []) {
-    if (!r || !isDate(r.date)) continue;
+    if (!r) continue;
+    if (!isDate(r.date)) { st.discarded.invalid++; continue; }
     const kg = toNumber(r.weight);
     if (kg === null || kg <= 0) continue;
     weightDates.add(r.date);
@@ -155,14 +168,15 @@ export function recordsFromSheet(sheet, plans, opts = {}) {
     const exerciseId = hit ? hit.ex.id : `name:${nameKey(name)}`;
     const planId = hit ? hit.planId : null;
     for (const r of Array.isArray(rows) ? rows : []) {
-      if (!r || !isDate(r.date)) continue;
+      if (!r) continue;
+      if (!isDate(r.date)) { st.discarded.invalid++; continue; }
       const setN = Number(r.setN);
       if (!Number.isInteger(setN) || setN < 1) continue;
       const setIndex = setN - 1;
       const reps = Number(r.rip);
       out.push(change("setLog", `${r.date}:${exerciseId}:${setIndex}`, {
         date: r.date, exerciseId, exerciseName: name, planId, setIndex,
-        weight: String(r.peso), reps: Number.isFinite(reps) && r.rip !== "" && r.rip != null ? reps : null,
+        weight: hasValue(r.peso) ? String(r.peso) : "", reps: Number.isFinite(reps) && r.rip !== "" && r.rip != null ? reps : null,
         done: true, substitutedWith: null,
       }, noon(r.date)));
     }
@@ -184,7 +198,7 @@ export function recordsFromSheet(sheet, plans, opts = {}) {
     out.push(change("bodyWeight", today, { date: today, kg }, now));
   }
 
-  return mergeChanges(out);
+  return sanitizeChanges(mergeChanges(out), st);
 }
 
 // ── backup PWA ──────────────────────────────────────────────────────────────
@@ -204,6 +218,7 @@ export function recordsFromBackup(backup, plans, stats, opts = {}) {
 
     if (dm) {
       const prefix = dm[1], date = dm[2];
+      if (!isDate(date)) { st.discarded.invalid++; continue; }
       const at = noon(date);
       switch (prefix) {
         case "checkIn_":
@@ -251,14 +266,17 @@ export function recordsFromBackup(backup, plans, stats, opts = {}) {
     switch (key) {
       case "weightLog":
         for (const e of Array.isArray(val) ? val : []) {
-          const kg = e && toNumber(e.weight);
-          if (!e || !isDate(e.date) || kg === null || kg <= 0) continue;
+          if (!e) continue;
+          if (!isDate(e.date)) { st.discarded.invalid++; continue; }
+          const kg = toNumber(e.weight);
+          if (kg === null || kg <= 0) continue;
           out.push(change("bodyWeight", e.date, { date: e.date, kg }, noon(e.date)));
         }
         break;
       case "bodyMeasures":
         for (const e of Array.isArray(val) ? val : []) {
-          if (!isObj(e) || !isDate(e.date)) continue;
+          if (!isObj(e)) continue;
+          if (!isDate(e.date)) { st.discarded.invalid++; continue; }
           out.push(change("bodyMeasure", e.date, { ...e }, noon(e.date)));
         }
         break;
@@ -279,7 +297,7 @@ export function recordsFromBackup(backup, plans, stats, opts = {}) {
     }
   }
   out.push(excludedFoodsChange(now));
-  return mergeChanges(out);
+  return sanitizeChanges(mergeChanges(out), st);
 }
 
 // schedaProg_<data> = { completion:{exId:[bool]}, substitutions:{exId:nome}, pesos:{exId:[str]}, names:{exId:nome minuscolo}, sig }
@@ -341,4 +359,25 @@ export function mergeChanges(...lists) {
     }
   }
   return [...map.values()];
+}
+
+// ── guardia finale ──────────────────────────────────────────────────────────
+// Scarta ogni change che /v1/sync rifiuterebbe (stesse regole di validateChange:
+// collezione, id 1..128, updatedAt > 0, data oggetto ≤ 64 KB): il push è
+// tutto-o-niente per richiesta, un solo record non valido bloccherebbe il lotto.
+// Conta gli scarti in stats.discarded.invalid e ne annota fino a 10 in
+// stats.invalidSamples ("collection/id" troncato).
+const MAX_SAMPLES = 10;
+export function sanitizeChanges(list, stats) {
+  const st = stats ? newStats(stats) : null;
+  const out = [];
+  for (const c of list || []) {
+    if (validateChange(c) === null) { out.push(c); continue; }
+    if (!st) continue;
+    st.discarded.invalid++;
+    if (st.invalidSamples.length < MAX_SAMPLES) {
+      st.invalidSamples.push(`${c && c.collection}/${c && c.id}`.slice(0, 80));
+    }
+  }
+  return out;
 }

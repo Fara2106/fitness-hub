@@ -11,6 +11,29 @@ const isPlainObject = (v) => typeof v === "object" && v !== null && !Array.isArr
 const fail = (error) => ({ ok: false, error });
 const encoder = new TextEncoder();
 
+// Regole di UNA modifica: messaggio d'errore (con prefisso `at`) oppure null se valida.
+export function validateChange(c, at = "change") {
+  if (!isPlainObject(c)) return `${at}: la modifica deve essere un oggetto`;
+  if (typeof c.collection !== "string" || !COLLECTIONS.has(c.collection)) {
+    return `${at}: collezione sconosciuta '${String(c.collection)}'`;
+  }
+  if (typeof c.id !== "string" || !c.id || c.id.length > MAX_ID_LEN) {
+    return `${at}: id deve essere una stringa non vuota di al massimo ${MAX_ID_LEN} caratteri`;
+  }
+  if (typeof c.updatedAt !== "number" || !Number.isFinite(c.updatedAt) || c.updatedAt <= 0) {
+    return `${at}: updatedAt deve essere un numero maggiore di 0`;
+  }
+  if (c.deleted !== undefined && typeof c.deleted !== "boolean") return `${at}: deleted deve essere vero o falso`;
+  const deleted = c.deleted === true;
+  if (deleted ? c.data != null && !isPlainObject(c.data) : !isPlainObject(c.data)) {
+    return `${at}: data deve essere un oggetto${deleted ? " oppure null" : ""}`;
+  }
+  if (c.data != null && encoder.encode(JSON.stringify(c.data)).length > MAX_DATA_BYTES) {
+    return `${at}: data troppo grande (massimo ${MAX_DATA_BYTES} byte)`;
+  }
+  return null;
+}
+
 export function validateSyncBody(body) {
   if (!isPlainObject(body)) return fail("il corpo della richiesta deve essere un oggetto JSON");
   const { deviceId, cursor, changes } = body;
@@ -22,26 +45,8 @@ export function validateSyncBody(body) {
   if (changes.length > MAX_CHANGES) return fail(`troppe modifiche: al massimo ${MAX_CHANGES} per richiesta`);
 
   for (let i = 0; i < changes.length; i++) {
-    const c = changes[i];
-    const at = `changes[${i}]`;
-    if (!isPlainObject(c)) return fail(`${at}: la modifica deve essere un oggetto`);
-    if (typeof c.collection !== "string" || !COLLECTIONS.has(c.collection)) {
-      return fail(`${at}: collezione sconosciuta '${String(c.collection)}'`);
-    }
-    if (typeof c.id !== "string" || !c.id || c.id.length > MAX_ID_LEN) {
-      return fail(`${at}: id deve essere una stringa non vuota di al massimo ${MAX_ID_LEN} caratteri`);
-    }
-    if (typeof c.updatedAt !== "number" || !Number.isFinite(c.updatedAt) || c.updatedAt <= 0) {
-      return fail(`${at}: updatedAt deve essere un numero maggiore di 0`);
-    }
-    if (c.deleted !== undefined && typeof c.deleted !== "boolean") return fail(`${at}: deleted deve essere vero o falso`);
-    const deleted = c.deleted === true;
-    if (deleted ? c.data != null && !isPlainObject(c.data) : !isPlainObject(c.data)) {
-      return fail(`${at}: data deve essere un oggetto${deleted ? " oppure null" : ""}`);
-    }
-    if (c.data != null && encoder.encode(JSON.stringify(c.data)).length > MAX_DATA_BYTES) {
-      return fail(`${at}: data troppo grande (massimo ${MAX_DATA_BYTES} byte)`);
-    }
+    const error = validateChange(changes[i], `changes[${i}]`);
+    if (error) return fail(error);
   }
   return { ok: true, value: { deviceId, cursor, changes } };
 }
