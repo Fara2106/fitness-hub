@@ -37,8 +37,10 @@ Alimenti = **testo libero**: `options[].text` e `lines[].choices[]` sono stringh
 
 `meal.note`: testo libero del pasto (le righe "Note:" della dieta originale). Opzionale: la PWA lo ignora, il converter `.txt` non lo scrive.
 
-`shopping` (lista della spesa del piano): opzionale. `qty1` = quantità per 1 spesa a settimana, `qty2` = per ciascuna di 2 spese. Gli item migrati dalla lista scritta nel codice della PWA (`CATEGORIES` in `screens/spesa.jsx`) tengono la chiave di oggi, `${cat.id}-${indice}` (`proteine-4`…), così le spunte `shoppingCheck` esistenti restano valide; "nuovo dal precedente" copia la lista con gli **stessi id degli item**. La PWA legge `shopping` dal piano e ricade sulla lista nel codice solo se manca.
+`shopping` (lista della spesa del piano): opzionale. `qty1` = quantità per 1 spesa a settimana, `qty2` = per ciascuna di 2 spese. Gli item migrati dalla lista scritta nel codice della PWA (`CATEGORIES` in `screens/spesa.jsx`) tengono la chiave di oggi, `${cat.id}-${indice}` (`proteine-4`…), così le spunte `shoppingCheck` esistenti restano valide; "nuovo dal precedente" copia la lista con gli **stessi id degli item**. La PWA leggerà `shopping` dal piano e ricadrà sulla lista nel codice solo se manca (dal Task 8 della fase 3; oggi usa sempre la lista nel codice).
 `key` della variante: `riposo|mattina|ore17|ore21|ore22` per quelle migrate. `key` dell'integratore: chiave di spunta stabile (`vitac`, `ps`, `custom-<nome>`…). Gli integratori esistono solo se la dieta li prevede. Gli id interni dei piani migrati sono percorsi (`<planId>/d0/e2`, `<planId>/v1/m3/o0`, `<planId>/v0/s4`); quelli creati dall'editor possono essere UUID.
+
+Il client Swift conserva le chiavi che non conosce (round-trip): aggiungere campi opzionali è sicuro. Vale per ogni oggetto dei `data` (piano, giorno, esercizio, variante, pasto, categoria della spesa…, e i log): chi rilegge e risalva un record non cancella i campi aggiunti da un altro client o da una versione successiva del contratto (test: `UnknownKeysTests` in FitnessCore).
 
 ## Log giornalieri
 
