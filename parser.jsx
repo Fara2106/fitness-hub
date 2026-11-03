@@ -143,13 +143,18 @@ window._musclesFromExercises = _musclesFromExercises;
 
 // Schedule corrente (unica fonte di verità per tutti i consumer): il piano attivo
 // strutturato (plan_workout, copia locale tenuta da SyncV2) convertito nella forma
-// di parseScheda; senza piano (device mai collegato) il testo embedded di
-// defaults.jsx. Il vecchio storage "schedaData" non è più la sorgente dei piani.
+// di parseScheda; senza piano (device non ancora collegato, Ruling 16) il testo
+// legacy del device ("schedaData", ciò che mostrava prima del backend v2) e solo
+// se manca o non è leggibile il testo embedded di defaults.jsx.
 window.getSchedule = function () {
   const st = window.storage;
   const plan = st ? st.get("plan_workout", null) : null;
   if (plan && plan.data && Array.isArray(plan.data.days) && plan.data.days.length && window.PlanConv) {
     try { return window.PlanConv.toLegacyScheda(plan.data); } catch (_) {}
+  }
+  const legacy = st ? st.get("schedaData", null) : null;
+  if (typeof legacy === "string" && legacy.trim()) {
+    try { const p = window.parseScheda(legacy); if (p && Array.isArray(p.days) && p.days.length) return p; } catch (_) {}
   }
   const text = window.SCHEDA_TXT_FALLBACK || null;
   if (!text) return { days: [] };
@@ -157,7 +162,8 @@ window.getSchedule = function () {
 };
 
 // Dieta corrente, stessa regola: plan_diet → PlanConv.toLegacyDieta (forma di
-// parseDieta), altrimenti il testo embedded. null se nulla è leggibile.
+// parseDieta), altrimenti il testo legacy del device ("dietaData"), poi il testo
+// embedded. null se nulla è leggibile.
 // _fromPlan (non enumerabile) = viene dal piano: i suoi integratori sono SOLO
 // quelli previsti dal piano (niente lista fissa di ripiego nella schermata).
 window.getDieta = function () {
@@ -167,6 +173,14 @@ window.getDieta = function () {
     try {
       const d = window.PlanConv.toLegacyDieta(plan.data);
       if (d) { Object.defineProperty(d, "_fromPlan", { value: true }); return d; }
+    } catch (_) {}
+  }
+  const legacy = st ? st.get("dietaData", null) : null;
+  if (typeof legacy === "string" && legacy.trim()) {
+    try {
+      const p = window.parseDieta(legacy);
+      const has = (v) => v && Array.isArray(v.meals) && v.meals.length;
+      if (p && Object.keys(p).some((k) => has(p[k]))) return p;
     } catch (_) {}
   }
   const text = window.DIETA_TXT_FALLBACK || null;

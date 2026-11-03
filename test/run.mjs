@@ -1575,15 +1575,29 @@ console.log("\nSuite App v2 — piani dal piano attivo, fallback embedded, vecch
     w.storage = { get: (k, d = null) => (k in mem ? mem[k] : d) };
     ok("getDieta esposto da parser.jsx", typeof w.getDieta === "function");
 
-    // Senza piani: come oggi (testo embedded, anche se in storage c'è ancora il vecchio schedaData).
-    mem.schedaData = "# VECCHIO - Giorno 1\n\nEsercizio | Serie | Rip | Recupero | Note tecniche\nPanca vecchia | 3 | 8 | 60 | Muscoli: petto\n";
+    // Senza piani e senza testo legacy: testo embedded.
     const fbS = J(w.getSchedule()), refS = J(w.parseScheda(w.SCHEDA_TXT_FALLBACK));
-    ok("getSchedule senza plan_workout → fallback embedded (non il vecchio schedaData)",
+    ok("getSchedule senza plan_workout né schedaData → fallback embedded",
       fbS.days.length === refS.days.length && fbS.days.every((d, i) => d.name === refS.days[i].name));
     const fbD = typeof w.getDieta === "function" ? J(w.getDieta()) : null;
     const refD = J(w.parseDieta(w.DIETA_TXT_FALLBACK));
-    ok("getDieta senza plan_diet → fallback embedded",
+    ok("getDieta senza plan_diet né dietaData → fallback embedded",
       !!fbD && ["riposo", "ore17"].every(k => fbD[k].meals.length === refD[k].meals.length));
+    // Ruling 16: senza piano strutturato, prima il testo legacy del device (ciò che mostrava prima del deploy).
+    mem.schedaData = "# VECCHIO - Giorno 1\n\nEsercizio | Serie | Rip | Recupero | Note tecniche\nPanca vecchia | 3 | 8 | 60 | Muscoli: petto\n";
+    const lgS = J(w.getSchedule());
+    ok("getSchedule senza plan_workout → testo legacy del device (schedaData), parsato come prima",
+      JSON.stringify(lgS) === JSON.stringify(J(w.parseScheda(mem.schedaData))) && lgS.days[0].name === "VECCHIO" && lgS.days[0].exercises[0].name === "Panca vecchia");
+    const legacyDieta = readFileSync(join(ROOT, "dieta.txt"), "utf8").replace("- Opzione 1: 40g gallette grano saraceno (4)", "- Opzione 1: 77g pane di segale");
+    mem.dietaData = legacyDieta;
+    const lgD = typeof w.getDieta === "function" ? w.getDieta() : null;
+    ok("getDieta senza plan_diet → testo legacy del device (dietaData), non segnato come piano",
+      !!lgD && JSON.stringify(lgD.riposo.meals[0].primary).includes("77g pane di segale") && !lgD._fromPlan);
+    mem.schedaData = "ciao, non sono una scheda"; mem.dietaData = "nemmeno una dieta";
+    ok("testo legacy illeggibile → fallback embedded (scheda e dieta)",
+      J(w.getSchedule()).days.length === refS.days.length && J(w.getDieta()).riposo.meals.length === refD.riposo.meals.length);
+    mem.schedaData = "# VECCHIO - Giorno 1\n\nEsercizio | Serie | Rip | Recupero | Note tecniche\nPanca vecchia | 3 | 8 | 60 | Muscoli: petto\n";
+    mem.dietaData = legacyDieta;
 
     // Con piano attivo: giorni ed esercizi del piano (giorno rinominato, esercizio cambiato).
     const txt = readFileSync(join(ROOT, "scheda.txt"), "utf8")
@@ -1598,7 +1612,8 @@ console.log("\nSuite App v2 — piani dal piano attivo, fallback embedded, vecch
       ps.days[0].exercises[0].rest === 60 && ps.days[0].exercises[0].ripRange === "8-12");
     ok("getSelectedSession usa il piano attivo", (() => { mem.schedaSelectedDay = "Giorno 1"; const s = w.getSelectedSession(); return !!s && s.name === "SPINTA NUOVA"; })());
     mem.plan_workout = { id: "workout-vuoto", data: { name: "x", status: "active", days: [] } };
-    ok("getSchedule con piano senza giorni → fallback embedded", J(w.getSchedule()).days.length === refS.days.length);
+    ok("getSchedule con piano senza giorni → testo legacy, poi embedded", J(w.getSchedule()).days[0].name === "VECCHIO" &&
+      (() => { delete mem.schedaData; return J(w.getSchedule()).days.length === refS.days.length; })());
 
     const dtxt = readFileSync(join(ROOT, "dieta.txt"), "utf8").replace("- Opzione 1: 40g gallette grano saraceno (4)", "- Opzione 1: 99g fiocchi d'avena");
     mem.plan_diet = J(w.PlanConv.dietPlanFromText(dtxt, { id: "diet-20261103-0900", name: "Nuova", validFrom: "2026-11-03" }));

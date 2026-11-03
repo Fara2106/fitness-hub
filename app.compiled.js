@@ -623,6 +623,13 @@ window.getSchedule = function () {
       return window.PlanConv.toLegacyScheda(plan.data);
     } catch (_) {}
   }
+  const legacy = st ? st.get("schedaData", null) : null;
+  if (typeof legacy === "string" && legacy.trim()) {
+    try {
+      const p = window.parseScheda(legacy);
+      if (p && Array.isArray(p.days) && p.days.length) return p;
+    } catch (_) {}
+  }
   const text = window.SCHEDA_TXT_FALLBACK || null;
   if (!text) return {
     days: []
@@ -647,6 +654,14 @@ window.getDieta = function () {
         });
         return d;
       }
+    } catch (_) {}
+  }
+  const legacy = st ? st.get("dietaData", null) : null;
+  if (typeof legacy === "string" && legacy.trim()) {
+    try {
+      const p = window.parseDieta(legacy);
+      const has = v => v && Array.isArray(v.meals) && v.meals.length;
+      if (p && Object.keys(p).some(k => has(p[k]))) return p;
     } catch (_) {}
   }
   const text = window.DIETA_TXT_FALLBACK || null;
