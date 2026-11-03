@@ -438,6 +438,122 @@ console.log("\nSuite Insights — e1RM, storico esercizio, riepilogo, report, de
   }
 }
 
+// ---- Suite PlanConv (planconv.jsx: piani strutturati ⇄ forme del parser) + storage.onChange ----
+console.log("\nSuite PlanConv — piani strutturati ⇄ parseScheda/parseDieta, activePlan, planToText, storage.onChange");
+{
+  const pc = { window: {}, console };
+  vm.createContext(pc);
+  let loaded = true;
+  try {
+    vm.runInContext(transform(join(ROOT, "parser.jsx")), pc, { filename: "parser.jsx" });
+    vm.runInContext(transform(join(ROOT, "planconv.jsx")), pc, { filename: "planconv.jsx" });
+  } catch (e) { loaded = false; ok("parser.jsx + planconv.jsx si caricano sotto vm — " + e.message.split("\n")[0], false); }
+  const PC = pc.window.PlanConv;
+  if (loaded && PC) {
+    ok("planconv.jsx espone window.PlanConv", ["workoutPlanFromText", "dietPlanFromText", "toLegacyScheda", "toLegacyDieta", "planToText", "activePlan"].every(k => typeof PC[k] === "function"));
+    const J = (x) => JSON.parse(JSON.stringify(x));          // via i prototipi del contesto vm
+    const schedaTxt = readFileSync(join(ROOT, "scheda.txt"), "utf8");
+    const dietaTxt = readFileSync(join(ROOT, "dieta.txt"), "utf8");
+    const OPT = { name: "Piano fixture", validFrom: "2026-01-01" };
+    const wp = PC.workoutPlanFromText(schedaTxt, { ...OPT, id: "workout-fixture" });
+    const dp = PC.dietPlanFromText(dietaTxt, { ...OPT, id: "diet-fixture" });
+
+    // Id/forma identici a quelli prodotti da backend/migrate/plans.mjs prima del refactor.
+    const before = readFileSync(join(ROOT, "backend", "test", "fixtures", "plans-before.json"), "utf8");
+    ok("piani da testo: byte-identici al fixture generato prima del refactor (id deterministici)",
+      JSON.stringify({ workout: wp, diet: dp }, null, 2) + "\n" === before);
+    ok("piani da testo: id deterministici (stessa chiamata → stesso risultato)",
+      JSON.stringify(PC.workoutPlanFromText(schedaTxt, { ...OPT, id: "workout-fixture" })) === JSON.stringify(wp));
+
+    // toLegacyScheda ≡ parseScheda sui campi usati dalle schermate
+    const ps = J(pc.window.parseScheda(schedaTxt)), ls = J(PC.toLegacyScheda(wp.data));
+    ok("toLegacyScheda: stesso numero di giorni", ls.days.length === ps.days.length && ls.days.length > 0);
+    ok("toLegacyScheda: num/key/name/focus dei giorni", ps.days.every((d, i) =>
+      ls.days[i].num === d.num && ls.days[i].key === d.key && ls.days[i].name === d.name &&
+      JSON.stringify(ls.days[i].focus) === JSON.stringify(d.focus)));
+    ok("toLegacyScheda: esercizi name/muscles/rest/notes/ripRange/alternatives", ps.days.every((d, i) =>
+      d.exercises.length === ls.days[i].exercises.length && d.exercises.every((e, j) => {
+        const x = ls.days[i].exercises[j];
+        return x.name === e.name && x.rest === e.rest && x.notes === e.notes && x.ripRange === e.ripRange &&
+          JSON.stringify(x.muscles) === JSON.stringify(e.muscles) && JSON.stringify(x.alternatives) === JSON.stringify(e.alternatives);
+      })));
+    ok("toLegacyScheda: sets = [{peso:0, rip}] con la stessa lunghezza e rip del parser", ps.days.every((d, i) =>
+      d.exercises.every((e, j) => JSON.stringify(ls.days[i].exercises[j].sets) === JSON.stringify(e.sets))));
+    ok("toLegacyScheda: history [] come il parser", ls.days.every(d => d.exercises.every(e => Array.isArray(e.history) && e.history.length === 0)));
+    ok("toLegacyScheda: deep-equal completo a parseScheda (altMap escluso)", JSON.stringify(ls.days.map(d => ({ ...d, altMap: 0 }))) === JSON.stringify(ps.days.map(d => ({ ...d, altMap: 0 }))));
+    ok("toLegacyScheda: piano vuoto/null → {days:[]}", JSON.stringify(PC.toLegacyScheda(null)) === '{"days":[]}');
+
+    // toLegacyDieta ≡ parseDieta per ogni variante
+    const pd = J(pc.window.parseDieta(dietaTxt)), ld = J(PC.toLegacyDieta(dp.data));
+    const KEYS = ["riposo", "mattina", "ore17", "ore21", "ore22"];
+    ok("toLegacyDieta: le cinque sezioni", KEYS.every(k => ld[k]));
+    ok("toLegacyDieta: pasti time/title/emoji", KEYS.every(k => pd[k].meals.length === ld[k].meals.length && pd[k].meals.every((m, i) =>
+      ld[k].meals[i].time === m.time && ld[k].meals[i].title === m.title && ld[k].meals[i].emoji === m.emoji)));
+    const texts = (m) => m.primary.concat(m.others).map(f => f.food + "|" + f.qty);
+    ok("toLegacyDieta: testi primary+others nello stesso ordine", KEYS.every(k => pd[k].meals.every((m, i) =>
+      JSON.stringify(texts(ld[k].meals[i])) === JSON.stringify(texts(m)))));
+    ok("toLegacyDieta: integratori name/time/sortTime/type/color", KEYS.every(k =>
+      JSON.stringify(ld[k].integratori) === JSON.stringify(pd[k].integratori)));
+    ok("toLegacyDieta: ore22 ha PS+ (dal blocco del file)", ld.ore22.integratori.some(x => x.type === "ps" && x.sortTime === "18:30"));
+    const dMin = { name: "x", status: "active", variants: [{ id: "v", key: "riposo", name: "R", training: null,
+      meals: [{ id: "m", name: "Colazione", time: "08:00", options: [{ id: "o", text: "a" }, { id: "o2", text: "b" }, { id: "o3", text: "c" }],
+        lines: [{ id: "l", label: "Verdure", choices: ["1", "2", "3", "4", "5", "6"] }, { id: "l2", label: null, choices: ["Nessun pasto"] }] }],
+      supplements: [{ id: "s", key: "custom-zinco", name: "Zinco", moment: "Dopocena", time: "21:00" }] }] };
+    const lm = J(PC.toLegacyDieta(dMin));
+    ok("toLegacyDieta: prima opzione in primary, le altre in others", lm.riposo.meals[0].primary[0].food === "a" && lm.riposo.meals[0].others[0].food === "b" && lm.riposo.meals[0].others[1].food === "c");
+    ok("toLegacyDieta: riga con >4 scelte → prime 4 + 'Altre opzioni: …'", lm.riposo.meals[0].primary[1].food === "Verdure: 1 | 2 | 3 | 4" && lm.riposo.meals[0].others[2].food === "Altre opzioni: 5 | 6");
+    ok("toLegacyDieta: riga senza label → testo nudo in primary", lm.riposo.meals[0].primary[2].food === "Nessun pasto");
+    ok("toLegacyDieta: integratore nuovo con colore neutro, type = key", lm.riposo.integratori.length === 1 && lm.riposo.integratori[0].color === "#8E8E93" && lm.riposo.integratori[0].type === "custom-zinco");
+    ok("toLegacyDieta: sezioni assenti → vuote con lista fissa come parseDieta", lm.ore17.meals.length === 0 && JSON.stringify(lm.ore17.integratori) === JSON.stringify(J(pc.window._INTEGRATORI_DEFAULT.ore17)));
+    const noSupp = J(PC.toLegacyDieta({ variants: [{ key: "riposo", meals: [], supplements: [] }] }));
+    ok("toLegacyDieta: piano senza integratori → lista fissa (come testo senza blocco)", JSON.stringify(noSupp.riposo.integratori) === JSON.stringify(J(pc.window._INTEGRATORI_DEFAULT.riposo)));
+    ok("toLegacyDieta: piano non valido → null", PC.toLegacyDieta(null) === null);
+
+    // activePlan
+    const rec = (id, status, validFrom, extra) => ({ collection: "workoutPlan", id, updatedAt: 1, deleted: false, data: { status, validFrom, days: [] }, ...(extra || {}) });
+    const two = [rec("a", "active", "2026-01-01"), rec("b", "active", "2026-03-01"), rec("c", "archived", "2026-09-01")];
+    ok("activePlan: due attivi → vince validFrom più recente", PC.activePlan(two, "workoutPlan").id === "b");
+    ok("activePlan: archived ignorati", PC.activePlan([rec("c", "archived", "2026-09-01")], "workoutPlan") === null);
+    ok("activePlan: tombstone ignorati", PC.activePlan([rec("a", "active", "2026-01-01"), rec("t", "active", "2026-12-01", { deleted: true, data: null })], "workoutPlan").id === "a");
+    ok("activePlan: tombstone con data residua ignorato", PC.activePlan([rec("t", "active", "2026-12-01", { deleted: true })], "workoutPlan") === null);
+    ok("activePlan: filtra per collezione", PC.activePlan(two, "dietPlan") === null);
+    ok("activePlan: restituisce {id,data}", (() => { const r = PC.activePlan(two, "workoutPlan"); return r && r.data.validFrom === "2026-03-01" && Object.keys(r).join() === "id,data"; })());
+    ok("activePlan: lista vuota/null → null", PC.activePlan([], "workoutPlan") === null && PC.activePlan(null, "workoutPlan") === null);
+
+    // planToText
+    const txt = PC.planToText(wp.data, dp.data);
+    const [wt, dt] = txt.split("\n\nPIANO ALIMENTARE");
+    ok("planToText: scheda con giorni ed esercizi", /^SCHEDA ALLENAMENTO/.test(wt) && /Giorno 1 PUSH/.test(wt) && /Push-up \(bodyweight\) 3x8-12 rec 60s/.test(wt));
+    ok("planToText: dieta con varianti, pasti e integratori", /\[Giorno senza allenamento\]/.test(dt) && /Colazione 08:00/.test(dt) && /Integratori: /.test(dt));
+    ok("planToText: ogni piano ≤ 3000 caratteri", wt.length <= 3000 && ("PIANO ALIMENTARE" + dt).length <= 3000);
+    ok("planToText: dieta reale troncata con marcatore […troncato]", /\[…troncato\]$/.test(txt));
+    ok("planToText: piano corto (solo scheda) non troncato", !/troncato/.test(PC.planToText(wp.data, null)));
+    ok("planToText: solo scheda / senza piani", PC.planToText(null, null) === "" && !/PIANO ALIMENTARE/.test(PC.planToText(wp.data, null)));
+  }
+
+  // storage.onChange (storage.jsx sotto vm, senza indexedDB: il db non si apre, le scritture restano in memoria)
+  const sx = { window: {}, console };
+  vm.createContext(sx);
+  try {
+    vm.runInContext(transform(join(ROOT, "storage.jsx")), sx, { filename: "storage.jsx" });
+    const S = sx.window.storage, calls = [];
+    const off = S.onChange((k, v, info) => calls.push([k, v, info.silent]));
+    S.set("a", 1);
+    S.set("b", 2, { silent: true });
+    S.remove("a");
+    S.remove("b", { silent: true });
+    ok("storage.onChange: set notifica silent:false", JSON.stringify(calls[0]) === '["a",1,false]');
+    ok("storage.onChange: set(…,{silent:true}) notifica silent:true", JSON.stringify(calls[1]) === '["b",2,true]');
+    ok("storage.onChange: remove notifica (value null) con/senza silent", JSON.stringify(calls[2]) === '["a",null,false]' && JSON.stringify(calls[3]) === '["b",null,true]');
+    ok("storage.onChange: il valore è già letto da get() nel callback", (() => { let seen; const o = S.onChange((k) => { seen = S.get(k); }); S.set("z", 9); o(); S.remove("z"); return seen === 9; })());
+    off(); const n = calls.length; S.set("c", 3);
+    ok("storage.onChange: unsubscribe funziona", calls.length === n);
+    const off2 = S.onChange(() => { throw new Error("boom"); });
+    let thrown = false; try { S.set("d", 4); } catch (_) { thrown = true; } off2();
+    ok("storage.onChange: un listener che lancia non rompe set()", !thrown && S.get("d") === 4);
+  } catch (e) { ok("storage.jsx sotto vm — " + e.message.split("\n")[0], false); }
+}
+
 // ---- Suite bundle: app.compiled.js allineato ai sorgenti (no drift) ----
 // Il browser carica SOLO app.compiled.js: se un .jsx viene modificato senza
 // rigenerare il bundle (`npm run build`), l'app servirebbe codice vecchio.

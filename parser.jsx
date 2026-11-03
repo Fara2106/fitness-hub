@@ -188,6 +188,10 @@ const _EXCLUDED = [
   "pasta di ceci", "pasta di lenticchie", "pasta di piselli", "bevanda di mandorla"
 ];
 
+// Tabelle esposte per planconv.jsx (piani strutturati ⇄ forme del parser): stesso contenuto, solo riferimenti.
+window._MEAL_META = _MEAL_META;
+window._EXCLUDED_FOODS = _EXCLUDED;
+
 function _isExcluded(text) {
   return _EXCLUDED.some(e => text.toLowerCase().includes(e));
 }
@@ -265,6 +269,7 @@ const _SUPP_TYPES = [
 ];
 const _SUPP_COLORS = { vitac: "#FF9F0A", vitab: "#FFD60A", omega1: "#5AC8FA", omega2: "#5AC8FA", ps: "#BF5AF2",
   gluta: "#30D158", mgk: "#0A84FF", fuel: "#0A84FF", barretta: "#FF9F0A", omnia: "#5AC8FA" };
+window._SUPP_COLORS = _SUPP_COLORS; // esposta per planconv.jsx
 // Inizio allenamento per variante (pre-WO = 45' prima) se il file non lo scrive.
 const _WO_START = { mattina: "08:00", ore17: "17:00", ore21: "21:00", ore22: "22:00" };
 const _toMin = (hhmm) => { const m = /(\d{1,2})[:.](\d{2})/.exec(hhmm || ""); return m ? (+m[1]) * 60 + (+m[2]) : null; };

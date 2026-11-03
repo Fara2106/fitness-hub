@@ -30,6 +30,7 @@ export const BUNDLE_FILES = [
   "push.jsx",
   "defaults.jsx",
   "parser.jsx",
+  "planconv.jsx",
   // Components
   "i18n.jsx",
   "icons.jsx",

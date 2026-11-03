@@ -12,6 +12,17 @@
   let _rdy = false;
   const _q = [];
   const _pending = {};
+  const _listeners = [];
+  function _notify(key, value, opts) {
+    const info = {
+      silent: !!(opts && opts.silent)
+    };
+    _listeners.slice().forEach(fn => {
+      try {
+        fn(key, value, info);
+      } catch (_) {}
+    });
+  }
   function _open() {
     return new Promise((res, rej) => {
       const req = indexedDB.open(DB_NAME, 1);
@@ -50,11 +61,12 @@
     get(key, def = null) {
       return key in _m ? _m[key] : def;
     },
-    set(key, value) {
+    set(key, value, opts) {
       _m[key] = value;
       if (_db) _persist(key, value);else _pending[key] = value;
+      _notify(key, value, opts);
     },
-    remove(key) {
+    remove(key, opts) {
       delete _m[key];
       delete _pending[key];
       if (_db) {
@@ -62,6 +74,14 @@
           _db.transaction(STORE, "readwrite").objectStore(STORE).delete(key);
         } catch (_) {}
       }
+      _notify(key, null, opts);
+    },
+    onChange(fn) {
+      _listeners.push(fn);
+      return () => {
+        const i = _listeners.indexOf(fn);
+        if (i >= 0) _listeners.splice(i, 1);
+      };
     },
     clear() {
       Object.keys(_m).forEach(k => delete _m[k]);
@@ -883,6 +903,8 @@ const _MEAL_META = {
   }
 };
 const _EXCLUDED = ["pasta di ceci", "pasta di lenticchie", "pasta di piselli", "bevanda di mandorla"];
+window._MEAL_META = _MEAL_META;
+window._EXCLUDED_FOODS = _EXCLUDED;
 function _isExcluded(text) {
   return _EXCLUDED.some(e => text.toLowerCase().includes(e));
 }
@@ -1177,6 +1199,7 @@ const _SUPP_COLORS = {
   barretta: "#FF9F0A",
   omnia: "#5AC8FA"
 };
+window._SUPP_COLORS = _SUPP_COLORS;
 const _WO_START = {
   mattina: "08:00",
   ore17: "17:00",
@@ -1446,6 +1469,401 @@ window.buildDefaultNotifConfig = function () {
     overrides: {}
   };
 };
+})();
+
+// ══ planconv.jsx ══
+;(function () {
+(function () {
+  function workoutPlanFromText(text, {
+    id,
+    name,
+    validFrom
+  }) {
+    const parsed = window.parseScheda(text);
+    const days = parsed.days.map((d, i) => {
+      const dayId = `${id}/d${i}`;
+      return {
+        id: dayId,
+        name: d.name,
+        focus: d.focus,
+        exercises: d.exercises.map((ex, j) => ({
+          id: `${dayId}/e${j}`,
+          name: ex.name,
+          sets: ex.sets.length,
+          reps: ex.ripRange,
+          restSec: ex.rest,
+          notes: ex.notes || "",
+          muscles: ex.muscles,
+          alternatives: ex.alternatives || []
+        }))
+      };
+    });
+    return {
+      collection: "workoutPlan",
+      id,
+      data: {
+        name,
+        status: "active",
+        validFrom,
+        validTo: null,
+        days
+      }
+    };
+  }
+  const SECTIONS = {
+    "GIORNO SENZA ALLENAMENTO": {
+      key: "riposo",
+      name: "Giorno senza allenamento",
+      training: null
+    },
+    "ALLENAMENTO MATTINA": {
+      key: "mattina",
+      name: "Allenamento mattina",
+      training: {
+        time: "08:00"
+      }
+    },
+    "ALLENAMENTO ORE 17": {
+      key: "ore17",
+      name: "Allenamento ore 17",
+      training: {
+        time: "17:00"
+      }
+    },
+    "ALLENAMENTO ORE 21": {
+      key: "ore21",
+      name: "Allenamento ore 21",
+      training: {
+        time: "21:00"
+      }
+    },
+    "ALLENAMENTO ORE 22": {
+      key: "ore22",
+      name: "Allenamento ore 22",
+      training: {
+        time: "22:00"
+      }
+    }
+  };
+  const LEGACY_KEYS = ["riposo", "mattina", "ore17", "ore21", "ore22"];
+  const NO_FILE_SUPPS = [];
+  const mealHeadings = () => Object.keys(window._MEAL_META).sort((a, b) => b.length - a.length);
+  const isExcluded = t => window._EXCLUDED_FOODS.some(e => t.toLowerCase().includes(e));
+  const isMealHeading = (line, heads) => heads.some(k => line.toUpperCase().startsWith(k));
+  function walkDiet(text) {
+    const heads = mealHeadings();
+    const sections = [];
+    let sec = null,
+      meal = null,
+      inSupps = false;
+    for (const raw of text.split("\n")) {
+      const line = raw.trim();
+      if (!line) continue;
+      if (line === "---") {
+        sec = null;
+        meal = null;
+        inSupps = false;
+        continue;
+      }
+      const head = SECTIONS[line.replace(/^#\s+/, "")];
+      if (line.startsWith("# ") && head) {
+        sec = {
+          ...head,
+          meals: [],
+          hasSuppBlock: false
+        };
+        sections.push(sec);
+        meal = null;
+        inSupps = false;
+        continue;
+      }
+      if (!sec) continue;
+      if (line.toUpperCase().startsWith("INTEGRATORI")) {
+        inSupps = true;
+        meal = null;
+        sec.hasSuppBlock = true;
+        continue;
+      }
+      if (inSupps && line.startsWith("- ")) continue;
+      if (line.startsWith("#")) continue;
+      if (isMealHeading(line, heads)) {
+        inSupps = false;
+        meal = {
+          pick1: /scegli\s*1/i.test(line),
+          options: [],
+          lines: []
+        };
+        sec.meals.push(meal);
+        continue;
+      }
+      if (!meal) continue;
+      if (/^- Opzione \d+:/.test(line)) {
+        const t = line.replace(/^- Opzione \d+:\s*/, "").trim();
+        if (t && !isExcluded(t)) meal.options.push(t);
+      } else if (line.startsWith("- ")) {
+        const t = line.slice(2).trim();
+        if (!t || t.toLowerCase().startsWith("note:") || isExcluded(t)) continue;
+        if (meal.pick1) meal.options.push(t);else meal.lines.push({
+          label: null,
+          choices: [t]
+        });
+      } else if (/^Note:/i.test(line)) {
+        continue;
+      } else if (/^Nessun/i.test(line)) {
+        meal.lines.push({
+          label: null,
+          choices: [line]
+        });
+      } else if (line.includes(":")) {
+        const ci = line.indexOf(":");
+        const label = line.slice(0, ci).trim();
+        const rest = line.slice(ci + 1);
+        if (line.includes("|")) {
+          const choices = rest.split("|").map(s => s.trim()).filter(Boolean).filter(s => !isExcluded(s));
+          if (choices.length) meal.lines.push({
+            label,
+            choices
+          });
+        } else {
+          const v = rest.trim();
+          if (v && !isExcluded(v)) meal.lines.push({
+            label,
+            choices: [v]
+          });
+        }
+      }
+    }
+    return sections;
+  }
+  function dietPlanFromText(text, {
+    id,
+    name,
+    validFrom
+  }) {
+    const parsed = window.parseDieta(text);
+    const variants = walkDiet(text).map((sec, i) => {
+      const vId = `${id}/v${i}`;
+      const p = parsed[sec.key];
+      if (p.meals.length !== sec.meals.length) {
+        throw new Error(`dieta: ${sec.key} ha ${sec.meals.length} pasti nel testo ma ${p.meals.length} per parseDieta`);
+      }
+      const meals = sec.meals.map((m, j) => {
+        const mId = `${vId}/m${j}`;
+        return {
+          id: mId,
+          name: p.meals[j].title,
+          time: p.meals[j].time,
+          options: m.options.map((t, k) => ({
+            id: `${mId}/o${k}`,
+            text: t
+          })),
+          lines: m.lines.map((l, k) => ({
+            id: `${mId}/l${k}`,
+            label: l.label,
+            choices: l.choices
+          }))
+        };
+      });
+      const supplements = sec.hasSuppBlock ? p.integratori.map((s, k) => ({
+        id: `${vId}/s${k}`,
+        key: s.type,
+        name: s.name,
+        moment: s.time,
+        time: s.sortTime
+      })) : NO_FILE_SUPPS;
+      return {
+        id: vId,
+        key: sec.key,
+        name: sec.name,
+        training: sec.training,
+        meals,
+        supplements
+      };
+    });
+    return {
+      collection: "dietPlan",
+      id,
+      data: {
+        name,
+        status: "active",
+        validFrom,
+        validTo: null,
+        variants
+      }
+    };
+  }
+  function ripLower(reps) {
+    const s = reps == null ? "" : String(reps);
+    const m = s.match(/(\d+)[-–](\d+)/);
+    return m ? parseInt(m[1]) : parseInt(s) || 10;
+  }
+  function toLegacyScheda(planData) {
+    const days = (planData && planData.days || []).map((d, i) => {
+      const altMap = {};
+      const exercises = (d.exercises || []).map(ex => {
+        const alternatives = ex.alternatives || [];
+        if (alternatives.length) altMap[String(ex.name).toLowerCase()] = alternatives;
+        const rip = ripLower(ex.reps);
+        return {
+          name: ex.name,
+          muscles: ex.muscles || [],
+          sets: Array.from({
+            length: ex.sets
+          }, () => ({
+            peso: 0,
+            rip
+          })),
+          rest: ex.restSec,
+          notes: ex.notes || "",
+          ripRange: ex.reps,
+          history: [],
+          alternatives
+        };
+      });
+      return {
+        num: i + 1,
+        key: "Giorno " + (i + 1),
+        name: d.name,
+        focus: d.focus || [],
+        exercises,
+        altMap
+      };
+    });
+    return {
+      days
+    };
+  }
+  function legacyMeal(m, emojiByTitle) {
+    const primary = [],
+      others = [];
+    (m.options || []).forEach((o, k) => (k === 0 && !primary.length ? primary : others).push({
+      food: o.text,
+      qty: ""
+    }));
+    (m.lines || []).forEach(l => {
+      const ch = l.choices || [];
+      if (!ch.length) return;
+      if (l.label == null) {
+        ch.forEach(c => primary.push({
+          food: c,
+          qty: ""
+        }));
+        return;
+      }
+      primary.push({
+        food: `${l.label}: ${ch.slice(0, 4).join(" | ")}`,
+        qty: ""
+      });
+      if (ch.length > 4) others.push({
+        food: `Altre opzioni: ${ch.slice(4).join(" | ")}`,
+        qty: ""
+      });
+    });
+    return {
+      time: m.time,
+      emoji: emojiByTitle[m.name] || "🍽️",
+      title: m.name,
+      primary,
+      others
+    };
+  }
+  function toLegacyDieta(planData) {
+    if (!planData || !Array.isArray(planData.variants)) return null;
+    const META = window._MEAL_META,
+      DEF = window._INTEGRATORI_DEFAULT,
+      COLORS = window._SUPP_COLORS;
+    const emojiByTitle = {};
+    Object.keys(META).forEach(k => {
+      emojiByTitle[META[k].title] = META[k].emoji;
+    });
+    const clone = x => JSON.parse(JSON.stringify(x));
+    const out = {};
+    planData.variants.forEach(v => {
+      const base = DEF[v.key] || [];
+      const integratori = v.supplements && v.supplements.length ? v.supplements.map(s => {
+        const known = base.find(b => b.type === s.key);
+        return {
+          name: s.name,
+          time: s.moment,
+          sortTime: s.time,
+          color: known ? known.color : COLORS[s.key] || "#8E8E93",
+          type: s.key
+        };
+      }) : clone(base);
+      out[v.key] = {
+        meals: (v.meals || []).map(m => legacyMeal(m, emojiByTitle)),
+        integratori
+      };
+    });
+    LEGACY_KEYS.forEach(k => {
+      if (!out[k]) out[k] = {
+        meals: [],
+        integratori: clone(DEF[k] || [])
+      };
+    });
+    return out;
+  }
+  const TEXT_MAX = 3000;
+  const CUT = "\n[…troncato]";
+  const clip = s => s.length <= TEXT_MAX ? s : s.slice(0, TEXT_MAX - CUT.length) + CUT;
+  const firstN = (arr, n) => arr.length > n ? arr.slice(0, n).join(" | ") + " | …" : arr.join(" | ");
+  function workoutText(data) {
+    if (!data || !Array.isArray(data.days)) return "";
+    const rows = [`SCHEDA ALLENAMENTO${data.name ? " – " + data.name : ""}`];
+    data.days.forEach((d, i) => {
+      const focus = (d.focus || []).length ? ` (${d.focus.join(", ")})` : "";
+      const ex = (d.exercises || []).map(e => `${e.name} ${e.sets}x${e.reps} rec ${e.restSec}s`);
+      rows.push(`Giorno ${i + 1} ${d.name}${focus}: ${ex.join("; ")}`);
+    });
+    return rows.join("\n");
+  }
+  function dietText(data) {
+    if (!data || !Array.isArray(data.variants)) return "";
+    const rows = [`PIANO ALIMENTARE${data.name ? " – " + data.name : ""}`];
+    data.variants.forEach(v => {
+      rows.push(`[${v.name}]`);
+      (v.meals || []).forEach(m => {
+        const parts = [];
+        if ((m.options || []).length) parts.push(firstN(m.options.map(o => o.text), 2));
+        (m.lines || []).forEach(l => parts.push(l.label == null ? firstN(l.choices, 2) : `${l.label}: ${firstN(l.choices, 2)}`));
+        rows.push(`${m.name} ${m.time}: ${parts.join("; ")}`);
+      });
+      if ((v.supplements || []).length) {
+        rows.push("Integratori: " + v.supplements.map(s => s.name).join(", "));
+      }
+    });
+    return rows.join("\n");
+  }
+  function planToText(workoutData, dietData) {
+    return [workoutText(workoutData), dietText(dietData)].filter(Boolean).map(clip).join("\n\n");
+  }
+  function activePlan(records, collection) {
+    let best = null;
+    (records || []).forEach(r => {
+      if (!r || r.collection !== collection || r.deleted || !r.data || r.data.status !== "active") return;
+      const k = [r.data.validFrom || "", r.updatedAt || 0, r.id || ""];
+      if (!best || k[0] > best.k[0] || k[0] === best.k[0] && (k[1] > best.k[1] || k[1] === best.k[1] && k[2] > best.k[2])) {
+        best = {
+          k,
+          rec: r
+        };
+      }
+    });
+    return best ? {
+      id: best.rec.id,
+      data: best.rec.data
+    } : null;
+  }
+  const PlanConv = {
+    workoutPlanFromText,
+    dietPlanFromText,
+    toLegacyScheda,
+    toLegacyDieta,
+    planToText,
+    activePlan
+  };
+  window.PlanConv = PlanConv;
+})();
 })();
 
 // ══ i18n.jsx ══

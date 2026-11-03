@@ -9,6 +9,13 @@
   let _rdy = false;
   const _q = [];           // callback queue
   const _pending = {};      // scritture in attesa che _db sia pronto (key→value)
+  const _listeners = [];    // onChange: fn(key, value, { silent })
+
+  // Notifica i listener (mai lancia: un listener rotto non blocca la scrittura).
+  function _notify(key, value, opts) {
+    const info = { silent: !!(opts && opts.silent) };
+    _listeners.slice().forEach(fn => { try { fn(key, value, info); } catch (_) {} });
+  }
 
   function _open() {
     return new Promise((res, rej) => {
@@ -49,13 +56,16 @@
     get(key, def = null) { return key in _m ? _m[key] : def; },
 
     // sync write + async persist
-    set(key, value) {
+    // opts.silent = true: scrittura "di sistema" (sweep, ricostruzione da sync) →
+    // i listener la ricevono con silent:true e il ponte di sync NON la rimanda al server.
+    set(key, value, opts) {
       _m[key] = value;
       if (_db) _persist(key, value);
       else     _pending[key] = value;   // verrà scritto al drain quando _db è pronto
+      _notify(key, value, opts);
     },
 
-    remove(key) {
+    remove(key, opts) {
       delete _m[key];
       delete _pending[key];
       if (_db) {
@@ -65,6 +75,14 @@
              .delete(key);
         } catch (_) {}
       }
+      _notify(key, null, opts);
+    },
+
+    // Registra fn(key, value, { silent }) per ogni set/remove (remove → value null).
+    // Restituisce la funzione per annullare la registrazione.
+    onChange(fn) {
+      _listeners.push(fn);
+      return () => { const i = _listeners.indexOf(fn); if (i >= 0) _listeners.splice(i, 1); };
     },
 
     clear() {

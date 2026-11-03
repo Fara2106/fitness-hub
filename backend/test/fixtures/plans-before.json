@@ -1,0 +1,1412 @@
+{
+  "workout": {
+    "collection": "workoutPlan",
+    "id": "workout-fixture",
+    "data": {
+      "name": "Piano fixture",
+      "status": "active",
+      "validFrom": "2026-01-01",
+      "validTo": null,
+      "days": [
+        {
+          "id": "workout-fixture/d0",
+          "name": "PUSH",
+          "focus": [
+            "Petto",
+            "Spalle",
+            "Tricipiti"
+          ],
+          "exercises": [
+            {
+              "id": "workout-fixture/d0/e0",
+              "name": "Push-up (bodyweight)",
+              "sets": 3,
+              "reps": "8-12",
+              "restSec": 60,
+              "notes": "Corpo in linea, gomiti a 45°. Petto sfiora terra. Espira in spinta. Ultime 2-3 rip vicine a cedimento. Muscoli: petto, tricipiti, deltoide ant.",
+              "muscles": [
+                "petto",
+                "spalle",
+                "tricipiti"
+              ],
+              "alternatives": []
+            },
+            {
+              "id": "workout-fixture/d0/e1",
+              "name": "Band chest press",
+              "sets": 3,
+              "reps": "12-15",
+              "restSec": 60,
+              "notes": "Fokky viola/nero. Banda dietro la schiena, sotto le ascelle. Spingi in avanti mani unite. No slancio del busto. Muscoli: petto, tricipiti.",
+              "muscles": [
+                "petto",
+                "tricipiti"
+              ],
+              "alternatives": []
+            },
+            {
+              "id": "workout-fixture/d0/e2",
+              "name": "Band shoulder press",
+              "sets": 2,
+              "reps": "10-12",
+              "restSec": 60,
+              "notes": "Fokky nero/rosso. In piedi su banda, maniglie alle spalle. Spingi sopra la testa senza inarcare la lombare. Muscoli: deltoide, trapezio.",
+              "muscles": [
+                "spalle",
+                "trapezi"
+              ],
+              "alternatives": []
+            },
+            {
+              "id": "workout-fixture/d0/e3",
+              "name": "Band lateral raise",
+              "sets": 2,
+              "reps": "12-15",
+              "restSec": 45,
+              "notes": "Gritin light/medium. In piedi su banda. Solleva fino a spalle, gomiti morbidi. No slancio. Muscoli: deltoide mediale.",
+              "muscles": [
+                "spalle"
+              ],
+              "alternatives": []
+            },
+            {
+              "id": "workout-fixture/d0/e4",
+              "name": "Band tricep kickback",
+              "sets": 2,
+              "reps": "12-15",
+              "restSec": 45,
+              "notes": "Gritin medium. Busto inclinato ~45°, banda sotto un piede. Estendi il gomito indietro, fermo ai fianchi. Muscoli: tricipite.",
+              "muscles": [
+                "tricipiti"
+              ],
+              "alternatives": []
+            }
+          ]
+        },
+        {
+          "id": "workout-fixture/d1",
+          "name": "PULL",
+          "focus": [
+            "Schiena",
+            "Bicipiti"
+          ],
+          "exercises": [
+            {
+              "id": "workout-fixture/d1/e0",
+              "name": "Band bent-over row",
+              "sets": 3,
+              "reps": "10-12",
+              "restSec": 60,
+              "notes": "Fokky viola/nero. Piedi sulla banda, busto inclinato 45°, schiena neutra. Tira verso l'ombelico, gomiti vicini. Ultime rip vicine a cedimento. Muscoli: dorsale, romboidi, bicipite.",
+              "muscles": [
+                "schiena",
+                "bicipiti"
+              ],
+              "alternatives": []
+            },
+            {
+              "id": "workout-fixture/d1/e1",
+              "name": "Superman",
+              "sets": 2,
+              "reps": "12-15",
+              "restSec": 45,
+              "notes": "Bodyweight. Prono, solleva braccia e gambe insieme. Contrai i glutei. No slancio. Muscoli: erettori spinali, lombare, glutei.",
+              "muscles": [
+                "glutei",
+                "schiena"
+              ],
+              "alternatives": []
+            },
+            {
+              "id": "workout-fixture/d1/e2",
+              "name": "Band face pull",
+              "sets": 2,
+              "reps": "15",
+              "restSec": 45,
+              "notes": "Gritin light/medium. Banda tesa davanti al petto, tira verso il viso aprendo i gomiti. Muscoli: deltoide post., cervicale/salute spalla.",
+              "muscles": [
+                "spalle"
+              ],
+              "alternatives": []
+            },
+            {
+              "id": "workout-fixture/d1/e3",
+              "name": "Band bicep curl",
+              "sets": 2,
+              "reps": "10-12",
+              "restSec": 45,
+              "notes": "Gritin medium. In piedi su banda, gomiti fissi ai fianchi. Curla espirando, scendi in 3s. No momentum. Muscoli: bicipite.",
+              "muscles": [
+                "bicipiti"
+              ],
+              "alternatives": []
+            },
+            {
+              "id": "workout-fixture/d1/e4",
+              "name": "Band hammer curl",
+              "sets": 2,
+              "reps": "10-12",
+              "restSec": 45,
+              "notes": "Gritin medium. Presa neutra, stesso movimento del curl. Muscoli: bicipite, brachioradiale.",
+              "muscles": [
+                "bicipiti"
+              ],
+              "alternatives": []
+            }
+          ]
+        },
+        {
+          "id": "workout-fixture/d2",
+          "name": "LEGS + CORE (mantenimento)",
+          "focus": [
+            "Gambe",
+            "Glutei",
+            "Core"
+          ],
+          "exercises": [
+            {
+              "id": "workout-fixture/d2/e0",
+              "name": "Band squat",
+              "sets": 3,
+              "reps": "12-15",
+              "restSec": 45,
+              "notes": "Fokky verde/viola. Banda sopra ginocchia o sotto piedi fino alle spalle. Scendi a parallelo, ginocchia in linea con le dita. Muscoli: quadricipiti, glutei.",
+              "muscles": [
+                "quadricipiti",
+                "glutei"
+              ],
+              "alternatives": []
+            },
+            {
+              "id": "workout-fixture/d2/e1",
+              "name": "Band RDL (hip hinge)",
+              "sets": 2,
+              "reps": "12-15",
+              "restSec": 45,
+              "notes": "Fokky viola/nero. Banda sotto i piedi, in mano. Spingi i fianchi indietro, schiena neutra. Muscoli: ischiocrurali, glutei.",
+              "muscles": [
+                "femorali",
+                "glutei"
+              ],
+              "alternatives": []
+            },
+            {
+              "id": "workout-fixture/d2/e2",
+              "name": "Band glute bridge",
+              "sets": 2,
+              "reps": "15",
+              "restSec": 45,
+              "notes": "Gritin medium/heavy. Banda sopra le ginocchia, supino. Spingi i fianchi in alto, contrai in cima. Muscoli: glutei.",
+              "muscles": [
+                "glutei"
+              ],
+              "alternatives": []
+            },
+            {
+              "id": "workout-fixture/d2/e3",
+              "name": "Plank",
+              "sets": 2,
+              "reps": "45-60 sec",
+              "restSec": 45,
+              "notes": "Bodyweight. Avambracci a terra, corpo in linea. Addome contratto. Muscoli: core, trasverso addominale.",
+              "muscles": [
+                "addome"
+              ],
+              "alternatives": []
+            },
+            {
+              "id": "workout-fixture/d2/e4",
+              "name": "Bicycle crunch",
+              "sets": 2,
+              "reps": "15 (per lato)",
+              "restSec": 45,
+              "notes": "Bodyweight. Supino, alterna gomito-ginocchio opposto. Controlla, non tirare il collo. Muscoli: retto addominale, obliqui.",
+              "muscles": [
+                "addome"
+              ],
+              "alternatives": []
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "diet": {
+    "collection": "dietPlan",
+    "id": "diet-fixture",
+    "data": {
+      "name": "Piano fixture",
+      "status": "active",
+      "validFrom": "2026-01-01",
+      "validTo": null,
+      "variants": [
+        {
+          "id": "diet-fixture/v0",
+          "key": "riposo",
+          "name": "Giorno senza allenamento",
+          "training": null,
+          "meals": [
+            {
+              "id": "diet-fixture/v0/m0",
+              "name": "Colazione",
+              "time": "08:00",
+              "options": [
+                {
+                  "id": "diet-fixture/v0/m0/o0",
+                  "text": "40g gallette grano saraceno (4) + 50g marmellata ridotto zucchero + 10g burro chiarificato"
+                },
+                {
+                  "id": "diet-fixture/v0/m0/o1",
+                  "text": "80g pane di segale (4 fette per 2 toast) + 100g prosciutto crudo oppure 100g bresaola"
+                },
+                {
+                  "id": "diet-fixture/v0/m0/o2",
+                  "text": "150g yogurt greco Fage Total 0% + 20g miele + 50g muesli linea viviverde coop"
+                },
+                {
+                  "id": "diet-fixture/v0/m0/o3",
+                  "text": "160g uova di gallina (2 uova) + 100g pane di segale"
+                }
+              ],
+              "lines": []
+            },
+            {
+              "id": "diet-fixture/v0/m1",
+              "name": "Spuntino",
+              "time": "10:30",
+              "options": [],
+              "lines": [
+                {
+                  "id": "diet-fixture/v0/m1/l0",
+                  "label": null,
+                  "choices": [
+                    "200g frutta fresca (no macedonie)"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v0/m1/l1",
+                  "label": null,
+                  "choices": [
+                    "30g noci oppure 30g mandorle"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "diet-fixture/v0/m2",
+              "name": "Pranzo",
+              "time": "13:00",
+              "options": [],
+              "lines": [
+                {
+                  "id": "diet-fixture/v0/m2/l0",
+                  "label": "Carboidrato (scegli 1)",
+                  "choices": [
+                    "80g pasta farro integrale",
+                    "80g riso rosso integrale",
+                    "80g riso venere",
+                    "80g riso basmati",
+                    "100g pane integrale",
+                    "120g pane di segale"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v0/m2/l1",
+                  "label": "Verdure",
+                  "choices": [
+                    "300g verdure o ortaggi a scelta"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v0/m2/l2",
+                  "label": "Condimento",
+                  "choices": [
+                    "20g olio extravergine di oliva"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v0/m2/l3",
+                  "label": "Proteina (scegli 1)",
+                  "choices": [
+                    "150g tonno",
+                    "110g primo sale",
+                    "160g ricotta vacca e pecora",
+                    "60g parmigiano reggiano",
+                    "100g feta",
+                    "250g orata surgelata",
+                    "280g filetto platessa findus (non panato)",
+                    "380g rana pescatrice",
+                    "200g filetto di manzo",
+                    "230g petto di tacchino",
+                    "130g salmone",
+                    "340g merluzzo",
+                    "190g uova (2 uova + 1-2 albumi)",
+                    "240g petto di pollo",
+                    "180g bistecca di manzo",
+                    "110g hamburger di chianina"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "diet-fixture/v0/m3",
+              "name": "Merenda",
+              "time": "16:30",
+              "options": [],
+              "lines": [
+                {
+                  "id": "diet-fixture/v0/m3/l0",
+                  "label": null,
+                  "choices": [
+                    "200g yogurt greco Fage Total 0% (o yoeggs)"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v0/m3/l1",
+                  "label": null,
+                  "choices": [
+                    "100g frutta fresca"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "diet-fixture/v0/m4",
+              "name": "Cena",
+              "time": "20:00",
+              "options": [],
+              "lines": [
+                {
+                  "id": "diet-fixture/v0/m4/l0",
+                  "label": "Verdure",
+                  "choices": [
+                    "200g verdure o ortaggi oppure 90g verdure e legumi surgelati oppure 20g misto legumi secchi"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v0/m4/l1",
+                  "label": "Condimento",
+                  "choices": [
+                    "10g olio extravergine di oliva"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v0/m4/l2",
+                  "label": "Proteina (scegli 1)",
+                  "choices": [
+                    "250g merluzzo",
+                    "120g ricotta vacca e pecora",
+                    "70g feta",
+                    "110g orata fresca",
+                    "220g spigola o branzino",
+                    "100g salmone",
+                    "140g uova (2 uova)",
+                    "180g petto di pollo",
+                    "80g hamburger di chianina",
+                    "130g bistecca di manzo",
+                    "190g filetto di vitello",
+                    "110g tonno"
+                  ]
+                }
+              ]
+            }
+          ],
+          "supplements": [
+            {
+              "id": "diet-fixture/v0/s0",
+              "key": "vitac",
+              "name": "Vita C+ Slow Release",
+              "moment": "Colazione (mattina)",
+              "time": "08:00"
+            },
+            {
+              "id": "diet-fixture/v0/s1",
+              "key": "vitab",
+              "name": "Vita B+",
+              "moment": "Colazione (mattina)",
+              "time": "08:00"
+            },
+            {
+              "id": "diet-fixture/v0/s2",
+              "key": "omega1",
+              "name": "Extra Omega+ (1ª)",
+              "moment": "Dopo pranzo",
+              "time": "14:00"
+            },
+            {
+              "id": "diet-fixture/v0/s3",
+              "key": "ps",
+              "name": "PS+",
+              "moment": "Dopo merenda",
+              "time": "17:00"
+            },
+            {
+              "id": "diet-fixture/v0/s4",
+              "key": "omega2",
+              "name": "Extra Omega+ (2ª)",
+              "moment": "Dopocena",
+              "time": "21:00"
+            },
+            {
+              "id": "diet-fixture/v0/s5",
+              "key": "gluta",
+              "name": "Gluta+ · 1 mis. 250ml",
+              "moment": "Prima di dormire",
+              "time": "23:00"
+            }
+          ]
+        },
+        {
+          "id": "diet-fixture/v1",
+          "key": "mattina",
+          "name": "Allenamento mattina",
+          "training": {
+            "time": "08:00"
+          },
+          "meals": [
+            {
+              "id": "diet-fixture/v1/m0",
+              "name": "Colazione",
+              "time": "08:00",
+              "options": [
+                {
+                  "id": "diet-fixture/v1/m0/o0",
+                  "text": "40g gallette grano saraceno (4) + 50g marmellata ridotto zucchero o miele"
+                },
+                {
+                  "id": "diet-fixture/v1/m0/o1",
+                  "text": "50g pane tipo 1 + 50g marmellata o miele"
+                }
+              ],
+              "lines": []
+            },
+            {
+              "id": "diet-fixture/v1/m1",
+              "name": "Pranzo",
+              "time": "13:00",
+              "options": [],
+              "lines": [
+                {
+                  "id": "diet-fixture/v1/m1/l0",
+                  "label": "Carboidrato (scegli 1)",
+                  "choices": [
+                    "80g pasta farro integrale",
+                    "70g pasta semola",
+                    "80g riso rosso integrale",
+                    "80g riso venere",
+                    "80g riso basmati",
+                    "100g pane grano duro",
+                    "100g pane integrale",
+                    "120g pane di segale"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v1/m1/l1",
+                  "label": "Verdure",
+                  "choices": [
+                    "300g verdure o ortaggi a scelta"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v1/m1/l2",
+                  "label": "Condimento",
+                  "choices": [
+                    "20g olio extravergine di oliva"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v1/m1/l3",
+                  "label": "Proteina aumentata (scegli 1)",
+                  "choices": [
+                    "180g tonno",
+                    "310g orata surgelata",
+                    "340g filetto platessa findus (non panato)",
+                    "460g rana pescatrice",
+                    "240g filetto di manzo",
+                    "280g petto di tacchino",
+                    "150g salmone",
+                    "410g merluzzo",
+                    "220g uova (2 uova + 1-2 albumi)",
+                    "290g petto di pollo",
+                    "210g bistecca di manzo",
+                    "140g hamburger di chianina"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "diet-fixture/v1/m2",
+              "name": "Merenda",
+              "time": "16:30",
+              "options": [],
+              "lines": [
+                {
+                  "id": "diet-fixture/v1/m2/l0",
+                  "label": null,
+                  "choices": [
+                    "200g yogurt greco Fage Total 0% (o yoeggs)"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v1/m2/l1",
+                  "label": null,
+                  "choices": [
+                    "100g frutta fresca"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v1/m2/l2",
+                  "label": null,
+                  "choices": [
+                    "30g noci"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "diet-fixture/v1/m3",
+              "name": "Cena",
+              "time": "20:00",
+              "options": [],
+              "lines": [
+                {
+                  "id": "diet-fixture/v1/m3/l0",
+                  "label": "Verdure",
+                  "choices": [
+                    "100g verdure o ortaggi"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v1/m3/l1",
+                  "label": "Condimento",
+                  "choices": [
+                    "10g olio extravergine di oliva"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v1/m3/l2",
+                  "label": "Proteina (scegli 1)",
+                  "choices": [
+                    "220g merluzzo",
+                    "100g orata fresca",
+                    "190g spigola o branzino",
+                    "80g salmone",
+                    "120g uova (2 uova)",
+                    "150g petto di pollo",
+                    "70g hamburger di chianina",
+                    "110g bistecca di manzo",
+                    "170g filetto di vitello",
+                    "100g tonno"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v1/m3/l3",
+                  "label": "Extra",
+                  "choices": [
+                    "50g pane di segale"
+                  ]
+                }
+              ]
+            }
+          ],
+          "supplements": [
+            {
+              "id": "diet-fixture/v1/s0",
+              "key": "vitac",
+              "name": "Vita C+ Slow Release",
+              "moment": "Colazione",
+              "time": "06:30"
+            },
+            {
+              "id": "diet-fixture/v1/s1",
+              "key": "vitab",
+              "name": "Vita B+",
+              "moment": "Colazione",
+              "time": "06:30"
+            },
+            {
+              "id": "diet-fixture/v1/s2",
+              "key": "mgk",
+              "name": "MGK+ Liquid",
+              "moment": "Pre-WO (45min prima)",
+              "time": "07:15"
+            },
+            {
+              "id": "diet-fixture/v1/s3",
+              "key": "fuel",
+              "name": "Fuel+",
+              "moment": "Pre-WO (45min prima)",
+              "time": "07:15"
+            },
+            {
+              "id": "diet-fixture/v1/s4",
+              "key": "barretta",
+              "name": "Barretta 4plus 45g",
+              "moment": "Pre-WO (45min prima)",
+              "time": "07:15"
+            },
+            {
+              "id": "diet-fixture/v1/s5",
+              "key": "omnia",
+              "name": "OMNIA+ 500ml",
+              "moment": "Intra-WO (borraccia)",
+              "time": "08:00"
+            },
+            {
+              "id": "diet-fixture/v1/s6",
+              "key": "omega1",
+              "name": "Extra Omega+ (1ª)",
+              "moment": "Dopo pranzo",
+              "time": "11:30"
+            },
+            {
+              "id": "diet-fixture/v1/s7",
+              "key": "ps",
+              "name": "PS+",
+              "moment": "Dopo merenda",
+              "time": "16:30"
+            },
+            {
+              "id": "diet-fixture/v1/s8",
+              "key": "omega2",
+              "name": "Extra Omega+ (2ª)",
+              "moment": "Dopocena",
+              "time": "21:00"
+            },
+            {
+              "id": "diet-fixture/v1/s9",
+              "key": "gluta",
+              "name": "Gluta+ · 1 mis. 250ml",
+              "moment": "Prima di dormire",
+              "time": "23:00"
+            }
+          ]
+        },
+        {
+          "id": "diet-fixture/v2",
+          "key": "ore17",
+          "name": "Allenamento ore 17",
+          "training": {
+            "time": "17:00"
+          },
+          "meals": [
+            {
+              "id": "diet-fixture/v2/m0",
+              "name": "Colazione",
+              "time": "08:00",
+              "options": [
+                {
+                  "id": "diet-fixture/v2/m0/o0",
+                  "text": "40g gallette grano saraceno (4) + 50g marmellata ridotto zucchero + 10g burro chiarificato"
+                },
+                {
+                  "id": "diet-fixture/v2/m0/o1",
+                  "text": "80g pane di segale + 70g pane integrale + 100g prosciutto crudo oppure 100g bresaola"
+                },
+                {
+                  "id": "diet-fixture/v2/m0/o2",
+                  "text": "150g yogurt greco Fage Total 0% + 20g miele + 50g muesli linea viviverde coop"
+                },
+                {
+                  "id": "diet-fixture/v2/m0/o3",
+                  "text": "160g uova (2 uova) + 100g pane di segale oppure 90g pane integrale"
+                }
+              ],
+              "lines": []
+            },
+            {
+              "id": "diet-fixture/v2/m1",
+              "name": "Spuntino",
+              "time": "10:30",
+              "options": [],
+              "lines": [
+                {
+                  "id": "diet-fixture/v2/m1/l0",
+                  "label": null,
+                  "choices": [
+                    "200g frutta fresca (no macedonie)"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v2/m1/l1",
+                  "label": null,
+                  "choices": [
+                    "30g noci oppure mandorle"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v2/m1/l2",
+                  "label": null,
+                  "choices": [
+                    "150g yogurt greco Fage Total 0%"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "diet-fixture/v2/m2",
+              "name": "Pranzo",
+              "time": "13:00",
+              "options": [],
+              "lines": [
+                {
+                  "id": "diet-fixture/v2/m2/l0",
+                  "label": "Carboidrato (scegli 1)",
+                  "choices": [
+                    "70g pasta farro integrale",
+                    "70g riso rosso integrale",
+                    "70g riso venere",
+                    "70g riso basmati",
+                    "100g pane di segale"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v2/m2/l1",
+                  "label": "Verdure",
+                  "choices": [
+                    "300g verdure o ortaggi a scelta"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v2/m2/l2",
+                  "label": "Condimento",
+                  "choices": [
+                    "20g olio extravergine di oliva"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v2/m2/l3",
+                  "label": "Proteina (scegli 1)",
+                  "choices": [
+                    "150g tonno",
+                    "110g primo sale",
+                    "60g parmigiano reggiano",
+                    "160g ricotta vacca e pecora",
+                    "100g feta",
+                    "250g orata surgelata",
+                    "280g filetto platessa findus (non panato)",
+                    "380g rana pescatrice",
+                    "200g filetto di manzo",
+                    "230g petto di tacchino",
+                    "130g salmone",
+                    "340g merluzzo",
+                    "190g uova (2 uova + 1-2 albumi)",
+                    "240g petto di pollo",
+                    "180g bistecca di manzo",
+                    "110g hamburger di chianina"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "diet-fixture/v2/m3",
+              "name": "Post-workout",
+              "time": "19:30",
+              "options": [],
+              "lines": [
+                {
+                  "id": "diet-fixture/v2/m3/l0",
+                  "label": "Verdure",
+                  "choices": [
+                    "200g verdure o ortaggi oppure 90g verdure e legumi surgelati"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v2/m3/l1",
+                  "label": "Condimento",
+                  "choices": [
+                    "10g olio extravergine di oliva"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v2/m3/l2",
+                  "label": "Proteina (scegli 1)",
+                  "choices": [
+                    "250g merluzzo",
+                    "110g orata fresca",
+                    "220g spigola o branzino",
+                    "100g salmone",
+                    "140g uova (2 uova)",
+                    "180g petto di pollo",
+                    "80g hamburger di chianina",
+                    "130g bistecca di manzo",
+                    "190g filetto di vitello",
+                    "110g tonno"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v2/m3/l3",
+                  "label": "Carboidrato",
+                  "choices": [
+                    "80g riso basmati oppure 80g riso parboiled oppure 80g riso arborio"
+                  ]
+                }
+              ]
+            }
+          ],
+          "supplements": [
+            {
+              "id": "diet-fixture/v2/s0",
+              "key": "vitac",
+              "name": "Vita C+ Slow Release",
+              "moment": "Colazione",
+              "time": "08:00"
+            },
+            {
+              "id": "diet-fixture/v2/s1",
+              "key": "vitab",
+              "name": "Vita B+",
+              "moment": "Colazione",
+              "time": "08:00"
+            },
+            {
+              "id": "diet-fixture/v2/s2",
+              "key": "omega1",
+              "name": "Extra Omega+ (1ª)",
+              "moment": "Dopo pranzo",
+              "time": "14:00"
+            },
+            {
+              "id": "diet-fixture/v2/s3",
+              "key": "mgk",
+              "name": "MGK+ Liquid",
+              "moment": "Pre-WO ore 16:15",
+              "time": "16:15"
+            },
+            {
+              "id": "diet-fixture/v2/s4",
+              "key": "fuel",
+              "name": "Fuel+",
+              "moment": "Pre-WO ore 16:15",
+              "time": "16:15"
+            },
+            {
+              "id": "diet-fixture/v2/s5",
+              "key": "barretta",
+              "name": "Barretta 4plus 45g",
+              "moment": "Pre-WO ore 16:15",
+              "time": "16:15"
+            },
+            {
+              "id": "diet-fixture/v2/s6",
+              "key": "ps",
+              "name": "PS+",
+              "moment": "Dopo merenda",
+              "time": "16:30"
+            },
+            {
+              "id": "diet-fixture/v2/s7",
+              "key": "omnia",
+              "name": "OMNIA+ 500ml",
+              "moment": "Intra-WO (borraccia)",
+              "time": "17:00"
+            },
+            {
+              "id": "diet-fixture/v2/s8",
+              "key": "omega2",
+              "name": "Extra Omega+ (2ª)",
+              "moment": "Dopocena",
+              "time": "21:00"
+            },
+            {
+              "id": "diet-fixture/v2/s9",
+              "key": "gluta",
+              "name": "Gluta+ · 1 mis. 250ml",
+              "moment": "Prima di dormire",
+              "time": "23:00"
+            }
+          ]
+        },
+        {
+          "id": "diet-fixture/v3",
+          "key": "ore21",
+          "name": "Allenamento ore 21",
+          "training": {
+            "time": "21:00"
+          },
+          "meals": [
+            {
+              "id": "diet-fixture/v3/m0",
+              "name": "Colazione",
+              "time": "08:00",
+              "options": [
+                {
+                  "id": "diet-fixture/v3/m0/o0",
+                  "text": "40g gallette grano saraceno (4) + 50g marmellata ridotto zucchero + 10g burro chiarificato"
+                },
+                {
+                  "id": "diet-fixture/v3/m0/o1",
+                  "text": "80g pane di segale + 70g pane integrale + 100g prosciutto crudo oppure 100g bresaola"
+                },
+                {
+                  "id": "diet-fixture/v3/m0/o2",
+                  "text": "150g yogurt greco Fage Total 0% + 20g miele + 50g muesli linea viviverde coop"
+                },
+                {
+                  "id": "diet-fixture/v3/m0/o3",
+                  "text": "160g uova (2 uova) + 100g pane di segale oppure 90g pane integrale"
+                }
+              ],
+              "lines": []
+            },
+            {
+              "id": "diet-fixture/v3/m1",
+              "name": "Spuntino",
+              "time": "10:30",
+              "options": [],
+              "lines": [
+                {
+                  "id": "diet-fixture/v3/m1/l0",
+                  "label": null,
+                  "choices": [
+                    "200g frutta fresca (no macedonie)"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v3/m1/l1",
+                  "label": null,
+                  "choices": [
+                    "30g noci oppure mandorle"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "diet-fixture/v3/m2",
+              "name": "Pranzo",
+              "time": "13:00",
+              "options": [],
+              "lines": [
+                {
+                  "id": "diet-fixture/v3/m2/l0",
+                  "label": "Carboidrato (scegli 1)",
+                  "choices": [
+                    "70g pasta farro integrale",
+                    "70g riso rosso integrale",
+                    "70g riso venere",
+                    "70g riso basmati",
+                    "100g pane di segale"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v3/m2/l1",
+                  "label": "Verdure",
+                  "choices": [
+                    "300g verdure o ortaggi a scelta"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v3/m2/l2",
+                  "label": "Condimento",
+                  "choices": [
+                    "20g olio extravergine di oliva"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v3/m2/l3",
+                  "label": "Proteina (scegli 1)",
+                  "choices": [
+                    "150g tonno",
+                    "250g orata surgelata",
+                    "280g filetto platessa findus (non panato)",
+                    "380g rana pescatrice",
+                    "200g filetto di manzo",
+                    "230g petto di tacchino",
+                    "130g salmone",
+                    "340g merluzzo",
+                    "190g uova (2 uova + 1-2 albumi)",
+                    "240g petto di pollo",
+                    "180g bistecca di manzo",
+                    "110g hamburger di chianina"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "diet-fixture/v3/m3",
+              "name": "Merenda",
+              "time": "16:30",
+              "options": [],
+              "lines": [
+                {
+                  "id": "diet-fixture/v3/m3/l0",
+                  "label": null,
+                  "choices": [
+                    "200g yogurt greco Fage Total 0% (o yoeggs)"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v3/m3/l1",
+                  "label": null,
+                  "choices": [
+                    "100g frutta fresca"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "diet-fixture/v3/m4",
+              "name": "Post-workout",
+              "time": "19:30",
+              "options": [],
+              "lines": [
+                {
+                  "id": "diet-fixture/v3/m4/l0",
+                  "label": "Verdure",
+                  "choices": [
+                    "100g verdure o ortaggi"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v3/m4/l1",
+                  "label": "Condimento",
+                  "choices": [
+                    "10g olio extravergine di oliva"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v3/m4/l2",
+                  "label": "Proteina leggera (scegli 1)",
+                  "choices": [
+                    "150g merluzzo",
+                    "70g orata fresca",
+                    "130g spigola o branzino",
+                    "60g salmone",
+                    "80g uova (2 uova)",
+                    "110g petto di pollo",
+                    "50g hamburger di chianina",
+                    "80g bistecca di manzo",
+                    "120g filetto di vitello",
+                    "70g tonno"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v3/m4/l3",
+                  "label": "Carboidrato",
+                  "choices": [
+                    "50g riso basmati oppure 50g riso parboiled oppure 50g riso arborio"
+                  ]
+                }
+              ]
+            }
+          ],
+          "supplements": [
+            {
+              "id": "diet-fixture/v3/s0",
+              "key": "vitac",
+              "name": "Vita C+ Slow Release",
+              "moment": "Colazione",
+              "time": "08:00"
+            },
+            {
+              "id": "diet-fixture/v3/s1",
+              "key": "vitab",
+              "name": "Vita B+",
+              "moment": "Colazione",
+              "time": "08:00"
+            },
+            {
+              "id": "diet-fixture/v3/s2",
+              "key": "omega1",
+              "name": "Extra Omega+ (1ª)",
+              "moment": "Dopo pranzo",
+              "time": "14:00"
+            },
+            {
+              "id": "diet-fixture/v3/s3",
+              "key": "ps",
+              "name": "PS+",
+              "moment": "Dopo merenda · entro 17:00",
+              "time": "16:30"
+            },
+            {
+              "id": "diet-fixture/v3/s4",
+              "key": "mgk",
+              "name": "MGK+ Liquid",
+              "moment": "Pre-WO ore 20:15",
+              "time": "20:15"
+            },
+            {
+              "id": "diet-fixture/v3/s5",
+              "key": "fuel",
+              "name": "Fuel+",
+              "moment": "Pre-WO ore 20:15",
+              "time": "20:15"
+            },
+            {
+              "id": "diet-fixture/v3/s6",
+              "key": "barretta",
+              "name": "Barretta 4plus 45g",
+              "moment": "Pre-WO ore 20:15",
+              "time": "20:15"
+            },
+            {
+              "id": "diet-fixture/v3/s7",
+              "key": "omnia",
+              "name": "OMNIA+ 500ml",
+              "moment": "Intra-WO (borraccia)",
+              "time": "21:00"
+            },
+            {
+              "id": "diet-fixture/v3/s8",
+              "key": "omega2",
+              "name": "Extra Omega+ (2ª)",
+              "moment": "Dopocena",
+              "time": "22:30"
+            },
+            {
+              "id": "diet-fixture/v3/s9",
+              "key": "gluta",
+              "name": "Gluta+ · 1 mis. 250ml",
+              "moment": "Prima di dormire",
+              "time": "23:30"
+            }
+          ]
+        },
+        {
+          "id": "diet-fixture/v4",
+          "key": "ore22",
+          "name": "Allenamento ore 22",
+          "training": {
+            "time": "22:00"
+          },
+          "meals": [
+            {
+              "id": "diet-fixture/v4/m0",
+              "name": "Colazione",
+              "time": "08:00",
+              "options": [
+                {
+                  "id": "diet-fixture/v4/m0/o0",
+                  "text": "40g gallette grano saraceno (4) + 50g marmellata ridotto zucchero + 10g burro chiarificato"
+                },
+                {
+                  "id": "diet-fixture/v4/m0/o1",
+                  "text": "80g pane di segale + 70g pane integrale + 100g prosciutto crudo oppure 100g bresaola"
+                },
+                {
+                  "id": "diet-fixture/v4/m0/o2",
+                  "text": "150g yogurt greco Fage Total 0% + 20g miele + 50g muesli linea viviverde coop"
+                },
+                {
+                  "id": "diet-fixture/v4/m0/o3",
+                  "text": "160g uova (2 uova) + 100g pane di segale oppure 90g pane integrale"
+                }
+              ],
+              "lines": []
+            },
+            {
+              "id": "diet-fixture/v4/m1",
+              "name": "Spuntino",
+              "time": "10:30",
+              "options": [],
+              "lines": [
+                {
+                  "id": "diet-fixture/v4/m1/l0",
+                  "label": null,
+                  "choices": [
+                    "200g frutta fresca (no macedonie)"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v4/m1/l1",
+                  "label": null,
+                  "choices": [
+                    "30g noci oppure mandorle"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "diet-fixture/v4/m2",
+              "name": "Pranzo",
+              "time": "13:00",
+              "options": [],
+              "lines": [
+                {
+                  "id": "diet-fixture/v4/m2/l0",
+                  "label": "Carboidrato (scegli 1)",
+                  "choices": [
+                    "80g pasta farro integrale",
+                    "80g riso rosso integrale",
+                    "80g riso venere",
+                    "80g riso basmati",
+                    "100g pane integrale",
+                    "120g pane di segale"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v4/m2/l1",
+                  "label": "Verdure",
+                  "choices": [
+                    "300g verdure o ortaggi a scelta"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v4/m2/l2",
+                  "label": "Condimento",
+                  "choices": [
+                    "20g olio extravergine di oliva"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v4/m2/l3",
+                  "label": "Proteina (scegli 1)",
+                  "choices": [
+                    "150g tonno",
+                    "250g orata surgelata",
+                    "280g filetto platessa findus (non panato)",
+                    "380g rana pescatrice",
+                    "200g filetto di manzo",
+                    "230g petto di tacchino",
+                    "130g salmone",
+                    "340g merluzzo",
+                    "190g uova (2 uova + 1-2 albumi)",
+                    "240g petto di pollo",
+                    "180g bistecca di manzo",
+                    "110g hamburger di chianina"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "diet-fixture/v4/m3",
+              "name": "Merenda",
+              "time": "18:00",
+              "options": [],
+              "lines": [
+                {
+                  "id": "diet-fixture/v4/m3/l0",
+                  "label": "Verdure",
+                  "choices": [
+                    "100g verdure o ortaggi"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v4/m3/l1",
+                  "label": "Condimento",
+                  "choices": [
+                    "10g olio extravergine di oliva"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v4/m3/l2",
+                  "label": "Proteina (scegli 1)",
+                  "choices": [
+                    "250g merluzzo",
+                    "110g orata fresca",
+                    "220g spigola o branzino",
+                    "100g salmone",
+                    "140g uova (2 uova)",
+                    "180g petto di pollo",
+                    "80g hamburger di chianina",
+                    "130g bistecca di manzo",
+                    "190g filetto di vitello",
+                    "110g tonno"
+                  ]
+                },
+                {
+                  "id": "diet-fixture/v4/m3/l3",
+                  "label": "Carboidrato",
+                  "choices": [
+                    "50g riso basmati",
+                    "60g pane grano duro",
+                    "50g riso parboiled",
+                    "50g riso arborio"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "diet-fixture/v4/m4",
+              "name": "Post-workout",
+              "time": "19:30",
+              "options": [],
+              "lines": [
+                {
+                  "id": "diet-fixture/v4/m4/l0",
+                  "label": null,
+                  "choices": [
+                    "Nessun pasto aggiuntivo - l'allenamento è a fine giornata"
+                  ]
+                }
+              ]
+            }
+          ],
+          "supplements": [
+            {
+              "id": "diet-fixture/v4/s0",
+              "key": "vitac",
+              "name": "Vita C+ Slow Release",
+              "moment": "Colazione",
+              "time": "08:00"
+            },
+            {
+              "id": "diet-fixture/v4/s1",
+              "key": "vitab",
+              "name": "Vita B+",
+              "moment": "Colazione",
+              "time": "08:00"
+            },
+            {
+              "id": "diet-fixture/v4/s2",
+              "key": "omega1",
+              "name": "Extra Omega+ (1ª)",
+              "moment": "Dopo pranzo",
+              "time": "14:00"
+            },
+            {
+              "id": "diet-fixture/v4/s3",
+              "key": "ps",
+              "name": "PS+",
+              "moment": "Dopo merenda",
+              "time": "18:30"
+            },
+            {
+              "id": "diet-fixture/v4/s4",
+              "key": "mgk",
+              "name": "MGK+ Liquid",
+              "moment": "Pre-WO ore 21:15",
+              "time": "21:15"
+            },
+            {
+              "id": "diet-fixture/v4/s5",
+              "key": "fuel",
+              "name": "Fuel+",
+              "moment": "Pre-WO ore 21:15",
+              "time": "21:15"
+            },
+            {
+              "id": "diet-fixture/v4/s6",
+              "key": "barretta",
+              "name": "Barretta 4plus 45g",
+              "moment": "Pre-WO ore 21:15",
+              "time": "21:15"
+            },
+            {
+              "id": "diet-fixture/v4/s7",
+              "key": "omnia",
+              "name": "OMNIA+ 500ml",
+              "moment": "Intra-WO (borraccia)",
+              "time": "22:00"
+            },
+            {
+              "id": "diet-fixture/v4/s8",
+              "key": "omega2",
+              "name": "Extra Omega+ (2ª)",
+              "moment": "Dopocena",
+              "time": "23:30"
+            },
+            {
+              "id": "diet-fixture/v4/s9",
+              "key": "gluta",
+              "name": "Gluta+ · 1 mis. 250ml",
+              "moment": "Prima di dormire",
+              "time": "23:55"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
