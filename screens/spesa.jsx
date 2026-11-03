@@ -198,22 +198,19 @@ const Spesa = ({ device, spesaChecked, setSpesaChecked, spesaFreq, setSpesaFreq 
 
   const setChecked = (next) => {
     if (setSpesaChecked) {
-      setSpesaChecked(next); // AppFrame gestisce storage + cloud sync
+      setSpesaChecked(next); // AppFrame scrive lo storage (il sync fa il resto)
     } else {
       _setLocalChecked(next);
       if (window.storage) window.storage.set("spesaChecked", next);
-      if (window._markEdits) window._markEdits("spesaChecked2", _localChecked, next);
-      if (window._saveSettingRetry) window._saveSettingRetry("spesaChecked2", JSON.stringify(next));
     }
   };
 
   const setFreq = (f) => {
     if (setSpesaFreq) {
-      setSpesaFreq(f); // AppFrame gestisce storage + cloud sync
+      setSpesaFreq(f); // AppFrame scrive lo storage (il sync fa il resto)
     } else {
       _setLocalFreq(f);
       if (window.storage) window.storage.set("spesaFreq", f);
-      if (window._saveSettingRetry) window._saveSettingRetry("spesaFreq", f);
     }
   };
 
@@ -224,17 +221,25 @@ const Spesa = ({ device, spesaChecked, setSpesaChecked, spesaFreq, setSpesaFreq 
 
   // Articoli extra manuali (oltre a quelli generati dalla dieta). Id stabile
   // (timestamp) → le spunte non si spostano quando rimuovi un articolo.
-  // Sincati come chiave Settings "spesaExtra" (pull in _cloudSync).
+  // Sincronizzati articolo per articolo (record shoppingExtra).
   const [extra, setExtra] = React.useState(() =>
     window.storage ? window.storage.get("spesaExtra", []) : []
   );
   const [newItem, setNewItem] = React.useState("");
   const saveExtra = (next) => {
-    if (window._markEdits) window._markEdits("spesaExtra", extra, next); // unione per voce tra device
     setExtra(next);
     if (window.storage) window.storage.set("spesaExtra", next);
-    if (window._saveSettingRetry) window._saveSettingRetry("spesaExtra", JSON.stringify(next));
   };
+
+  // Dati arrivati dal sync (altro device). Spunte e frequenza in modalità
+  // controllata arrivano già da AppFrame; qui lo stato locale della schermata.
+  useSyncedData(["spesaExtra", "spesaChecked", "spesaFreq"], (keys) => {
+    const st = window.storage;
+    if (!st) return;
+    if (keys.indexOf("spesaExtra") !== -1) setExtra(st.get("spesaExtra", []) || []);
+    if (keys.indexOf("spesaChecked") !== -1) _setLocalChecked(st.get("spesaChecked", {}) || {});
+    if (keys.indexOf("spesaFreq") !== -1) _setLocalFreq(st.get("spesaFreq", 1) || 1);
+  });
   const addExtra = () => {
     const name = newItem.trim();
     if (!name) return;

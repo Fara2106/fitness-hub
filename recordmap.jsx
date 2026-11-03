@@ -6,6 +6,7 @@
 //     keysForRecord(record, ctx)      → string[]            chiavi locali da ricostruire
 //     rebuildKeys(keys, getRecord, listRecords, ctx) → { [key]: value | undefined }
 //     DIRECT: Set(["workoutPlan","dietPlan"])               collezioni gestite direttamente dal motore
+//     MUSCLE_GROUP: { muscolo: gruppo }                     tabella muscleSets_ (condivisa con scheda.jsx)
 //   }
 //   get(key, def) legge lo storage; getRecord(collection,id) / listRecords(collection) leggono la
 //   cache dei record; ctx = { workout: {id,data}|null, diet: {id,data}|null, today: "YYYY-MM-DD" }.
@@ -43,7 +44,8 @@
   const DAY_FIELD_KEY = { checkIn: "checkIn_", hydration: "hydration_", notes: "notes_", rest: "restDay_", dietVariant: "dietaVariant_" };
   const DIRECT = new Set(["workoutPlan", "dietPlan"]);
 
-  // Stessa tabella di screens/scheda.jsx (handleSaveSession → muscleSets_<data>).
+  // Muscolo principale → gruppo della card "Settimana": unica tabella, usata anche da
+  // screens/scheda.jsx (handleSaveSession → muscleSets_<data>) via RecordMap.MUSCLE_GROUP.
   const MUSCLE_GROUP = {
     petto: "Petto", schiena: "Schiena", spalle: "Spalle", trapezi: "Spalle",
     quadricipiti: "Gambe", femorali: "Gambe", glutei: "Gambe", polpacci: "Gambe",
@@ -631,6 +633,6 @@
     out[key] = daily;
   }
 
-  const RecordMap = { groupsForKey, buildGroup, keysForRecord, rebuildKeys, DIRECT };
+  const RecordMap = { groupsForKey, buildGroup, keysForRecord, rebuildKeys, DIRECT, MUSCLE_GROUP };
   window.RecordMap = RecordMap;
 })();

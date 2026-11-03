@@ -135,8 +135,15 @@ const GoalRow = ({ weightLog }) => {
     setGoal(v);
     const n = parseFloat(String(v).replace(",", "."));
     if (window.storage) window.storage.set("weightGoal", n > 0 ? n : "");
-    if (window._saveSettingRetry && n > 0) window._saveSettingRetry("weightGoal", n);
   };
+
+  // Obiettivo cambiato su un altro device: si aggiorna, ma non mentre lo stai scrivendo.
+  const inputRef = React.useRef(null);
+  useSyncedData(["weightGoal"], () => {
+    if (!window.storage || document.activeElement === inputRef.current) return;
+    const g = window.storage.get("weightGoal", "");
+    setGoal(g ? String(g) : "");
+  });
 
   const proj = (window.Insights && weightLog && weightLog.length >= 2)
     ? window.Insights.weightProjection(weightLog, goal || null)
@@ -152,6 +159,7 @@ const GoalRow = ({ weightLog }) => {
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-2)", flex: 1 }}>🎯 {t("Obiettivo")}</div>
         <input
+          ref={inputRef}
           inputMode="decimal"
           value={goal}
           onChange={(e) => save(e.target.value.replace(/[^0-9.,]/g, ""))}
@@ -197,6 +205,11 @@ const RegistroView = ({ isDesktop }) => {
         };
       });
   };
+
+  // Righe locali (fallback): si aggiornano con le sessioni arrivate dal sync.
+  useSyncedData((k) => /^(gym_|muscleSets_|notes_)\d{4}-\d{2}-\d{2}$/.test(k), () => {
+    setRows(r => (r && r.length && !r[0].local) ? r : localFallback());
+  });
 
   React.useEffect(() => {
     if (!window.sheetsAPI || !window.sheetsAPI.getSessioni) { setRows(localFallback()); return; }
@@ -251,8 +264,10 @@ const RegistroView = ({ isDesktop }) => {
 const CheckInTrend = ({ isDesktop }) => {
   const t = useT();
 
-  // refreshKey cambia dopo il fetch da Sheets, forzando il ricalcolo dei dati
+  // refreshKey cambia dopo il fetch da Sheets o un check-in arrivato dal sync,
+  // forzando il ricalcolo dei dati
   const [refreshKey, setRefreshKey] = React.useState(0);
+  useSyncedData((k) => /^checkIn_\d{4}-\d{2}-\d{2}$/.test(k), () => setRefreshKey(n => n + 1));
 
   // Sync check-in da Sheets → storage locale (ultimi 30 giorni)
   React.useEffect(() => {
@@ -404,6 +419,8 @@ const _GROUP_COLORS = {
 };
 const VolumeView = ({ isDesktop }) => {
   const t = useT();
+  const [rev, setRev] = React.useState(0);
+  useSyncedData((k) => /^muscleSets_\d{4}-\d{2}-\d{2}$/.test(k), () => setRev(n => n + 1));
   const data = React.useMemo(() => {
     if (!window.storage || !window.WorkoutProgress) return { byGroup: {}, total: 0, order: [], days: 0 };
     const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
@@ -413,7 +430,7 @@ const VolumeView = ({ isDesktop }) => {
       .filter(h => h.muscleSets && Object.keys(h.muscleSets).length);
     const agg = window.WorkoutProgress.aggregateVolume(hist);
     return Object.assign({}, agg, { days: hist.length });
-  }, []);
+  }, [rev]);
 
   if (!data.total) {
     return (
@@ -564,6 +581,8 @@ const MisureView = ({ isDesktop }) => {
   const [editing, setEditing] = React.useState(false);
   const [vals, setVals] = React.useState({});
   const [savedMsg, setSavedMsg] = React.useState("");
+  // Misure arrivate dal sync (l'editor aperto ha i suoi valori in `vals`: non si tocca).
+  useSyncedData(["bodyMeasures"], () => { if (window.storage) setLog(window.storage.get("bodyMeasures", []) || []); });
 
   // Pull dal foglio Misure (merge per data, cloud vince). Finché il .gs non è
   // rideployato la chiamata fallisce → si resta local-only, senza errori.
@@ -715,10 +734,18 @@ const Storico = ({ device, onNav }) => {
       .catch(() => {});
   }, []);
 
+  // Peso e attività arrivati dal sync (altro device).
+  const [actRev, setActRev] = React.useState(0);
+  useSyncedData(["weightLog", "activities"], (keys) => {
+    if (!window.storage) return;
+    if (keys.indexOf("weightLog") !== -1) setWeightLog((window.storage.get("weightLog", []) || []).slice(-60));
+    if (keys.indexOf("activities") !== -1) setActRev(n => n + 1);
+  });
+
   const activities = React.useMemo(() => {
     if (!window.storage) return [];
     return window.storage.get("activities", []).slice(0, 30);
-  }, []);
+  }, [actRev]);
 
   const weekSummary = React.useMemo(() => {
     if (!window.storage || !activities.length) return null;

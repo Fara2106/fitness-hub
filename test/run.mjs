@@ -1260,6 +1260,73 @@ await (async () => {
   }
 })();
 
+// ---- Suite App v2: piani dal modello strutturato + vecchio motore Sheets rimosso ----
+// getSchedule()/getDieta() leggono plan_workout/plan_diet (copie locali di SyncV2) via PlanConv;
+// senza piano → testo embedded (defaults.jsx). Più controlli sul sorgente: app.jsx non parla più
+// con Sheets e nessuna schermata usa gli helper del vecchio motore.
+console.log("\nSuite App v2 — piani dal piano attivo, fallback embedded, vecchio motore rimosso");
+{
+  const sb = { window: {}, console };
+  vm.createContext(sb);
+  let loaded = true;
+  try {
+    for (const f of ["defaults.jsx", "parser.jsx", "planconv.jsx"]) vm.runInContext(transform(join(ROOT, f)), sb, { filename: f });
+  } catch (e) { loaded = false; ok("defaults + parser + planconv si caricano sotto vm — " + e.message.split("\n")[0], false); }
+  const w = sb.window;
+  if (loaded) {
+    const J = (x) => JSON.parse(JSON.stringify(x));
+    const mem = {};
+    w.storage = { get: (k, d = null) => (k in mem ? mem[k] : d) };
+    ok("getDieta esposto da parser.jsx", typeof w.getDieta === "function");
+
+    // Senza piani: come oggi (testo embedded, anche se in storage c'è ancora il vecchio schedaData).
+    mem.schedaData = "# VECCHIO - Giorno 1\n\nEsercizio | Serie | Rip | Recupero | Note tecniche\nPanca vecchia | 3 | 8 | 60 | Muscoli: petto\n";
+    const fbS = J(w.getSchedule()), refS = J(w.parseScheda(w.SCHEDA_TXT_FALLBACK));
+    ok("getSchedule senza plan_workout → fallback embedded (non il vecchio schedaData)",
+      fbS.days.length === refS.days.length && fbS.days.every((d, i) => d.name === refS.days[i].name));
+    const fbD = typeof w.getDieta === "function" ? J(w.getDieta()) : null;
+    const refD = J(w.parseDieta(w.DIETA_TXT_FALLBACK));
+    ok("getDieta senza plan_diet → fallback embedded",
+      !!fbD && ["riposo", "ore17"].every(k => fbD[k].meals.length === refD[k].meals.length));
+
+    // Con piano attivo: giorni ed esercizi del piano (giorno rinominato, esercizio cambiato).
+    const txt = readFileSync(join(ROOT, "scheda.txt"), "utf8")
+      .replace("# PUSH - Giorno 1", "# SPINTA NUOVA - Giorno 1")
+      .replace("Push-up (bodyweight)", "Panca piana manubri");
+    mem.plan_workout = J(w.PlanConv.workoutPlanFromText(txt, { id: "workout-20261103-0900", name: "Nuova", validFrom: "2026-11-03" }));
+    const ps = J(w.getSchedule());
+    ok("getSchedule con plan_workout → nomi dei giorni del piano", ps.days.length === refS.days.length && ps.days[0].name === "SPINTA NUOVA");
+    ok("getSchedule con plan_workout → esercizi del piano", ps.days[0].exercises[0].name === "Panca piana manubri");
+    ok("getSchedule con plan_workout → forma di parseScheda (key Giorno N, sets, rest, ripRange)",
+      ps.days[0].key === "Giorno 1" && Array.isArray(ps.days[0].exercises[0].sets) && ps.days[0].exercises[0].sets.length === 3 &&
+      ps.days[0].exercises[0].rest === 60 && ps.days[0].exercises[0].ripRange === "8-12");
+    ok("getSelectedSession usa il piano attivo", (() => { mem.schedaSelectedDay = "Giorno 1"; const s = w.getSelectedSession(); return !!s && s.name === "SPINTA NUOVA"; })());
+    mem.plan_workout = { id: "workout-vuoto", data: { name: "x", status: "active", days: [] } };
+    ok("getSchedule con piano senza giorni → fallback embedded", J(w.getSchedule()).days.length === refS.days.length);
+
+    const dtxt = readFileSync(join(ROOT, "dieta.txt"), "utf8").replace("- Opzione 1: 40g gallette grano saraceno (4)", "- Opzione 1: 99g fiocchi d'avena");
+    mem.plan_diet = J(w.PlanConv.dietPlanFromText(dtxt, { id: "diet-20261103-0900", name: "Nuova", validFrom: "2026-11-03" }));
+    const pd = typeof w.getDieta === "function" ? w.getDieta() : null;
+    ok("getDieta con plan_diet → pasti del piano (toLegacyDieta)", !!pd && JSON.stringify(pd.riposo.meals[0].primary).includes("99g fiocchi d'avena"));
+    ok("getDieta con plan_diet → segnato come piano (_fromPlan, non enumerabile)", !!pd && pd._fromPlan === true && !Object.keys(pd).includes("_fromPlan"));
+    ok("getDieta senza piano → non segnato", (() => { delete mem.plan_diet; const d = typeof w.getDieta === "function" ? w.getDieta() : null; return !!d && !d._fromPlan; })());
+  }
+
+  // Sorgente: nessun residuo del vecchio motore.
+  const appSrc = readFileSync(join(ROOT, "app.jsx"), "utf8");
+  ok("app.jsx: nessuna chiamata a sheetsAPI.", !/sheetsAPI\./.test(appSrc));
+  ok("app.jsx: niente _cloudSync / _saveSettingRetry / _markEdits / _cloudPushAll / _reconcileRepoFiles",
+    !/_cloudSync|_saveSettingRetry|_markEdits|_cloudPushAll|_reconcileRepoFiles|_maybeAutoBackup/.test(appSrc));
+  ok("app.jsx: SyncV2.init dentro storage.onReady", /storage\.onReady\([\s\S]{0,400}SyncV2\.init\(/.test(appSrc));
+  const sweep = (appSrc.match(/function _cleanupOldDailyKeys[\s\S]*?\n}\n/) || [""])[0];
+  ok("sweep 90 gg: dietaVariant_ incluso e rimozioni silenziose", /dietaVariant_/.test(sweep) && /remove\(k,\s*\{\s*silent:\s*true\s*\}\)/.test(sweep));
+  const screenSrc = readdirSync(join(ROOT, "screens")).filter(f => f.endsWith(".jsx")).map(f => readFileSync(join(ROOT, "screens", f), "utf8")).join("\n");
+  ok("schermate: nessun uso di _markEdits / _saveSettingRetry / _cloudPushAll", !/_markEdits|_saveSettingRetry|_cloudPushAll/.test(screenSrc));
+  ok("schermate: i piani non si leggono più da schedaData/dietaData",
+    !/get\(\s*"(schedaData|dietaData)"/.test(readFileSync(join(ROOT, "screens", "dieta.jsx"), "utf8") +
+      readFileSync(join(ROOT, "screens", "dashboard.jsx"), "utf8") + readFileSync(join(ROOT, "screens", "coach.jsx"), "utf8")));
+}
+
 // ---- Suite bundle: app.compiled.js allineato ai sorgenti (no drift) ----
 // Il browser carica SOLO app.compiled.js: se un .jsx viene modificato senza
 // rigenerare il bundle (`npm run build`), l'app servirebbe codice vecchio.

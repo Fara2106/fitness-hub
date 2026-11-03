@@ -173,7 +173,7 @@ const Sidebar = ({ screen, onNav }) => {
 };
 
 // — Sync badge — piccolo indicatore dello stato cloud-sync (legge window._syncState,
-//   aggiornato da _cloudSync in app.jsx via evento "lfh-sync") —
+//   aggiornato dal motore SyncV2 in syncv2.jsx via evento "lfh-sync") —
 const SyncBadge = ({ compact }) => {
   const t = useT();
   const [s, setS] = React.useState(() => window._syncState || { status: "idle", last: null });
@@ -194,6 +194,8 @@ const SyncBadge = ({ compact }) => {
     ok:      { color: "var(--success)", bg: "rgba(48,209,88,0.12)",   icon: "cloud",     label: time ? `${t("Sync")} ${time}` : t("Sincronizzato") },
     error:   { color: "var(--warning)",  bg: "rgba(255,159,10,0.14)",  icon: "cloud-off", label: t("Sync non riuscito") },
     offline: { color: "var(--text-3)",  bg: "rgba(120,120,128,0.14)", icon: "cloud-off", label: t("Offline") },
+    // Device senza token: l'app funziona solo in locale, la coda resta in attesa.
+    unlinked: { color: "var(--text-3)", bg: "rgba(120,120,128,0.14)", icon: "cloud-off", label: t("Non collegato") },
   };
   const cfg = CFG[status] || CFG.ok;
 

@@ -280,6 +280,26 @@ const UIAnimatedNumber = ({ value, decimals = 1 }) => {
   return <span ref={ref} className="tnum">{Number(value).toFixed(decimals)}</span>;
 };
 
+// — Dati arrivati dal sync: dopo aver applicato record di un altro device SyncV2
+//   emette "lfh-data" { keys } (chiavi locali riscritte). Le schermate che tengono
+//   in stato React valori letti da storage li ricaricano qui.
+//   match: array di chiavi esatte o funzione (key) → bool; onData(hitKeys).
+//   Callback sempre l'ultima (ref): niente closure vecchie. —
+function useSyncedData(match, onData) {
+  const ref = React.useRef(null);
+  ref.current = { match, onData };
+  React.useEffect(() => {
+    const h = (e) => {
+      const keys = (e && e.detail && Array.isArray(e.detail.keys)) ? e.detail.keys : [];
+      const cur = ref.current;
+      const hit = keys.filter(k => (typeof cur.match === "function" ? cur.match(k) : cur.match.indexOf(k) !== -1));
+      if (hit.length) cur.onData(hit);
+    };
+    window.addEventListener("lfh-data", h);
+    return () => window.removeEventListener("lfh-data", h);
+  }, []);
+}
+
 window.UIAvatarLF = UIAvatarLF;
 window.UIHeader   = UIHeader;
 window.UICard     = UICard;
@@ -295,6 +315,7 @@ window.UIErrorBoundary = UIErrorBoundary;
 window.UIEmpty    = UIEmpty;
 window.UISkeleton = UISkeleton;
 window.UIAnimatedNumber = UIAnimatedNumber;
+window.useSyncedData = useSyncedData;
 
 // ── Recharts on-demand ──────────────────────────────────────────────────────
 // ~500 KB usati solo da Storico: iniettati al primo ingresso invece che a ogni

@@ -160,6 +160,10 @@ function _validateDietaText(text, t) {
 
 function _fmtImportDate(iso) {
   try {
+    // "YYYY-MM-DD" (validFrom di un piano) → solo data, in ora locale.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(iso))) {
+      return new Date(iso + "T12:00:00").toLocaleDateString(undefined, { day: "2-digit", month: "2-digit", year: "numeric" });
+    }
     const d = new Date(iso);
     if (isNaN(d)) return "";
     return d.toLocaleDateString(undefined, { day: "2-digit", month: "2-digit", year: "numeric" }) +
@@ -167,18 +171,49 @@ function _fmtImportDate(iso) {
   } catch (_) { return ""; }
 }
 
+// ── Import .txt → piano strutturato (temporaneo, sostituito in Task 6) ────────
+// Il testo diventa un nuovo piano attivo (workoutPlan / dietPlan) con id
+// workout|diet-YYYYMMDD-HHMM, nome dal file e validFrom = oggi; il piano attivo
+// precedente passa ad "archived" con validTo = oggi. SyncV2.putRecords aggiorna
+// subito plan_workout / plan_diet (Scheda e Dieta lo usano) e mette in coda il push.
+const _PLAN_IMPORT = {
+  scheda: { collection: "workoutPlan", prefix: "workout", fromText: "workoutPlanFromText", legacy: "toLegacyScheda", local: "plan_workout", textKey: "schedaData" },
+  dieta:  { collection: "dietPlan",    prefix: "diet",    fromText: "dietPlanFromText",    legacy: "toLegacyDieta",  local: "plan_diet",    textKey: "dietaData" },
+};
+function _importPlanChanges(kind, text, fileName, now) {
+  const cfg = _PLAN_IMPORT[kind], PC = window.PlanConv;
+  const d = now || new Date();
+  const p2 = (n) => String(n).padStart(2, "0");
+  const today = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+  const id = `${cfg.prefix}-${today.replace(/-/g, "")}-${p2(d.getHours())}${p2(d.getMinutes())}`;
+  const name = String(fileName || "").replace(/\.txt$/i, "") || kind;
+  const plan = PC[cfg.fromText](text, { id, name, validFrom: today });
+  const prev = window.storage ? window.storage.get(cfg.local, null) : null;
+  // Stesso contenuto del piano attivo → niente nuovo piano.
+  if (prev && prev.data && JSON.stringify(PC[cfg.legacy](prev.data)) === JSON.stringify(PC[cfg.legacy](plan.data))) {
+    return { identical: true, changes: [] };
+  }
+  const changes = [{ collection: cfg.collection, id: plan.id, data: plan.data }];
+  if (prev && prev.id && prev.id !== plan.id && prev.data) {
+    changes.push({ collection: cfg.collection, id: prev.id, data: Object.assign({}, prev.data, { status: "archived", validTo: today }) });
+  }
+  return { identical: false, changes };
+}
+
 // NB: nessun filtro `accept` di default. iOS (picker "File") rende NON
 // selezionabili i .txt quando accept=".txt"/"text/plain" (filtra per UTI):
 // il popup si apre ma il file resta grigio. Senza accept il file è sempre
 // selezionabile; la sicurezza è garantita da `validate` (valida il contenuto
 // dopo la lettura, un file sbagliato non tocca i dati esistenti).
-const FileImporter = ({ label, icon, storageKey, accept = "", validate }) => {
+const FileImporter = ({ label, icon, kind, accept = "", validate }) => {
   const t = useT();
-  const [loaded, setLoaded]   = React.useState(() => !!(window.storage && window.storage.get(storageKey, null)));
-  const [fileName, setFileName] = React.useState(() => window.storage ? window.storage.get(storageKey + "_name", "") : "");
-  const [importedAt, setImportedAt] = React.useState(() => window.storage ? window.storage.get(storageKey + "_at", "") : "");
-  const [status, setStatus] = React.useState(null); // {type:'ok'|'err', msg}
+  const cfg = _PLAN_IMPORT[kind];
+  const readPlan = () => (window.storage ? window.storage.get(cfg.local, null) : null);
+  const [plan, setPlan] = React.useState(readPlan);
+  const [status, setStatus] = React.useState(null); // {type:'ok'|'err'|'warn', msg}
   const inputRef = React.useRef(null);
+  // Piano cambiato da un altro device (o da questo import): riga aggiornata.
+  useSyncedData([cfg.local], () => setPlan(readPlan()));
 
   const handleFile = (e) => {
     const file = e.target.files?.[0];
@@ -186,39 +221,35 @@ const FileImporter = ({ label, icon, storageKey, accept = "", validate }) => {
     const reader = new FileReader();
     reader.onerror = () => setStatus({ type: "err", msg: t("Errore di lettura del file") });
     reader.onload = (ev) => {
-      // Normalizza: BOM (file da Windows/Blocco note) e a-capo CR/CRLF → LF,
-      // così il testo salvato/sincato è identico a prescindere dall'editor.
-      const text = String(ev.target.result || "").replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+      // Normalizza: BOM (file da Windows/Blocco note) e a-capo CR/CRLF → LF.
+      const text = String(ev.target.result || "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
       // Validazione: se il formato non torna, NON toccare i dati esistenti
       const v = validate ? validate(text, t) : { ok: true, detail: "" };
-      if (!v.ok) {
+      if (!v.ok || !window.PlanConv || !window.SyncV2) {
         setStatus({ type: "err", msg: t("Formato non valido — dati attuali conservati") });
         return;
       }
-      if (window.storage && text === window.storage.get(storageKey, null)) {
+      let res;
+      try { res = _importPlanChanges(kind, text, file.name); }
+      catch (_) { setStatus({ type: "err", msg: t("Formato non valido — dati attuali conservati") }); return; }
+      if (res.identical) {
         setStatus({ type: "ok", msg: t("File identico a quello attuale") });
         setTimeout(() => setStatus(null), 4000);
         return;
       }
-      const now = new Date().toISOString();
-      if (window.storage) {
-        window.storage.set(storageKey, text);
-        window.storage.set(storageKey + "_name", file.name);
-        window.storage.set(storageKey + "_at", now);
-      }
-      setLoaded(true);
-      setFileName(file.name);
-      setImportedAt(now);
+      window.SyncV2.putRecords(res.changes);
+      // Testo grezzo tenuto solo sul device per "Esporta (.txt)" qui sotto.
+      if (window.storage) window.storage.set(cfg.textKey, text);
+      setPlan(readPlan());
       const okMsg = `${t("Importato")}${v.detail ? " · " + v.detail : ""}`;
+      if (!window.SyncV2.hasToken()) {
+        setStatus({ type: "warn", msg: `${okMsg} · ${t("salvato sul device (non collegato)")}` });
+        setTimeout(() => setStatus(null), 6000);
+        return;
+      }
       setStatus({ type: "ok", msg: `${okMsg} · ${t("sync cloud…")}` });
-      // Sync al cloud (scheda/dieta disponibili su tutti i device): retry +
-      // "pending" → un pull concorrente non può più riportare la versione
-      // vecchia, e se la rete manca riparte da sola al prossimo sync.
-      const push = window._saveSettingRetry
-        ? window._saveSettingRetry(storageKey, text)
-        : Promise.resolve(false);
-      push.then(ok => {
-        setStatus(ok
+      window.SyncV2.syncNow().then(r => {
+        setStatus(r && r.ok
           ? { type: "ok",   msg: `${okMsg} · ${t("sincronizzato")}` }
           : { type: "warn", msg: `${okMsg} · ${t("salvato sul device, sync cloud appena torna la rete")}` });
         setTimeout(() => setStatus(null), 6000);
@@ -227,10 +258,11 @@ const FileImporter = ({ label, icon, storageKey, accept = "", validate }) => {
     reader.readAsText(file, "UTF-8");
   };
 
+  const loaded = !!(plan && plan.data);
   const subText = status
     ? status.msg
     : loaded
-      ? `${fileName || t("Caricato")}${importedAt ? " · " + t("Ultimo import") + " " + _fmtImportDate(importedAt) : ""}`
+      ? `${plan.data.name || t("Caricato")}${plan.data.validFrom ? " · " + t("dal") + " " + _fmtImportDate(plan.data.validFrom) : ""}`
       : t("Nessun file importato");
 
   return (
@@ -315,14 +347,15 @@ const SyncNowRow = () => {
   const [syncing, setSyncing] = React.useState(false);
   const [syncResult, setSyncResult] = React.useState(null);
 
+  // Sync completo con il backend (invio coda + ricezione); senza token → "non collegato".
   const handleSync = async () => {
     setSyncing(true);
     setSyncResult(null);
     try {
-      await window._cloudPushAll();
-      setSyncResult({ ok: true });
+      const r = window.SyncV2 ? await window.SyncV2.syncNow() : { ok: false, error: "assente" };
+      setSyncResult({ ok: !!(r && r.ok), unlinked: !!(r && r.error === "unlinked") });
     } catch (e) {
-      setSyncResult({ ok: false, msg: e.message });
+      setSyncResult({ ok: false });
     } finally {
       setSyncing(false);
       setTimeout(() => setSyncResult(null), 4000);
@@ -334,7 +367,7 @@ const SyncNowRow = () => {
       icon="refresh"
       iconBg="#0A84FF"
       title={t("Sincronizza ora")}
-      sub={t("Pusha tutti i dati locali al cloud")}
+      sub={t("Invia e ricevi le modifiche")}
       onClick={!syncing ? handleSync : undefined}
     >
       {syncing ? (
@@ -345,7 +378,7 @@ const SyncNowRow = () => {
           background: syncResult.ok ? "rgba(48,209,88,0.18)" : "rgba(255,69,58,0.14)",
           color: syncResult.ok ? "var(--success)" : "var(--danger)",
         }}>
-          {syncResult.ok ? "✓ " + t("Sincronizzato") : "✗ " + t("Errore")}
+          {syncResult.ok ? "✓ " + t("Sincronizzato") : "✗ " + (syncResult.unlinked ? t("Non collegato") : t("Errore"))}
         </span>
       ) : (
         <Icon name="chevron" size={13} color="var(--accent)" />
@@ -354,7 +387,7 @@ const SyncNowRow = () => {
   );
 };
 
-// ── Sync status row — legge window._syncState (aggiornato da app.jsx) ──────
+// ── Sync status row — legge window._syncState (aggiornato da SyncV2) ────────
 const SyncStatusRow = () => {
   const t = useT();
   const [s, setS] = React.useState(() => window._syncState || { status: "idle", last: null });
@@ -373,7 +406,7 @@ const SyncStatusRow = () => {
       icon="cloud"
       iconBg="#30D158"
       title={t("Stato sincronizzazione")}
-      sub={time ? `${t("Ultimo sync")}: ${time} · ${t("Cloud: Google Sheets via proxy")}` : t("In attesa del primo sync")}
+      sub={time ? `${t("Ultimo sync")}: ${time} · ${t("Cloud: Cloudflare")}` : s.status === "unlinked" ? t("Device non collegato: dati solo in locale") : t("In attesa del primo sync")}
     >
       {window.SyncBadge ? <SyncBadge /> : null}
     </IRow>
@@ -808,13 +841,13 @@ const Impostazioni = ({ device, onNav, theme, setTheme, bodyWeight, setBodyWeigh
         <FileImporter
           label={t("Importa scheda (.txt)")}
           icon="dumbbell"
-          storageKey="schedaData"
+          kind="scheda"
           validate={_validateSchedaText}
         />
         <FileImporter
           label={t("Importa dieta (.txt)")}
           icon="fork"
-          storageKey="dietaData"
+          kind="dieta"
           validate={_validateDietaText}
         />
         <PlanExportRow

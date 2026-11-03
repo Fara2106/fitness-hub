@@ -175,27 +175,25 @@ _FALLBACK.ore22 = {
   ],
 };
 
-// Load parsed dieta or fallback
+// Dieta corrente: piano attivo (plan_diet) o testo embedded, via window.getDieta
+// (parser.jsx); _FALLBACK (codice) solo se nulla è leggibile.
 function _getDieta() {
-  if (!window.parseDieta || !window.storage) return _FALLBACK;
-  const text = window.storage.get("dietaData", null);
-  if (!text) return _FALLBACK;
+  let parsed = null;
+  try { parsed = window.getDieta ? window.getDieta() : null; } catch (_) { parsed = null; }
+  if (!parsed) return _FALLBACK;
   try {
-    const parsed = window.parseDieta(text);
-    if (!parsed) return _FALLBACK;
+    const fromPlan = !!parsed._fromPlan;
     const has = (k) => parsed[k] && parsed[k].meals && parsed[k].meals.length;
     const KEYS = ["riposo","mattina","ore17","ore21","ore22"];
     if (!KEYS.some(has)) return _FALLBACK;
     // Prima normalizza le varianti presenti nel TUO piano.
     KEYS.filter(has).forEach(k => {
-      // Integratori dal file; la lista fissa solo se il file non ne ha (prima
-      // vinceva SEMPRE la lista fissa: cambiando piano gli integratori non
-      // cambiavano. Per il dieta.txt attuale le due coincidono).
-      if (!parsed[k].integratori || !parsed[k].integratori.length) parsed[k].integratori = _SUPPS_MAP[k];
+      // Integratori: dal piano strutturato SOLO quelli previsti (anche nessuno);
+      // dal testo embedded la lista fissa solo se il file non ne ha.
+      if (!fromPlan && (!parsed[k].integratori || !parsed[k].integratori.length)) parsed[k].integratori = _SUPPS_MAP[k];
       parsed[k].meals.forEach(m => { if (!m.sortTime) m.sortTime = m.time; });
     });
-    // Variante assente nel piano importato → la più vicina DEL TUO PIANO (prima:
-    // pasti di un vecchio piano scritto nel codice, senza avviso). _fallbackFrom
+    // Variante assente nel piano → la più vicina DEL TUO PIANO. _fallbackFrom
     // fa comparire l'avviso nella schermata.
     const NEAR = { riposo: ["ore17","mattina","ore21","ore22"], mattina: ["ore17","ore21","ore22","riposo"],
                    ore17: ["mattina","ore21","ore22","riposo"], ore21: ["ore22","ore17","mattina","riposo"],
@@ -209,6 +207,13 @@ function _getDieta() {
   } catch (_) {
     return _FALLBACK;
   }
+}
+
+// Variante mostrata oggi (dietaVariant_<data>, sincronizzata come dayState.dietVariant):
+// valida solo se è una delle varianti della schermata, altrimenti null.
+function _savedVariant(today) {
+  const v = window.storage ? window.storage.get(`dietaVariant_${today}`, null) : null;
+  return (v === "riposo" || _DAY_TYPES.some(d => d.id === v)) ? v : null;
 }
 
 // ── Build chronological timeline (meals + supplements) ────────────────────
@@ -563,23 +568,47 @@ const Dieta = ({ device, onNav }) => {
   const isDesktop = device === "desktop";
   const t = useT();
 
-  const [dieta]       = React.useState(() => _getDieta());
+  const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
+  const [dieta, setDieta] = React.useState(() => _getDieta());
+  const [, bump] = React.useState(0);
+  // Variante del giorno: quella scelta oggi (anche su un altro device) se c'è,
+  // altrimenti sessione di oggi → "ore17", nessuna sessione → riposo.
   const [training, setTraining] = React.useState(() => {
+    const v = _savedVariant(today);
+    if (v) return v !== "riposo";
     const sess = window.getTodaySession ? window.getTodaySession() : null;
     return !!sess;
   });
-  const [trainTime, setTrainTime] = React.useState("ore17");
+  const [trainTime, setTrainTime] = React.useState(() => {
+    const v = _savedVariant(today);
+    return v && v !== "riposo" ? v : "ore17";
+  });
   const [cardio, setCardio]       = React.useState(false);
   const [cardioType, setCardioType] = React.useState("camminata");
   const [cardioMin, setCardioMin]   = React.useState(30);
 
+  // Registra la variante mostrata (cambio variante o spunta): così le spunte di
+  // oggi restano legate ai pasti/integratori giusti anche sugli altri device.
+  const saveVariant = (v) => {
+    if (window.storage && window.storage.get(`dietaVariant_${today}`, null) !== v) window.storage.set(`dietaVariant_${today}`, v);
+  };
+  const toggleTraining = () => {
+    const next = !training;
+    setTraining(next);
+    saveVariant(next ? trainTime : "riposo");
+  };
+  const pickTrainTime = (id) => {
+    setTrainTime(id);
+    saveVariant(id);
+  };
+
   // Supplement check state — keyed by today
-  const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
   const [checked, setChecked] = React.useState(() =>
     window.storage ? window.storage.get(`integ_${today}`, {}) : {}
   );
 
   const toggleSupp = (type) => {
+    saveVariant(training ? trainTime : "riposo");
     setChecked(c => {
       const next = { ...c, [type]: !c[type] };
       if (window.storage) window.storage.set(`integ_${today}`, next);
@@ -593,6 +622,7 @@ const Dieta = ({ device, onNav }) => {
     window.storage ? window.storage.get(`dietaCheck_${today}`, {}) : {}
   );
   const toggleMeal = (key) => {
+    saveVariant(training ? trainTime : "riposo");
     setMealChecked(c => {
       const next = { ...c, [key]: !c[key] };
       if (window.storage) window.storage.set(`dietaCheck_${today}`, next);
@@ -600,12 +630,28 @@ const Dieta = ({ device, onNav }) => {
       return next;
     });
   };
+
+  // Dati arrivati dal sync (altro device): spunte, variante del giorno, piano.
+  useSyncedData([`integ_${today}`, `dietaCheck_${today}`, `dietaVariant_${today}`, "plan_diet", "plan_workout"], (keys) => {
+    const st = window.storage;
+    if (!st) return;
+    if (keys.indexOf(`integ_${today}`) !== -1) setChecked(st.get(`integ_${today}`, {}) || {});
+    if (keys.indexOf(`dietaCheck_${today}`) !== -1) setMealChecked(st.get(`dietaCheck_${today}`, {}) || {});
+    if (keys.indexOf(`dietaVariant_${today}`) !== -1) {
+      const v = _savedVariant(today);
+      if (v) { setTraining(v !== "riposo"); if (v !== "riposo") setTrainTime(v); }
+    }
+    if (keys.indexOf("plan_diet") !== -1) setDieta(_getDieta());
+    if (keys.indexOf("plan_workout") !== -1) bump(n => n + 1);  // etichetta della sessione di oggi
+  });
   const _mealKey = (ml) => `${ml.time}|${ml.title}`;
 
   const dayType    = training ? trainTime : "riposo";
   const section    = dieta[dayType] || dieta.riposo;
   const meals      = section.meals || [];
-  const supps      = (section.integratori && section.integratori.length) ? section.integratori : (_SUPPS_MAP[dayType] || _SUPPS_RIPOSO);
+  // Piano strutturato: solo gli integratori previsti dal piano (anche nessuno).
+  const supps      = (section.integratori && section.integratori.length) ? section.integratori
+                   : dieta._fromPlan ? [] : (_SUPPS_MAP[dayType] || _SUPPS_RIPOSO);
 
   const ct         = _CARDIO_TYPES.find(c => c.id === cardioType) || _CARDIO_TYPES[0];
 
@@ -667,7 +713,7 @@ const Dieta = ({ device, onNav }) => {
                 : t("Seleziona orario")}
             </div>
           </div>
-          <div className={`ios-toggle blue ${training ? "on" : ""}`} onClick={() => setTraining(v => !v)} />
+          <div className={`ios-toggle blue ${training ? "on" : ""}`} onClick={toggleTraining} />
         </div>
 
         {training && (
@@ -677,7 +723,7 @@ const Dieta = ({ device, onNav }) => {
               {_DAY_TYPES.map(d => {
                 const on = trainTime === d.id;
                 return (
-                  <button key={d.id} onClick={() => setTrainTime(d.id)} style={{
+                  <button key={d.id} onClick={() => pickTrainTime(d.id)} style={{
                     display: "inline-flex", alignItems: "center", gap: 5,
                     padding: "7px 12px", border: 0,
                     background: on ? "var(--accent)" : "var(--card-2)",
@@ -764,8 +810,8 @@ const Dieta = ({ device, onNav }) => {
         {/* Slider + supplement badge as sticky header above list */}
         <div style={{ marginBottom: isDesktop ? 14 : 10, display: "flex", flexDirection: "column", gap: 8 }}>
           <DayTimeSlider timeline={timeline} />
-          {/* Supplement summary badge */}
-          <div style={{
+          {/* Supplement summary badge (nascosto se il piano non prevede integratori) */}
+          {supps.length > 0 && <div style={{
             display: "flex", alignItems: "center", gap: 10,
             padding: "9px 14px", borderRadius: 12,
             background: allSuppsDone ? "rgba(48,209,88,0.1)" : "rgba(255,159,10,0.08)",
@@ -781,7 +827,7 @@ const Dieta = ({ device, onNav }) => {
             }}>
               {doneCount}/{supps.length}
             </span>
-          </div>
+          </div>}
         </div>
         {/* Vertical guide line */}
         <div style={{

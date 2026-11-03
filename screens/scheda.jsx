@@ -887,7 +887,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   const isDesktop = device === "desktop";
   const t = useT();
 
-  const [days]  = React.useState(() => _buildSchedule());
+  const [days, setDays] = React.useState(() => _buildSchedule());
   const current = days.find(d => d.key === scheda) || days[0] || { key: "", num: 0, name: "", focus: [], exercises: [] };
 
   // Blocco progressi di giornata (piatto, keyed-by-id, valido per TUTTI i giorni).
@@ -916,7 +916,6 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   const [pesiHistory, setPesiHistory] = React.useState(null);
   // Note setup persistenti per esercizio ("sedile 4, presa media"), sincate.
   const [exNotes, setExNotes] = React.useState(() => window.storage ? window.storage.get("exNotes", {}) : {});
-  const exNotesPushTid = React.useRef(null);
   // Riepilogo di fine sessione (overlay dopo il salvataggio).
   const [summary, setSummary] = React.useState(null);
   // Record personali (PR) per esercizio: { nome: { peso, date } } — persistiti,
@@ -971,22 +970,41 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
     }));
   };
 
-  // Nota setup: salva in locale subito, push cloud (chiave "exNotes") con debounce.
+  // Nota setup: salva in locale (il sync la porta agli altri device, nota per nota).
   const saveExNote = (name, text) => {
     const key = (name || "").toLowerCase();
     if (!key) return;
     setExNotes(prev => {
       const next = Object.assign({}, prev);
       if (text) next[key] = text; else delete next[key];
-      if (window._markEdits) window._markEdits("exNotes", prev, next); // unione per voce tra device
       if (window.storage) window.storage.set("exNotes", next);
-      clearTimeout(exNotesPushTid.current);
-      exNotesPushTid.current = setTimeout(() => {
-        if (window._saveSettingRetry) window._saveSettingRetry("exNotes", JSON.stringify(next));
-      }, 1500);
       return next;
     });
   };
+
+  // Dati arrivati dal sync (altro device). Le modifiche locali ancora in coda
+  // vincono già nel motore, quindi ricaricare da storage non perde pesi/spunte
+  // appena fatti; le note di oggi invece si scrivono solo alla chiusura sessione
+  // → se l'utente ha già scritto qualcosa nella textarea non si toccano.
+  const notesDirtyRef = React.useRef(false);
+  useSyncedData(["plan_workout", window.schedaProgKey(dayK), `notes_${dayK}`, "exNotes", "prMap"], (keys) => {
+    const st = window.storage;
+    if (!st) return;
+    const has = (k) => keys.indexOf(k) !== -1;
+    let curDays = days;
+    if (has("plan_workout")) { curDays = _buildSchedule(); setDays(curDays); }
+    if (has("plan_workout") || has(window.schedaProgKey(dayK))) {
+      // Piano cambiato in giornata → stessa pulizia del mount (sanitizeSchedaProg):
+      // le spunte non passano a un altro esercizio nella stessa posizione.
+      const res = window.sanitizeSchedaProg(window.readSchedaProg(st, dayK), curDays, window.schedaPlanSig(curDays));
+      if (res.changed) st.set(window.schedaProgKey(dayK), res.prog);
+      pesosRef.current = Object.assign({}, res.prog.pesos);
+      setProg(res.prog);
+    }
+    if (has(`notes_${dayK}`) && !notesDirtyRef.current) setNotes(st.get(`notes_${dayK}`, "") || "");
+    if (has("exNotes")) setExNotes(st.get("exNotes", {}) || {});
+    if (has("prMap")) setPrMap(st.get("prMap", {}) || {});
+  });
 
   // Seduta scarica? Check-in di oggi + due giorni precedenti (autoregolazione).
   const deload = React.useMemo(() => {
@@ -1094,11 +1112,8 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
       // gruppo muscolare (la card "Settimana" in Dashboard usa dati reali)
       if (window.storage) {
         window.storage.set(`gym_${today}`, true);
-        const GROUP = {
-          petto: "Petto", schiena: "Schiena", spalle: "Spalle", trapezi: "Spalle",
-          quadricipiti: "Gambe", femorali: "Gambe", glutei: "Gambe", polpacci: "Gambe",
-          bicipiti: "Braccia", tricipiti: "Braccia", addome: "Core",
-        };
+        // Stessa tabella usata dal sync per ricostruire muscleSets_ (recordmap.jsx).
+        const GROUP = window.RecordMap.MUSCLE_GROUP;
         const daily = {};
         exercises.forEach((ex, exIdx) => {
           const done = (completion[window.exId(scheda, exIdx)] || []).filter(Boolean).length;
@@ -1342,7 +1357,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
         </div>
         <textarea
           value={notes}
-          onChange={(e) => setNotes(e.target.value)}
+          onChange={(e) => { notesDirtyRef.current = true; setNotes(e.target.value); }}
           placeholder={t("Sensazioni, fastidi, dettagli da ricordare… il coach AI le leggerà.")}
           rows={3}
           style={{

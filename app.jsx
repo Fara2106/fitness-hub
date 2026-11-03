@@ -91,509 +91,50 @@ function _applyTheme(theme) {
   metas.forEach(m => m.setAttribute("content", light ? "#f7f7fa" : "#0b0b0f"));
 }
 
-// ── Sync state (osservabile dalla UI: SyncBadge in nav.jsx, riga in Impostazioni) ──
-window._syncState = { status: "idle", last: null };
-function _setSyncState(status) {
-  const prev = window._syncState || {};
-  window._syncState = {
-    status,
-    last: status === "ok" ? Date.now() : prev.last || null,
-  };
-  try { window.dispatchEvent(new Event("lfh-sync")); } catch (_) {}
-}
-
-// ── Cloud sync (pull settings + peso from Sheets on startup) ─────────────
-//
-// ARCHITETTURA: ogni chiamata ha il suo timeout individuale via _safe().
-// Promise.all aspetta entrambe, ma ognuna risolve a {ok,value/err} senza
-// mai rigettare → nessun blocco se una delle due è lenta.
-function _safe(p, ms) {
-  return Promise.race([
-    p.then(v  => ({ ok: true,  value: v    }))
-     .catch(e => ({ ok: false, err: String(e) })),
-    new Promise(resolve => setTimeout(() => resolve({ ok: false, err: "timeout" }), ms)),
-  ]);
-}
-
-// ── Push settings: retry + serializzato/coalescente per chiave + "pending" ──
-// 1) Retry: un singolo errore di rete non fa sparire il dato dal cloud.
-// 2) Per chiave le push vanno in fila e si manda solo l'ULTIMO valore: con
-//    tante spunte rapide (Spesa) le POST parallele arrivavano ad Apps Script
-//    in ordine sparso e nel foglio restava uno stato vecchio.
-// 3) Ogni valore scritto in locale resta in "settingsPending" (persistito)
-//    finché il cloud non lo conferma. Il pull (cloud-wins) NON sovrascrive le
-//    chiavi pending né quelle confermate mentre il pull era in volo: prima un
-//    pull concorrente riportava indietro un import scheda/dieta o una spunta
-//    appena fatta. Le pending rimaste (offline, app chiusa) si ri-pushano al
-//    primo pull riuscito.
-const _push = {}; // key → { chain, latest, busy, doneAt }
-function _pendingSettings() {
-  return (window.storage && window.storage.get("settingsPending", {})) || {};
-}
-function _setPending(key, value) {
-  if (!window.storage) return;
-  const p = Object.assign({}, _pendingSettings());
-  if (value === undefined) { if (!(key in p)) return; delete p[key]; }
-  else p[key] = value;
-  window.storage.set("settingsPending", p);
-}
-
-// ── Unione per voce tra device (spunte Spesa, articoli extra, note esercizi) ──
-// Prima ogni push mandava la mappa INTERA del device: spunte diverse fatte su
-// iPhone e iPad nello stesso momento si cancellavano a vicenda (vince l'ultimo
-// che scrive). Ora si ricorda QUALI voci sono cambiate in locale e non ancora
-// confermate ("settingsEdits"); alla push si rilegge il cloud e ci si
-// riapplicano sopra solo quelle; al pull idem. Stessa voce toccata su due
-// device → vince l'ultima modifica. Il formato nel foglio non cambia.
-const _MERGE = {
-  spesaChecked2: { local: "spesaChecked", list: false }, // { idArticolo: bool }
-  spesaExtra:    { local: "spesaExtra",   list: true  }, // [{ id, name }]
-  exNotes:       { local: "exNotes",      list: false }, // { esercizio: testo }
-};
-function _toMap(val, list) {
-  if (!val || typeof val !== "object") return {};
-  if (!list) return val;
-  const m = {};
-  (Array.isArray(val) ? val : []).forEach(it => { if (it && it.id != null) m[String(it.id)] = it; });
-  return m;
-}
-function _fromMap(m, list) {
-  return list ? Object.values(m).sort((a, b) => Number(a.id) - Number(b.id)) : m;
-}
-function _edits() {
-  return (window.storage && window.storage.get("settingsEdits", {})) || {};
-}
-// Registra le voci cambiate fra prev e next (null = voce rimossa).
-function _markEdits(key, prev, next) {
-  const cfg = _MERGE[key];
-  if (!cfg || !window.storage) return;
-  const a = _toMap(prev, cfg.list), b = _toMap(next, cfg.list);
-  const all = Object.assign({}, _edits());
-  const cur = all[key] || { seq: 0, e: {} };
-  const e = Object.assign({}, cur.e);
-  let changed = false;
-  new Set([...Object.keys(a), ...Object.keys(b)]).forEach(id => {
-    if (JSON.stringify(a[id]) !== JSON.stringify(b[id])) {
-      e[id] = b[id] === undefined ? null : b[id];
-      changed = true;
-    }
-  });
-  if (!changed) return;
-  all[key] = { seq: cur.seq + 1, e };
-  window.storage.set("settingsEdits", all);
-}
-window._markEdits = _markEdits;
-// Valore cloud (già parsato) + modifiche locali non confermate.
-function _applyEdits(key, cloudVal) {
-  const cfg = _MERGE[key];
-  const m = Object.assign({}, _toMap(cloudVal, cfg.list));
-  const ed = (_edits()[key] || {}).e || {};
-  Object.entries(ed).forEach(([id, v]) => { if (v === null) delete m[id]; else m[id] = v; });
-  return _fromMap(m, cfg.list);
-}
-
-// Pull di una chiave unibile: vista locale = cloud + modifiche non confermate.
-// Le modifiche si cancellano solo quando il cloud le contiene davvero; se due
-// device hanno scritto nello stesso istante e una voce è andata persa, la si
-// ri-pusha (convergenza garantita al pull successivo).
-function _pullMerged(key, cloudVal) {
-  const cfg = _MERGE[key];
-  const all = Object.assign({}, _edits());
-  const ed = all[key];
-  if (ed) {
-    const cm = _toMap(cloudVal, cfg.list);
-    const reflected = Object.entries(ed.e).every(([id, v]) =>
-      v === null ? !(id in cm) : JSON.stringify(cm[id]) === JSON.stringify(v));
-    const slot = _push[key];
-    if (reflected) {
-      if (!slot || slot.busy === 0) { delete all[key]; window.storage.set("settingsEdits", all); }
-    } else if (!slot || slot.busy === 0) {
-      _saveSettingRetry(key, JSON.stringify(_applyEdits(key, cloudVal)));
-    }
-  }
-  return _applyEdits(key, cloudVal);
-}
-
-function _saveSettingRetry(key, value, tries = 2) {
-  if (!window.sheetsAPI) return Promise.resolve(false);
-  const v = String(value);
-  _setPending(key, v);
-  const slot = _push[key] || (_push[key] = { chain: Promise.resolve(), latest: null, busy: 0, doneAt: 0 });
-  slot.latest = v;
-  slot.busy++;
-  const attempt = async (n) => {
-    // Chiave unibile con modifiche locali → rileggi il cloud e manda l'unione.
-    // Se la lettura fallisce si manda il valore locale (comportamento storico).
-    let payload = v;
-    const cfg = _MERGE[key];
-    const ed = _edits()[key];
-    if (cfg && ed && Object.keys(ed.e).length && window.sheetsAPI.getSettings) {
-      const r = await _safe(window.sheetsAPI.getSettings(), 8000);
-      if (r.ok && r.value && typeof r.value === "object") {
-        const raw = r.value[key] || (key === "spesaChecked2" ? r.value.spesaChecked : null);
-        let cloud = null;
-        try { cloud = raw ? JSON.parse(raw) : null; } catch (_) {}
-        const merged = _applyEdits(key, cloud);
-        payload = JSON.stringify(merged);
-        window.storage.set(cfg.local, merged);
-        try { window.dispatchEvent(new Event("lfh-merged")); } catch (_) {}
-      }
-    }
-    return window.sheetsAPI.saveSettings({ key, value: payload })
-      .then(() => {
-        slot.doneAt = Date.now();
-        if (_pendingSettings()[key] === v) _setPending(key, undefined);
-        console.log("[sync push]", key, "✓");
-        return true;
-      })
-      .catch(e => {
-        if (n > 0) return new Promise(r => setTimeout(r, 800)).then(() => attempt(n - 1));
-        console.warn("[sync push err]", key, e);
-        return false; // resta pending → ri-push al prossimo pull riuscito
-      });
-  };
-  // Superato da un valore più recente prima del suo turno → lo manda quello.
-  const run = slot.chain.then(() => (slot.latest !== v ? true : attempt(tries)));
-  slot.chain = run.catch(() => {}).then(() => { slot.busy--; });
-  return run;
-}
-window._saveSettingRetry = _saveSettingRetry;
-
-// Il pull deve lasciare stare questa chiave? (modifica locale non ancora
-// confermata dal cloud, o confermata DOPO l'avvio del pull → risposta stale)
-function _cloudSkip(key, pullStart) {
-  if (key in _pendingSettings()) return true;
-  const s = _push[key];
-  return !!(s && (s.busy > 0 || (s.doneAt && s.doneAt > pullStart - 1500)));
-}
-
-// Ri-pusha le modifiche locali rimaste pending (offline / app chiusa a metà).
-function _repushPending() {
-  Object.entries(_pendingSettings()).forEach(([k, v]) => {
-    const s = _push[k];
-    if (!s || s.busy === 0) _saveSettingRetry(k, v);
+// ── Sync v2 (Worker fitness-hub-api + D1, motore in syncv2.jsx) ───────────
+// Il motore pubblica lo stato in window._syncState + evento "lfh-sync" (SyncBadge in
+// nav.jsx, riga in Impostazioni) e, dopo aver applicato record in arrivo, l'evento
+// "lfh-data" { keys } con le chiavi locali riscritte: le schermate ricaricano da lì.
+// Le schermate scrivono SOLO lo storage locale: il ponte (storage.onChange →
+// RecordMap → coda) porta le modifiche al server, offline compreso.
+// init dentro onReady: l'indice della cache record si costruisce da storage.keys().
+// Registrato qui (al caricamento del bundle) → gira prima dell'onReady di AppFrame.
+if (window.storage) {
+  window.storage.onReady(() => {
+    _cleanupOldDailyKeys();
+    try { if (window.SyncV2) window.SyncV2.init({ storage: window.storage }); }
+    catch (e) { if (window._logError) window._logError(e); else console.warn("[sync] init:", e); }
   });
 }
 
-// ── Sorgente di verità: i file scheda.txt / dieta.txt del repo ────────────
-// L'app leggeva schedaData/dietaData SOLO da storage (import manuale o cloud):
-// modificare i .txt del repo e ridistribuire non aggiornava mai la scheda/dieta.
-// Ora, all'avvio, si confronta il .txt del repo con l'ultima versione applicata
-// (schedaData_src): se è cambiato, il .txt VINCE → sovrascrive lo storage locale
-// e viene pushato al cloud (Settings sheet). _repoOverride segna le chiavi che il
-// repo ha già vinto in questa sessione, così il pull cloud (che è cloud-wins e
-// avrebbe ancora il valore vecchio finché il push non propaga) non le riscrive.
-const _repoOverride = {};
-
-async function _reconcileRepoFiles() {
-  if (!window.storage) return;
-  const st = window.storage;
-  const files = [
-    { file: "scheda.txt", key: "schedaData", parse: window.parseScheda, valid: (p) =>
-        !!p && Array.isArray(p.days) && p.days.some(d => d && Array.isArray(d.exercises) && d.exercises.length) },
-    { file: "dieta.txt",  key: "dietaData",  parse: window.parseDieta,  valid: (p) =>
-        !!p && Object.keys(p || {}).some(k => p[k] && Array.isArray(p[k].meals) && p[k].meals.length) },
-  ];
-  await Promise.all(files.map(async ({ file, key, parse, valid }) => {
-    try {
-      // cache-bust + no-store: prendi sempre la versione fresca del repo
-      // (il service worker è comunque network-first sui file same-origin).
-      const url = new URL(file, document.baseURI).href + "?_cb=" + Date.now();
-      // Timeout: con rete "finta" (palestra) la fetch poteva restare appesa
-      // a lungo; il file del repo non è mai urgente.
-      const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-      const tid = ctrl && setTimeout(() => ctrl.abort(), 6000);
-      const res = await fetch(url, { cache: "no-store", signal: ctrl ? ctrl.signal : undefined })
-        .finally(() => clearTimeout(tid));
-      if (!res.ok) return;                     // offline / 404 → non toccare nulla
-      const text = await res.text();
-      if (!text || !text.trim()) return;
-      // Non applicare un file rotto: deve almeno parsare in modo valido.
-      if (parse) { try { if (!valid(parse(text))) return; } catch (_) { return; } }
-      const prevSrc = st.get(key + "_src", null);
-      if (text === prevSrc) return;  // invariato dall'ultima volta
-      if (prevSrc === null) {
-        // Primo avvio su QUESTO device (o PWA appena aggiunta alla Home, che ha
-        // uno storage separato da Safari): registra la versione del repo SENZA
-        // imporla né pusharla. Prima il .txt del repo vinceva e veniva pushato
-        // al cloud → cancellava ovunque la scheda/dieta importata a mano.
-        // La versione vera arriva dal pull cloud; se il cloud è vuoto resta
-        // questa (identica al fallback embedded).
-        st.set(key + "_src", text);
-        if (!st.get(key, null)) { st.set(key, text); st.set(key + "_name", file); }
-        return;
-      }
-      st.set(key, text);
-      st.set(key + "_src", text);
-      st.set(key + "_name", file);             // mostrato in Impostazioni → File di testo
-      st.set(key + "_at", new Date().toISOString());
-      _repoOverride[key] = true;               // il repo vince per tutta la sessione
-      _saveSettingRetry(key, text);            // → cloud (Settings sheet)
-      console.log("[repo-file] " + key + " aggiornato da " + file + " → storage + cloud");
-    } catch (e) { console.warn("[repo-file]", file, e); }
-  }));
-}
-window._reconcileRepoFiles = _reconcileRepoFiles;
-
-// getAll non supportato dal backend? Rilevato alla prima sync della sessione:
-// da lì in poi si usano direttamente le due chiamate legacy (zero retry inutili).
-let _getAllUnsupported = false;
-
-async function _cloudSync(opts) {
-  if (!window.sheetsAPI || !window.storage) return;
-  const st = window.storage;
-  const { pesiMs = 8000, settingsMs = 15000 } = opts || {};
-  const pullStart = Date.now();
-
-  if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    _setSyncState("offline");
-    return;
-  }
-  _setSyncState("syncing");
-
-  try {
-    // Percorso preferito: getAll = peso + settings in UNA chiamata (metà
-    // latenza e metà quota Apps Script). Feature-detect: il backend vecchio
-    // risponde al GET con il messaggio info di default (senza .settings) →
-    // fallback alle due chiamate separate per il resto della sessione.
-    let pesiRes = null, settingsRes = null;
-    if (_getAllUnsupported === false && window.sheetsAPI.getAll) {
-      const allRes = await _safe(window.sheetsAPI.getAll(), Math.max(pesiMs, settingsMs));
-      const v = allRes.ok ? allRes.value : null;
-      if (v && Array.isArray(v.pesoCorporeo) && v.settings && typeof v.settings === "object") {
-        pesiRes     = { ok: true, value: v.pesoCorporeo };
-        settingsRes = { ok: true, value: v.settings };
-      } else if (allRes.ok) {
-        _getAllUnsupported = true;
-        console.log("[sync] getAll non supportato dal backend → fallback 2 chiamate");
-      } else {
-        // Errore di rete/timeout: inutile insistere subito con altre due
-        // chiamate (stessa rete) — questo giro fallisce, riprova il prossimo.
-        pesiRes = settingsRes = { ok: false, err: allRes.err };
-      }
-    }
-    if (!settingsRes) {
-      [pesiRes, settingsRes] = await Promise.all([
-        _safe(window.sheetsAPI.getPesoCorporeo(), pesiMs),
-        _safe(window.sheetsAPI.getSettings(),     settingsMs),
-      ]);
-    }
-
-    // 1. Peso corporeo (foglio PesoCorporeo)
-    // Robustezza: fondi lo storico cloud nel weightLog locale (dedup per data,
-    // merge canonico e testato) invece di scrivere solo l'ultimo peso. Così i
-    // grafici/volume hanno i dati completi anche senza aprire lo Storico, e non
-    // si perde nulla per data mancante da un lato.
-    if (pesiRes.ok) {
-      const pesi = pesiRes.value;
-      if (Array.isArray(pesi) && pesi.length > 0) {
-        if (window.WorkoutProgress) {
-          const merged = window.WorkoutProgress.mergeWeightLog(st.get("weightLog", []), pesi, "cloud");
-          st.set("weightLog", merged);
-          if (merged.length) st.set("bodyWeight", merged[merged.length - 1].weight);
-        } else {
-          st.set("bodyWeight", pesi[pesi.length - 1].weight);
-        }
-        console.log("[sync] weightLog merge ←", pesi.length, "cloud rows");
-      }
-    } else {
-      console.warn("[sync] getPesoCorporeo:", pesiRes.err);
-    }
-
-    // 2. Settings cross-device (cloud → local)
-    // cloudKeys = null finché NON abbiamo letto con successo dal cloud.
-    // Fondamentale: se il pull fallisce non dobbiamo pushare nulla, altrimenti
-    // i dati locali (magari stale) sovrascriverebbero quelli buoni nel cloud.
-    let cloudKeys = null;
-    if (settingsRes.ok && settingsRes.value && typeof settingsRes.value === "object") {
-      const s = settingsRes.value;
-      cloudKeys = s;
-      // Le chiavi con una modifica locale non ancora confermata restano locali.
-      const skip = (k) => _cloudSkip(k, pullStart);
-      ["schedaData", "dietaData"].forEach(k => {
-        // Se il .txt del repo ha già vinto in questa sessione, non lasciare che
-        // il valore (ancora vecchio) del cloud lo riscriva prima che il push propaghi.
-        if (_repoOverride[k] || skip(k)) return;
-        if (s[k] && s[k] !== st.get(k, null)) {
-          st.set(k, s[k]);
-          st.set(k + "_name", "cloud");   // Impostazioni → Piani: "cloud · …"
-          console.log("[sync pull]", k, "✓");
-        }
-      });
-      // spesaChecked2: chiave cloud "pulita" (la vecchia "spesaChecked" aveva
-      // righe duplicate nel foglio → lettura sempre stale). Pull retro-compatibile.
-      const spesaCloud = s.spesaChecked2 || s.spesaChecked;
-      // Chiavi unibili (_MERGE): niente skip — la vista è sempre cloud + le
-      // modifiche locali non ancora confermate.
-      if (spesaCloud) {
-        try { st.set("spesaChecked", _pullMerged("spesaChecked2", JSON.parse(spesaCloud))); console.log("[sync pull] spesaChecked ✓"); } catch(_) {}
-      }
-      if (s.spesaFreq && !skip("spesaFreq"))  st.set("spesaFreq", Number(s.spesaFreq) || 1);
-      if (s.spesaExtra) {
-        try { st.set("spesaExtra", _pullMerged("spesaExtra", JSON.parse(s.spesaExtra))); } catch (_) {}
-      }
-      if (s.weightGoal && parseFloat(s.weightGoal) > 0 && !skip("weightGoal")) st.set("weightGoal", parseFloat(s.weightGoal));
-      if (s.exNotes) {
-        try { st.set("exNotes", _pullMerged("exNotes", JSON.parse(s.exNotes))); } catch (_) {}
-      }
-      // groqApiKey: NON sincronizzata (sicurezza) — la chiave resta solo sul device,
-      // così non finisce nel foglio Settings esposto dal backend pubblico.
-      if (s.bodyWeight && parseFloat(s.bodyWeight) > 0 && !skip("bodyWeight")) {
-        st.set("bodyWeight", parseFloat(s.bodyWeight));
-        console.log("[sync pull] bodyWeight (settings) →", s.bodyWeight);
-      }
-      if (s.onboardingDone === "true") st.set("onboardingDone", true);
-    } else {
-      console.warn("[sync] getSettings:", settingsRes.err);
-    }
-
-    // 3. Auto-skip onboarding
-    const hasBW   = parseFloat(st.get("bodyWeight", 0)) > 0;
-    const hasGroq = !!st.get("groqApiKey", "");
-    if (hasGroq || hasBW) {
-      st.set("onboardingDone", true);
-      // pusha onboardingDone solo se il pull è riuscito e il cloud non l'ha
-      if (cloudKeys && cloudKeys.onboardingDone !== "true") {
-        window.sheetsAPI.saveSettings({ key: "onboardingDone", value: "true" }).catch(() => {});
-      }
-      console.log("[sync] onboardingDone → true");
-    }
-
-    // 4. Push locale → cloud SOLO per chiavi mancanti, e SOLO se il pull è
-    //    riuscito (cloudKeys != null). Se il pull è fallito non sappiamo cosa
-    //    c'è nel cloud → non pushare, per non sovrascrivere dati buoni.
-    if (cloudKeys) { _repushPending(); _cloudPushMissing(cloudKeys); }
-    else console.warn("[sync] pull settings fallito → push saltato (anti-clobber)");
-
-    _setSyncState(settingsRes.ok || pesiRes.ok ? "ok" : "error");
-
-    // Backup automatico settimanale (best-effort, dopo una sync riuscita)
-    if (settingsRes.ok) _maybeAutoBackup();
-
-  } catch (e) { console.warn("[sync] error:", e); _setSyncState("error"); }
+// Sync completo (push coda + pull). Mai rigetta: senza token → "unlinked".
+function _syncNow() {
+  if (!window.SyncV2) return Promise.resolve({ ok: false, error: "assente" });
+  return window.SyncV2.syncNow().catch(() => ({ ok: false }));
 }
 
-// ── Backup automatico su Sheets (foglio "Backup", ~1 volta a settimana) ─────
-// Protegge i dati per-giorno che vivono SOLO in IndexedDB (schedaProg_/gym_/
-// coachChat_…): se iOS evicta lo storage, il JSON nel foglio è l'ultima rete.
-// Esclusi i segreti (groqApiKey) e il rumore (errorLog, sheetsQueue).
-// Feature-detect: col .gs vecchio (senza saveBackup) fallisce in silenzio e
-// NON aggiorna lastAutoBackup; un solo tentativo per sessione.
-let _backupTriedThisSession = false;
-function _maybeAutoBackup() {
-  if (_backupTriedThisSession || !window.storage || !window.sheetsAPI) return;
+// Onboarding saltato in automatico se i dati dicono che l'app è già in uso
+// (peso arrivato dal sync o chiave Groq presente), come faceva il vecchio motore.
+function _autoSkipOnboarding() {
   const st = window.storage;
-  const last = st.get("lastAutoBackup", null);
-  if (last && (Date.now() - last) < 6.5 * 86400000) return;
-  _backupTriedThisSession = true;
-  try {
-    const data = {};
-    st.keys().sort().forEach(k => {
-      if (k === "groqApiKey" || k === "errorLog" || k === "sheetsQueue") return;
-      data[k] = st.get(k, null);
-    });
-    const json = JSON.stringify({ _lfhBackup: 1, exportedAt: new Date().toISOString(), auto: true, data });
-    if (json.length > 900000) { console.warn("[backup] snapshot troppo grande, salto"); return; }
-    window.sheetsAPI.post({ action: "saveBackup", json }).then(r => {
-      if (r && r.success && !r.queued) {
-        st.set("lastAutoBackup", Date.now());
-        console.log("[backup] auto-backup su Sheets ✓ (" + (r.chunks || "?") + " chunk)");
-      }
-    }).catch(e => console.warn("[backup] non riuscito (backend senza saveBackup?):", e.message));
-  } catch (_) {}
+  if (!st || st.get("onboardingDone", false)) return;
+  if (parseFloat(st.get("bodyWeight", 0)) > 0 || !!st.get("groqApiKey", "")) st.set("onboardingDone", true);
 }
-
-// ── Cloud push: pusha al cloud tutto ciò che manca ────────────────────────
-function _cloudPushMissing(cloudKeys) {
-  if (!window.sheetsAPI || !window.storage) return;
-  const st = window.storage;
-  const save = (key, value) => {
-    if (value !== undefined && value !== null && value !== "") {
-      _saveSettingRetry(key, value);
-    }
-  };
-
-  // Chiavi semplici (string/number). groqApiKey ESCLUSA di proposito: è un
-  // segreto → resta device-local, non va nel foglio Settings esposto.
-  const KEYS = ["bodyWeight", "onboardingDone", "spesaFreq", "weightGoal"];
-  KEYS.forEach(k => {
-    const local = st.get(k, "");
-    if (local && !cloudKeys[k]) {
-      save(k, k === "onboardingDone" ? "true" : local);
-    }
-  });
-
-  // Chiavi grandi (text files)
-  ["schedaData", "dietaData"].forEach(k => {
-    const local = st.get(k, null);
-    if (local && !cloudKeys[k]) {
-      save(k, local);
-    }
-  });
-
-  // spesaChecked (JSON)
-  const sc = st.get("spesaChecked", null);
-  if (sc && Object.keys(sc).length > 0 && !cloudKeys.spesaChecked2) {
-    save("spesaChecked2", JSON.stringify(sc));
-  }
-
-  // Chiavi JSON (oggetti/array piccoli)
-  [["spesaExtra", []], ["exNotes", {}]].forEach(([k, empty]) => {
-    const local = st.get(k, empty);
-    if (local && Object.keys(local).length > 0 && !cloudKeys[k]) {
-      save(k, JSON.stringify(local));
-    }
-  });
-}
-
-// ── Push forzato di TUTTO al cloud (per bottone "Sincronizza ora") ────────
-window._cloudPushAll = function() {
-  if (!window.sheetsAPI || !window.storage) return Promise.resolve();
-  const st = window.storage;
-  const saves = [];
-  const push = (key, value) => {
-    if (value !== undefined && value !== null && value !== "") {
-      saves.push(_saveSettingRetry(key, value));
-    }
-  };
-
-  // Tutte le chiavi sincronizzabili (groqApiKey ESCLUSA: segreto device-local)
-  push("bodyWeight",    st.get("bodyWeight", ""));
-  push("spesaFreq",     st.get("spesaFreq", ""));
-  push("weightGoal",    st.get("weightGoal", ""));
-  push("onboardingDone", st.get("onboardingDone", false) ? "true" : "");
-
-  const sc = st.get("spesaChecked", null);
-  if (sc && Object.keys(sc).length > 0) push("spesaChecked2", JSON.stringify(sc));
-
-  const se = st.get("spesaExtra", []);
-  if (se && se.length > 0) push("spesaExtra", JSON.stringify(se));
-
-  const en = st.get("exNotes", {});
-  if (en && Object.keys(en).length > 0) push("exNotes", JSON.stringify(en));
-
-  const scheda = st.get("schedaData", null);
-  if (scheda) push("schedaData", scheda);
-
-  const dieta = st.get("dietaData", null);
-  if (dieta) push("dietaData", dieta);
-
-  return Promise.all(saves);
-};
 
 // ── Pulizia chiavi giornaliere vecchie (>90 giorni) ────────────────────────
 // checkIn_/hydration_/notes_/gym_/integ_/coachChat_/schedaProg_ si accumulano
-// una per giorno: senza sweep IndexedDB cresce per sempre.
+// una per giorno: senza sweep IndexedDB cresce per sempre. Rimozioni SILENZIOSE:
+// sul server i record restano per sempre, lo sweep non deve generare push.
 function _cleanupOldDailyKeys() {
   if (!window.storage || !window.storage.keys) return;
   try {
     const cut = new Date();
     cut.setDate(cut.getDate() - 90);
     const cutKey = `${cut.getFullYear()}-${String(cut.getMonth() + 1).padStart(2, "0")}-${String(cut.getDate()).padStart(2, "0")}`;
-    const re = /^(checkIn_|hydration_|notes_|gym_|integ_|coachChat_|schedaProg_|muscleSets_|dietaCheck_|gymStart_|gymSaved_|restDay_|nudgeDismissed_)(\d{4}-\d{2}-\d{2})$/;
+    const re = /^(checkIn_|hydration_|notes_|gym_|integ_|coachChat_|schedaProg_|muscleSets_|dietaCheck_|dietaVariant_|gymStart_|gymSaved_|restDay_|nudgeDismissed_)(\d{4}-\d{2}-\d{2})$/;
     window.storage.keys().forEach(k => {
       const m = k.match(re);
-      if (m && m[2] < cutKey) window.storage.remove(k);
+      if (m && m[2] < cutKey) window.storage.remove(k, { silent: true });
     });
   } catch (_) {}
 }
@@ -711,76 +252,69 @@ const AppFrame = ({ device: _deviceProp, initialScreen, chromeless }) => {
   const [lang, setLang] = React.useState(window.storage ? window.storage.get("lang", "it") : "it");
   const [initialized, setInitialized] = React.useState(false);
   const syncNowRef = React.useRef(null);
-  // Push "unita" (_MERGE): lo storage ora contiene anche le voci dell'altro
-  // device → riallinea subito lo stato (spunte Spesa) senza aspettare il pull.
-  React.useEffect(() => {
-    const onMerged = () => { if (window.storage && window.storage.isReady()) applySynced(); };
-    window.addEventListener("lfh-merged", onMerged);
-    return () => window.removeEventListener("lfh-merged", onMerged);
-  }, []);
 
-  // Riallinea lo stato React condiviso a quanto la sync ha scritto in storage.
-  const applySynced = () => {
+  // Riallinea lo stato React condiviso a quanto il sync ha scritto in storage.
+  // keys = chiavi riscritte (evento "lfh-data"); senza keys → tutto. Le modifiche
+  // locali in coda non tornano mai indietro: il motore le sovrappone ai record in arrivo.
+  const applySynced = (keys) => {
     const s = initState();
-    setStateRaw(prev => ({
-      ...prev,
-      bodyWeight:   s.bodyWeight,
-      checkIn:      s.checkIn,
-      spesaChecked: s.spesaChecked,
-      spesaFreq:    s.spesaFreq,
-    }));
+    const has = (k) => !keys || keys.indexOf(k) !== -1;
+    setStateRaw(prev => {
+      const next = { ...prev };
+      if (has("bodyWeight"))       next.bodyWeight   = s.bodyWeight;
+      if (has(`checkIn_${today}`)) next.checkIn      = s.checkIn;
+      if (has("spesaChecked"))     next.spesaChecked = s.spesaChecked;
+      if (has("spesaFreq"))        next.spesaFreq    = s.spesaFreq;
+      // activities: senza riallineo, il prossimo "Log" riscriverebbe la lista
+      // vecchia e cancellerebbe le attività arrivate dall'altro device.
+      if (has("activities"))       next.activities   = s.activities;
+      if (has("theme"))            next.theme        = s.theme;
+      return next;
+    });
+    if (has("lang") && window.storage) setLang(window.storage.get("lang", "it"));
   };
 
   React.useEffect(() => {
+    const onData = (e) => {
+      if (!window.storage || !window.storage.isReady()) return;
+      const keys = (e && e.detail && Array.isArray(e.detail.keys)) ? e.detail.keys : null;
+      applySynced(keys);
+    };
+    window.addEventListener("lfh-data", onData);
+    return () => window.removeEventListener("lfh-data", onData);
+  }, []);
+
+  React.useEffect(() => {
     if (!storageReady || initialized) return;
-    _cleanupOldDailyKeys();
     const finish = () => {
       setStateRaw(initState());
       setLang(window.storage ? window.storage.get("lang", "it") : "it");
       setInitialized(true);
     };
-    const bootSync = _reconcileRepoFiles().finally(() => _cloudSync());
+    const bootSync = _syncNow().then(_autoSkipOnboarding);
     if (window.storage && window.storage.get("onboardingDone", false)) {
-      // Avvio "a regime": UI subito dai dati locali, sync in background.
-      // Prima lo spinner aspettava .txt del repo + sync cloud (fino a ~15 s
-      // con la rete scarsa della palestra) a OGNI apertura.
+      // Avvio "a regime": UI subito dai dati locali, sync in background
+      // (i dati in arrivo riallineano le schermate via "lfh-data").
       finish();
-      bootSync.finally(applySynced);
     } else {
-      bootSync.finally(finish); // primo avvio: serve il cloud per saltare l'onboarding
+      // Primo avvio: si aspetta il sync (se il device è collegato può far saltare
+      // l'onboarding), ma mai più di 10 s — senza token risponde subito.
+      Promise.race([bootSync, new Promise(r => setTimeout(r, 10000))]).finally(finish);
     }
   }, [storageReady]);
 
-  // Persist state changes to storage
+  // Persiste i cambi di stato in storage: il ponte di SyncV2 li porta al server.
   const setState = React.useCallback((updater) => {
     setStateRaw(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       if (!window.storage) return next;
-      // Persist relevant keys
       const t = window.todayKey ? window.todayKey() : today;
-      if (next.activities !== prev.activities) window.storage.set("activities", next.activities.slice(0, 50));
-      if (next.checkIn    !== prev.checkIn) {
-        window.storage.set(`checkIn_${t}`, next.checkIn);
-        if (window.sheetsAPI) window.sheetsAPI.saveCheckIn({ date: t, sleep: next.checkIn.sleep, energy: next.checkIn.energy, ailments: next.checkIn.ailments || "" }).catch(() => {});
-      }
-      // Push settings con retry (_saveSettingRetry): il fire-and-forget singolo
-      // perdeva il dato al primo errore di rete (stessa ragione per cui esiste
-      // _saveSettingRetry — ora usato coerentemente anche qui).
-      if (next.bodyWeight !== prev.bodyWeight) {
-        window.storage.set("bodyWeight", next.bodyWeight);
-        _saveSettingRetry("bodyWeight", next.bodyWeight);
-        if (window.sheetsAPI) window.sheetsAPI.savePesoCorporeo({ date: t, weight: next.bodyWeight }).catch(() => {});
-      }
-      if (next.spesaChecked !== prev.spesaChecked) {
-        _markEdits("spesaChecked2", prev.spesaChecked, next.spesaChecked);
-        window.storage.set("spesaChecked", next.spesaChecked);
-        _saveSettingRetry("spesaChecked2", JSON.stringify(next.spesaChecked));
-      }
-      if (next.spesaFreq !== prev.spesaFreq) {
-        window.storage.set("spesaFreq", next.spesaFreq);
-        _saveSettingRetry("spesaFreq", next.spesaFreq);
-      }
-      if (next.theme      !== prev.theme)       { window.storage.set("theme", next.theme); _applyTheme(next.theme); }
+      if (next.activities   !== prev.activities)   window.storage.set("activities", next.activities.slice(0, 50));
+      if (next.checkIn      !== prev.checkIn)      window.storage.set(`checkIn_${t}`, next.checkIn);
+      if (next.bodyWeight   !== prev.bodyWeight)   window.storage.set("bodyWeight", next.bodyWeight);
+      if (next.spesaChecked !== prev.spesaChecked) window.storage.set("spesaChecked", next.spesaChecked);
+      if (next.spesaFreq    !== prev.spesaFreq)    window.storage.set("spesaFreq", next.spesaFreq);
+      if (next.theme        !== prev.theme)        { window.storage.set("theme", next.theme); _applyTheme(next.theme); }
       return next;
     });
   }, [today]);
@@ -813,27 +347,27 @@ const AppFrame = ({ device: _deviceProp, initialScreen, chromeless }) => {
     if (el && window.Motion) window.Motion.screenEnter(el);
   }, [state.screen, initialized]);
 
-  // Re-sync: foreground (Page Visibility) + polling periodico mentre l'app è
-  // aperta, così le modifiche fatte su un altro device compaiono da sole.
+  // Re-sync: foreground (Page Visibility), ritorno della rete e polling ogni 45 s
+  // mentre l'app è visibile, così le modifiche fatte su un altro device compaiono da sole.
   React.useEffect(() => {
     if (!initialized) return;
 
-    // Pull dal cloud + riallinea lo stato React condiviso
-    const pullAndApply = () => {
+    const syncIfVisible = () => {
       if (document.visibilityState !== "visible") return Promise.resolve();
-      return _cloudSync({ pesiMs: 6000, settingsMs: 8000 }).finally(applySynced);
+      return _syncNow();
     };
-    syncNowRef.current = pullAndApply;
+    syncNowRef.current = syncIfVisible;
 
-    const handleVisibility = () => { if (document.visibilityState === "visible") pullAndApply(); };
+    const handleVisibility = () => { if (document.visibilityState === "visible") syncIfVisible(); };
     document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("online", syncIfVisible);
 
-    // Polling ogni 45s (solo quando visibile, per non sprecare quota Apps Script)
     const POLL_MS = 45000;
-    const interval = setInterval(pullAndApply, POLL_MS);
+    const interval = setInterval(syncIfVisible, POLL_MS);
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("online", syncIfVisible);
       clearInterval(interval);
       syncNowRef.current = null;
     };

@@ -1,6 +1,7 @@
 // parser.jsx — Parse scheda.txt  +  dieta.txt
 // window.parseScheda(text)  →  { days: [ {num,key,name,focus,exercises,altMap} ] }  (N giorni dinamici)
-// window.getSchedule() / window.getSelectedSession()  — unica fonte di verità sui giorni
+// window.getSchedule() / window.getSelectedSession()  — unica fonte di verità sui giorni (piano attivo plan_workout)
+// window.getDieta()          — dieta corrente (piano attivo plan_diet, fallback testo embedded)
 // window.parseDieta(text)   →  { riposo, mattina, ore17, ore21, ore22 }  each = { meals, integratori }
 
 // ── MUSCLE DETECTION ───────────────────────────────────────────────────────
@@ -140,12 +141,37 @@ function _musclesFromExercises(exercises) {
 }
 window._musclesFromExercises = _musclesFromExercises;
 
-// Schedule corrente dal file salvato (unica fonte di verità per tutti i consumer).
+// Schedule corrente (unica fonte di verità per tutti i consumer): il piano attivo
+// strutturato (plan_workout, copia locale tenuta da SyncV2) convertito nella forma
+// di parseScheda; senza piano (device mai collegato) il testo embedded di
+// defaults.jsx. Il vecchio storage "schedaData" non è più la sorgente dei piani.
 window.getSchedule = function () {
   const st = window.storage;
-  const text = (st ? st.get("schedaData", null) : null) || window.SCHEDA_TXT_FALLBACK || null;
+  const plan = st ? st.get("plan_workout", null) : null;
+  if (plan && plan.data && Array.isArray(plan.data.days) && plan.data.days.length && window.PlanConv) {
+    try { return window.PlanConv.toLegacyScheda(plan.data); } catch (_) {}
+  }
+  const text = window.SCHEDA_TXT_FALLBACK || null;
   if (!text) return { days: [] };
   try { return window.parseScheda(text); } catch (_) { return { days: [] }; }
+};
+
+// Dieta corrente, stessa regola: plan_diet → PlanConv.toLegacyDieta (forma di
+// parseDieta), altrimenti il testo embedded. null se nulla è leggibile.
+// _fromPlan (non enumerabile) = viene dal piano: i suoi integratori sono SOLO
+// quelli previsti dal piano (niente lista fissa di ripiego nella schermata).
+window.getDieta = function () {
+  const st = window.storage;
+  const plan = st ? st.get("plan_diet", null) : null;
+  if (plan && plan.data && Array.isArray(plan.data.variants) && plan.data.variants.length && window.PlanConv) {
+    try {
+      const d = window.PlanConv.toLegacyDieta(plan.data);
+      if (d) { Object.defineProperty(d, "_fromPlan", { value: true }); return d; }
+    } catch (_) {}
+  }
+  const text = window.DIETA_TXT_FALLBACK || null;
+  if (!text) return null;
+  try { return window.parseDieta(text) || null; } catch (_) { return null; }
 };
 
 // Sessione selezionata manualmente (o null se oggi è riposo / nessun giorno).

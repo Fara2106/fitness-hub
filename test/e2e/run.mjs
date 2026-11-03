@@ -52,6 +52,16 @@ async function openApp(ctxOpts, state, mockOpts) {
   page.on("pageerror", e => page._errors.push(e.message));
   await page.goto(URL0);
   await page.waitForFunction(() => document.querySelector(".lfh-scroll"), null, { timeout: 15000 });
+  // Dal motore SyncV2 (fase 2) onboardingDone non arriva più dal foglio Settings
+  // finto: se lo stato del mock lo prevede lo si mette nello storage e si ricarica.
+  // (Task 7 sostituisce il mock Sheets col backend vero in-process.)
+  if (state && state.settings && state.settings.onboardingDone === "true" &&
+      !(await page.evaluate(() => window.storage.get("onboardingDone", false)))) {
+    await page.evaluate(() => window.storage.set("onboardingDone", true));
+    await page.waitForTimeout(200);
+    await page.reload();
+    await page.waitForFunction(() => document.querySelector(".lfh-scroll"), null, { timeout: 15000 });
+  }
   await page.waitForTimeout(700);
   return { ctx, page };
 }

@@ -15,19 +15,22 @@ const ACTIVITY_META = {
   ellittica: { label: "Ellittica", emoji: "🔄", c: "#5AC8FA" },
 };
 
-// Prossimo pasto dai dati dieta reali (nessun dato inventato: null se manca dieta).
-// Variante giorno: se oggi c'è sessione → "ore17" (default della schermata Dieta), altrimenti "riposo".
+// Prossimo pasto dalla dieta corrente (piano attivo o testo embedded, window.getDieta).
+// Variante: quella scelta oggi nella Dieta (dietaVariant_<data>) se c'è; altrimenti
+// sessione oggi → "ore17" (default della schermata Dieta), nessuna sessione → "riposo".
 function _homeDieta() {
-  if (!window.parseDieta || !window.storage) return null;
-  const text = window.storage.get("dietaData", null);
-  if (!text) return null;
-  try { return window.parseDieta(text); } catch (_) { return null; }
+  if (!window.getDieta) return null;
+  try { return window.getDieta(); } catch (_) { return null; }
 }
 function _nextMealHome() {
   const dieta = _homeDieta();
   if (!dieta) return null;
+  const today = window.todayKey ? window.todayKey() : _dayKey(new Date());
+  const saved = window.storage ? window.storage.get(`dietaVariant_${today}`, null) : null;
   const sess = window.getTodaySession ? window.getTodaySession() : null;
-  const section = (sess ? dieta.ore17 : dieta.riposo) || dieta.riposo;
+  const has = (k) => dieta[k] && dieta[k].meals && dieta[k].meals.length;
+  const key = (saved && has(saved)) ? saved : (sess && has("ore17") ? "ore17" : "riposo");
+  const section = dieta[key];
   if (!section || !section.meals || !section.meals.length) return null;
   const now = new Date();
   const nowMins = now.getHours() * 60 + now.getMinutes();
@@ -236,7 +239,7 @@ const ActivityLogger = ({ onClose, onSave, isDesktop }) => {
 };
 
 // ── Report settimanale (visibile domenica e lunedì, dismissabile a settimana) ─
-const WeeklyReportCard = ({ onNav }) => {
+const WeeklyReportCard = ({ onNav, rev }) => {
   const t = useT();
   const today = window.todayKey ? window.todayKey() : _dayKey(new Date());
   const dow = new Date().getDay();               // 0 = domenica, 1 = lunedì
@@ -268,7 +271,7 @@ const WeeklyReportCard = ({ onNav }) => {
       checkinDates,
       plannedSessions: (window.getSchedule ? (window.getSchedule().days || []).length : 3) || 3,
     });
-  }, [show, today]);
+  }, [show, today, rev]);
 
   if (!show || !rep || dismissed === weekKey) return null;
   if (!rep.sessions && !rep.totalSets && rep.avgWeight == null) return null; // niente da raccontare
@@ -334,6 +337,22 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
     if (window.storage) window.storage.set("restDay_" + today, next);
     setRestDay(next);
   };
+
+  // Dati arrivati dal sync (altro device): ricarica ciò che la Home tiene in stato
+  // e ricalcola i riepiloghi letti da storage (dataRev). Il peso digitato nello
+  // sheet (newWeight) non è in storage: non viene mai toccato.
+  const [dataRev, setDataRev] = React.useState(0);
+  useSyncedData(
+    (k) => k === "weightLog" || k === "prMap" || k === "plan_workout" || k === "plan_diet" ||
+           /^(restDay_|dietaVariant_|gym_|muscleSets_|checkIn_|hydration_)\d{4}-\d{2}-\d{2}$/.test(k),
+    (keys) => {
+      const st = window.storage;
+      if (!st) return;
+      if (keys.indexOf("restDay_" + today) !== -1) setRestDay(!!st.get("restDay_" + today, false));
+      if (keys.indexOf("weightLog") !== -1) setWeightLog(st.get("weightLog", []) || []);
+      setDataRev(n => n + 1);
+    }
+  );
   const daysCount = (window.getSchedule ? (window.getSchedule().days || []).length : 0) || 3;
   const _rawSession = window.getTodaySession ? window.getTodaySession() : null;
   const todaySession = restDay ? null : _rawSession;
@@ -365,7 +384,7 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
     let count = 0;
     for (let i = 0; i < 7; i++) { const d = new Date(); d.setDate(d.getDate() - i); if (window.storage.get(`gym_${_dayKey(d)}`, false)) count++; }
     return count;
-  }, [today]);
+  }, [today, dataRev]);
   const weekMuscles = React.useMemo(() => {
     if (!window.storage) return {};
     const agg = {};
@@ -375,10 +394,10 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
       if (day) Object.keys(day).forEach(g => { agg[g] = (agg[g] || 0) + (day[g] || 0); });
     }
     return agg;
-  }, [today]);
+  }, [today, dataRev]);
   const hasWeekMuscles = Object.keys(weekMuscles).length > 0;
 
-  const nextMeal = React.useMemo(() => _nextMealHome(), [today, restDay]);
+  const nextMeal = React.useMemo(() => _nextMealHome(), [today, restDay, dataRev]);
 
   const [ailOpen, setAilOpen]   = React.useState(!!(checkIn && checkIn.ailments));
   const [pesoOpen, setPesoOpen] = React.useState(false);
@@ -472,7 +491,7 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
       </UICard>
 
       {/* Report settimanale (solo domenica/lunedì, dati reali della settimana) */}
-      <WeeklyReportCard onNav={onNav} />
+      <WeeklyReportCard onNav={onNav} rev={dataRev} />
 
       {/* Prossimo pasto */}
       {nextMeal ? (

@@ -25,10 +25,15 @@ function _buildSystemPrompt({ activities, checkIn, bodyWeight, lang }) {
   const timeStr = now.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
   const dateStr = now.toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" });
 
-  // File caricati dall'utente
+  // Piani attivi (plan_workout / plan_diet, tenuti da SyncV2) in testo compatto;
+  // senza piano strutturato → il testo embedded (defaults.jsx), come la Scheda/Dieta.
   const st = window.storage;
-  const schedaData = (st ? st.get("schedaData", null) : null) || window.SCHEDA_TXT_FALLBACK || null;
-  const dietaData  = (st ? st.get("dietaData",  null) : null) || window.DIETA_TXT_FALLBACK  || null;
+  const planW = st ? st.get("plan_workout", null) : null;
+  const planD = st ? st.get("plan_diet", null) : null;
+  const PC = window.PlanConv;
+  const planText = (w, d) => { try { return PC ? PC.planToText(w, d) : ""; } catch (_) { return ""; } };
+  const schedaData = (planW && planW.data && planText(planW.data, null)) || window.SCHEDA_TXT_FALLBACK || null;
+  const dietaData  = (planD && planD.data && planText(null, planD.data)) || window.DIETA_TXT_FALLBACK  || null;
 
   // Check-in e note sessione di oggi
   const today = window.todayKey ? window.todayKey() : now.toISOString().slice(0, 10);
@@ -234,6 +239,14 @@ const Coach = ({ device, onNav, activities = [], checkIn, bodyWeight }) => {
   React.useEffect(() => {
     if (window.storage && messages.length > 1) window.storage.set(chatKey, messages.slice(-40));
   }, [messages]);
+
+  // Chat di oggi arrivata dal sync (altro device): si ricarica, ma non mentre
+  // il Coach sta rispondendo (lo streaming riscriverebbe la chat subito dopo).
+  useSyncedData([chatKey], () => {
+    if (busy || !window.storage) return;
+    const saved = window.storage.get(chatKey, null);
+    if (Array.isArray(saved) && saved.length) setMessages(saved);
+  });
 
   const resetChat = () => {
     if (window.storage) window.storage.remove(chatKey);

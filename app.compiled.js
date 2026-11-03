@@ -807,7 +807,13 @@ function _musclesFromExercises(exercises) {
 window._musclesFromExercises = _musclesFromExercises;
 window.getSchedule = function () {
   const st = window.storage;
-  const text = (st ? st.get("schedaData", null) : null) || window.SCHEDA_TXT_FALLBACK || null;
+  const plan = st ? st.get("plan_workout", null) : null;
+  if (plan && plan.data && Array.isArray(plan.data.days) && plan.data.days.length && window.PlanConv) {
+    try {
+      return window.PlanConv.toLegacyScheda(plan.data);
+    } catch (_) {}
+  }
+  const text = window.SCHEDA_TXT_FALLBACK || null;
   if (!text) return {
     days: []
   };
@@ -817,6 +823,28 @@ window.getSchedule = function () {
     return {
       days: []
     };
+  }
+};
+window.getDieta = function () {
+  const st = window.storage;
+  const plan = st ? st.get("plan_diet", null) : null;
+  if (plan && plan.data && Array.isArray(plan.data.variants) && plan.data.variants.length && window.PlanConv) {
+    try {
+      const d = window.PlanConv.toLegacyDieta(plan.data);
+      if (d) {
+        Object.defineProperty(d, "_fromPlan", {
+          value: true
+        });
+        return d;
+      }
+    } catch (_) {}
+  }
+  const text = window.DIETA_TXT_FALLBACK || null;
+  if (!text) return null;
+  try {
+    return window.parseDieta(text) || null;
+  } catch (_) {
+    return null;
   }
 };
 window.getSelectedSession = function () {
@@ -2706,7 +2734,8 @@ window.buildDefaultNotifConfig = function () {
     buildGroup,
     keysForRecord,
     rebuildKeys,
-    DIRECT
+    DIRECT,
+    MUSCLE_GROUP
   };
   window.RecordMap = RecordMap;
 })();
@@ -5253,6 +5282,9 @@ const I18N_DICT = {
   "Offline": {
     en: "Offline"
   },
+  "Non collegato": {
+    en: "Not linked"
+  },
   "Stato sincronizzazione": {
     en: "Sync status"
   },
@@ -5262,11 +5294,20 @@ const I18N_DICT = {
   "In attesa del primo sync": {
     en: "Waiting for first sync"
   },
-  "Cloud: Google Sheets via proxy": {
-    en: "Cloud: Google Sheets via proxy"
+  "Cloud: Cloudflare": {
+    en: "Cloud: Cloudflare"
   },
-  "Pusha tutti i dati locali al cloud": {
-    en: "Push all local data to the cloud"
+  "Invia e ricevi le modifiche": {
+    en: "Send and receive changes"
+  },
+  "Device non collegato: dati solo in locale": {
+    en: "Device not linked: data stays local"
+  },
+  "salvato sul device (non collegato)": {
+    en: "saved on device (not linked)"
+  },
+  "dal": {
+    en: "since"
   },
   "Dati locali": {
     en: "Local data"
@@ -6215,6 +6256,23 @@ const UIAnimatedNumber = ({
     className: "tnum"
   }, Number(value).toFixed(decimals));
 };
+function useSyncedData(match, onData) {
+  const ref = React.useRef(null);
+  ref.current = {
+    match,
+    onData
+  };
+  React.useEffect(() => {
+    const h = e => {
+      const keys = e && e.detail && Array.isArray(e.detail.keys) ? e.detail.keys : [];
+      const cur = ref.current;
+      const hit = keys.filter(k => typeof cur.match === "function" ? cur.match(k) : cur.match.indexOf(k) !== -1);
+      if (hit.length) cur.onData(hit);
+    };
+    window.addEventListener("lfh-data", h);
+    return () => window.removeEventListener("lfh-data", h);
+  }, []);
+}
 window.UIAvatarLF = UIAvatarLF;
 window.UIHeader = UIHeader;
 window.UICard = UICard;
@@ -6230,6 +6288,7 @@ window.UIErrorBoundary = UIErrorBoundary;
 window.UIEmpty = UIEmpty;
 window.UISkeleton = UISkeleton;
 window.UIAnimatedNumber = UIAnimatedNumber;
+window.useSyncedData = useSyncedData;
 window.ensureRecharts = (() => {
   let promise = null;
   const inject = src => new Promise((resolve, reject) => {
@@ -6753,6 +6812,12 @@ const SyncBadge = ({
       bg: "rgba(120,120,128,0.14)",
       icon: "cloud-off",
       label: t("Offline")
+    },
+    unlinked: {
+      color: "var(--text-3)",
+      bg: "rgba(120,120,128,0.14)",
+      icon: "cloud-off",
+      label: t("Non collegato")
     }
   };
   const cfg = CFG[status] || CFG.ok;
@@ -7811,11 +7876,9 @@ const ACTIVITY_META = {
   }
 };
 function _homeDieta() {
-  if (!window.parseDieta || !window.storage) return null;
-  const text = window.storage.get("dietaData", null);
-  if (!text) return null;
+  if (!window.getDieta) return null;
   try {
-    return window.parseDieta(text);
+    return window.getDieta();
   } catch (_) {
     return null;
   }
@@ -7823,8 +7886,12 @@ function _homeDieta() {
 function _nextMealHome() {
   const dieta = _homeDieta();
   if (!dieta) return null;
+  const today = window.todayKey ? window.todayKey() : _dayKey(new Date());
+  const saved = window.storage ? window.storage.get(`dietaVariant_${today}`, null) : null;
   const sess = window.getTodaySession ? window.getTodaySession() : null;
-  const section = (sess ? dieta.ore17 : dieta.riposo) || dieta.riposo;
+  const has = k => dieta[k] && dieta[k].meals && dieta[k].meals.length;
+  const key = saved && has(saved) ? saved : sess && has("ore17") ? "ore17" : "riposo";
+  const section = dieta[key];
   if (!section || !section.meals || !section.meals.length) return null;
   const now = new Date();
   const nowMins = now.getHours() * 60 + now.getMinutes();
@@ -8356,7 +8423,8 @@ const ActivityLogger = ({
   }, t("Salva sessione")))));
 };
 const WeeklyReportCard = ({
-  onNav
+  onNav,
+  rev
 }) => {
   const t = useT();
   const today = window.todayKey ? window.todayKey() : _dayKey(new Date());
@@ -8395,7 +8463,7 @@ const WeeklyReportCard = ({
       checkinDates,
       plannedSessions: (window.getSchedule ? (window.getSchedule().days || []).length : 3) || 3
     });
-  }, [show, today]);
+  }, [show, today, rev]);
   if (!show || !rep || dismissed === weekKey) return null;
   if (!rep.sessions && !rep.totalSets && rep.avgWeight == null) return null;
   const dismiss = () => {
@@ -8513,6 +8581,14 @@ const Dashboard = ({
     if (window.storage) window.storage.set("restDay_" + today, next);
     setRestDay(next);
   };
+  const [dataRev, setDataRev] = React.useState(0);
+  useSyncedData(k => k === "weightLog" || k === "prMap" || k === "plan_workout" || k === "plan_diet" || /^(restDay_|dietaVariant_|gym_|muscleSets_|checkIn_|hydration_)\d{4}-\d{2}-\d{2}$/.test(k), keys => {
+    const st = window.storage;
+    if (!st) return;
+    if (keys.indexOf("restDay_" + today) !== -1) setRestDay(!!st.get("restDay_" + today, false));
+    if (keys.indexOf("weightLog") !== -1) setWeightLog(st.get("weightLog", []) || []);
+    setDataRev(n => n + 1);
+  });
   const daysCount = (window.getSchedule ? (window.getSchedule().days || []).length : 0) || 3;
   const _rawSession = window.getTodaySession ? window.getTodaySession() : null;
   const todaySession = restDay ? null : _rawSession;
@@ -8552,7 +8628,7 @@ const Dashboard = ({
       if (window.storage.get(`gym_${_dayKey(d)}`, false)) count++;
     }
     return count;
-  }, [today]);
+  }, [today, dataRev]);
   const weekMuscles = React.useMemo(() => {
     if (!window.storage) return {};
     const agg = {};
@@ -8565,9 +8641,9 @@ const Dashboard = ({
       });
     }
     return agg;
-  }, [today]);
+  }, [today, dataRev]);
   const hasWeekMuscles = Object.keys(weekMuscles).length > 0;
-  const nextMeal = React.useMemo(() => _nextMealHome(), [today, restDay]);
+  const nextMeal = React.useMemo(() => _nextMealHome(), [today, restDay, dataRev]);
   const [ailOpen, setAilOpen] = React.useState(!!(checkIn && checkIn.ailments));
   const [pesoOpen, setPesoOpen] = React.useState(false);
   const startWorkout = () => {
@@ -8722,7 +8798,8 @@ const Dashboard = ({
       lineHeight: 1.45
     }
   }, t("Recupero attivo, mobilità e idratazione."))), React.createElement(WeeklyReportCard, {
-    onNav: onNav
+    onNav: onNav,
+    rev: dataRev
   }), nextMeal ? React.createElement(UICard, {
     onClick: () => onNav("dieta")
   }, React.createElement("div", {
@@ -10506,7 +10583,7 @@ const Scheda = ({
 }) => {
   const isDesktop = device === "desktop";
   const t = useT();
-  const [days] = React.useState(() => _buildSchedule());
+  const [days, setDays] = React.useState(() => _buildSchedule());
   const current = days.find(d => d.key === scheda) || days[0] || {
     key: "",
     num: 0,
@@ -10531,7 +10608,6 @@ const Scheda = ({
   const [sheetsWeights, setSheetsWeights] = React.useState(null);
   const [pesiHistory, setPesiHistory] = React.useState(null);
   const [exNotes, setExNotes] = React.useState(() => window.storage ? window.storage.get("exNotes", {}) : {});
-  const exNotesPushTid = React.useRef(null);
   const [summary, setSummary] = React.useState(null);
   const [prMap, setPrMap] = React.useState(() => window.storage ? window.storage.get("prMap", {}) : {});
   const [newPRs, setNewPRs] = React.useState([]);
@@ -10581,15 +10657,30 @@ const Scheda = ({
     setExNotes(prev => {
       const next = Object.assign({}, prev);
       if (text) next[key] = text;else delete next[key];
-      if (window._markEdits) window._markEdits("exNotes", prev, next);
       if (window.storage) window.storage.set("exNotes", next);
-      clearTimeout(exNotesPushTid.current);
-      exNotesPushTid.current = setTimeout(() => {
-        if (window._saveSettingRetry) window._saveSettingRetry("exNotes", JSON.stringify(next));
-      }, 1500);
       return next;
     });
   };
+  const notesDirtyRef = React.useRef(false);
+  useSyncedData(["plan_workout", window.schedaProgKey(dayK), `notes_${dayK}`, "exNotes", "prMap"], keys => {
+    const st = window.storage;
+    if (!st) return;
+    const has = k => keys.indexOf(k) !== -1;
+    let curDays = days;
+    if (has("plan_workout")) {
+      curDays = _buildSchedule();
+      setDays(curDays);
+    }
+    if (has("plan_workout") || has(window.schedaProgKey(dayK))) {
+      const res = window.sanitizeSchedaProg(window.readSchedaProg(st, dayK), curDays, window.schedaPlanSig(curDays));
+      if (res.changed) st.set(window.schedaProgKey(dayK), res.prog);
+      pesosRef.current = Object.assign({}, res.prog.pesos);
+      setProg(res.prog);
+    }
+    if (has(`notes_${dayK}`) && !notesDirtyRef.current) setNotes(st.get(`notes_${dayK}`, "") || "");
+    if (has("exNotes")) setExNotes(st.get("exNotes", {}) || {});
+    if (has("prMap")) setPrMap(st.get("prMap", {}) || {});
+  });
   const deload = React.useMemo(() => {
     if (!window.Insights) return {
       deload: false,
@@ -10677,19 +10768,7 @@ const Scheda = ({
       if (window.storage) window.storage.set(`notes_${today}`, notes);
       if (window.storage) {
         window.storage.set(`gym_${today}`, true);
-        const GROUP = {
-          petto: "Petto",
-          schiena: "Schiena",
-          spalle: "Spalle",
-          trapezi: "Spalle",
-          quadricipiti: "Gambe",
-          femorali: "Gambe",
-          glutei: "Gambe",
-          polpacci: "Gambe",
-          bicipiti: "Braccia",
-          tricipiti: "Braccia",
-          addome: "Core"
-        };
+        const GROUP = window.RecordMap.MUSCLE_GROUP;
         const daily = {};
         exercises.forEach((ex, exIdx) => {
           const done = (completion[window.exId(scheda, exIdx)] || []).filter(Boolean).length;
@@ -11032,7 +11111,10 @@ const Scheda = ({
     }
   }, notes.length)), React.createElement("textarea", {
     value: notes,
-    onChange: e => setNotes(e.target.value),
+    onChange: e => {
+      notesDirtyRef.current = true;
+      setNotes(e.target.value);
+    },
     placeholder: t("Sensazioni, fastidi, dettagli da ricordare… il coach AI le leggerà."),
     rows: 3,
     style: {
@@ -11830,17 +11912,20 @@ _FALLBACK.ore22 = {
   }]
 };
 function _getDieta() {
-  if (!window.parseDieta || !window.storage) return _FALLBACK;
-  const text = window.storage.get("dietaData", null);
-  if (!text) return _FALLBACK;
+  let parsed = null;
   try {
-    const parsed = window.parseDieta(text);
-    if (!parsed) return _FALLBACK;
+    parsed = window.getDieta ? window.getDieta() : null;
+  } catch (_) {
+    parsed = null;
+  }
+  if (!parsed) return _FALLBACK;
+  try {
+    const fromPlan = !!parsed._fromPlan;
     const has = k => parsed[k] && parsed[k].meals && parsed[k].meals.length;
     const KEYS = ["riposo", "mattina", "ore17", "ore21", "ore22"];
     if (!KEYS.some(has)) return _FALLBACK;
     KEYS.filter(has).forEach(k => {
-      if (!parsed[k].integratori || !parsed[k].integratori.length) parsed[k].integratori = _SUPPS_MAP[k];
+      if (!fromPlan && (!parsed[k].integratori || !parsed[k].integratori.length)) parsed[k].integratori = _SUPPS_MAP[k];
       parsed[k].meals.forEach(m => {
         if (!m.sortTime) m.sortTime = m.time;
       });
@@ -11863,6 +11948,10 @@ function _getDieta() {
   } catch (_) {
     return _FALLBACK;
   }
+}
+function _savedVariant(today) {
+  const v = window.storage ? window.storage.get(`dietaVariant_${today}`, null) : null;
+  return v === "riposo" || _DAY_TYPES.some(d => d.id === v) ? v : null;
 }
 function _buildTimeline(meals, integratori) {
   const parseMinutes = t => {
@@ -12394,18 +12483,37 @@ const Dieta = ({
 }) => {
   const isDesktop = device === "desktop";
   const t = useT();
-  const [dieta] = React.useState(() => _getDieta());
+  const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
+  const [dieta, setDieta] = React.useState(() => _getDieta());
+  const [, bump] = React.useState(0);
   const [training, setTraining] = React.useState(() => {
+    const v = _savedVariant(today);
+    if (v) return v !== "riposo";
     const sess = window.getTodaySession ? window.getTodaySession() : null;
     return !!sess;
   });
-  const [trainTime, setTrainTime] = React.useState("ore17");
+  const [trainTime, setTrainTime] = React.useState(() => {
+    const v = _savedVariant(today);
+    return v && v !== "riposo" ? v : "ore17";
+  });
   const [cardio, setCardio] = React.useState(false);
   const [cardioType, setCardioType] = React.useState("camminata");
   const [cardioMin, setCardioMin] = React.useState(30);
-  const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
+  const saveVariant = v => {
+    if (window.storage && window.storage.get(`dietaVariant_${today}`, null) !== v) window.storage.set(`dietaVariant_${today}`, v);
+  };
+  const toggleTraining = () => {
+    const next = !training;
+    setTraining(next);
+    saveVariant(next ? trainTime : "riposo");
+  };
+  const pickTrainTime = id => {
+    setTrainTime(id);
+    saveVariant(id);
+  };
   const [checked, setChecked] = React.useState(() => window.storage ? window.storage.get(`integ_${today}`, {}) : {});
   const toggleSupp = type => {
+    saveVariant(training ? trainTime : "riposo");
     setChecked(c => {
       const next = {
         ...c,
@@ -12418,6 +12526,7 @@ const Dieta = ({
   };
   const [mealChecked, setMealChecked] = React.useState(() => window.storage ? window.storage.get(`dietaCheck_${today}`, {}) : {});
   const toggleMeal = key => {
+    saveVariant(training ? trainTime : "riposo");
     setMealChecked(c => {
       const next = {
         ...c,
@@ -12428,11 +12537,26 @@ const Dieta = ({
       return next;
     });
   };
+  useSyncedData([`integ_${today}`, `dietaCheck_${today}`, `dietaVariant_${today}`, "plan_diet", "plan_workout"], keys => {
+    const st = window.storage;
+    if (!st) return;
+    if (keys.indexOf(`integ_${today}`) !== -1) setChecked(st.get(`integ_${today}`, {}) || {});
+    if (keys.indexOf(`dietaCheck_${today}`) !== -1) setMealChecked(st.get(`dietaCheck_${today}`, {}) || {});
+    if (keys.indexOf(`dietaVariant_${today}`) !== -1) {
+      const v = _savedVariant(today);
+      if (v) {
+        setTraining(v !== "riposo");
+        if (v !== "riposo") setTrainTime(v);
+      }
+    }
+    if (keys.indexOf("plan_diet") !== -1) setDieta(_getDieta());
+    if (keys.indexOf("plan_workout") !== -1) bump(n => n + 1);
+  });
   const _mealKey = ml => `${ml.time}|${ml.title}`;
   const dayType = training ? trainTime : "riposo";
   const section = dieta[dayType] || dieta.riposo;
   const meals = section.meals || [];
-  const supps = section.integratori && section.integratori.length ? section.integratori : _SUPPS_MAP[dayType] || _SUPPS_RIPOSO;
+  const supps = section.integratori && section.integratori.length ? section.integratori : dieta._fromPlan ? [] : _SUPPS_MAP[dayType] || _SUPPS_RIPOSO;
   const ct = _CARDIO_TYPES.find(c => c.id === cardioType) || _CARDIO_TYPES[0];
   const timeline = _buildTimeline(meals, supps);
   const doneCount = supps.filter(s => checked[s.type]).length;
@@ -12545,7 +12669,7 @@ const Dieta = ({
     }
   }, window.getTodaySession ? window.getTodaySession()?.label || t("Giorno di riposo") : t("Seleziona orario"))), React.createElement("div", {
     className: `ios-toggle blue ${training ? "on" : ""}`,
-    onClick: () => setTraining(v => !v)
+    onClick: toggleTraining
   })), training && React.createElement("div", {
     className: "fade-up",
     style: {
@@ -12573,7 +12697,7 @@ const Dieta = ({
     const on = trainTime === d.id;
     return React.createElement("button", {
       key: d.id,
-      onClick: () => setTrainTime(d.id),
+      onClick: () => pickTrainTime(d.id),
       style: {
         display: "inline-flex",
         alignItems: "center",
@@ -12753,7 +12877,7 @@ const Dieta = ({
     }
   }, React.createElement(DayTimeSlider, {
     timeline: timeline
-  }), React.createElement("div", {
+  }), supps.length > 0 && React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
@@ -13296,8 +13420,6 @@ const Spesa = ({
     } else {
       _setLocalChecked(next);
       if (window.storage) window.storage.set("spesaChecked", next);
-      if (window._markEdits) window._markEdits("spesaChecked2", _localChecked, next);
-      if (window._saveSettingRetry) window._saveSettingRetry("spesaChecked2", JSON.stringify(next));
     }
   };
   const setFreq = f => {
@@ -13306,7 +13428,6 @@ const Spesa = ({
     } else {
       _setLocalFreq(f);
       if (window.storage) window.storage.set("spesaFreq", f);
-      if (window._saveSettingRetry) window._saveSettingRetry("spesaFreq", f);
     }
   };
   const toggle = k => {
@@ -13319,11 +13440,16 @@ const Spesa = ({
   const [extra, setExtra] = React.useState(() => window.storage ? window.storage.get("spesaExtra", []) : []);
   const [newItem, setNewItem] = React.useState("");
   const saveExtra = next => {
-    if (window._markEdits) window._markEdits("spesaExtra", extra, next);
     setExtra(next);
     if (window.storage) window.storage.set("spesaExtra", next);
-    if (window._saveSettingRetry) window._saveSettingRetry("spesaExtra", JSON.stringify(next));
   };
+  useSyncedData(["spesaExtra", "spesaChecked", "spesaFreq"], keys => {
+    const st = window.storage;
+    if (!st) return;
+    if (keys.indexOf("spesaExtra") !== -1) setExtra(st.get("spesaExtra", []) || []);
+    if (keys.indexOf("spesaChecked") !== -1) _setLocalChecked(st.get("spesaChecked", {}) || {});
+    if (keys.indexOf("spesaFreq") !== -1) _setLocalFreq(st.get("spesaFreq", 1) || 1);
+  });
   const addExtra = () => {
     const name = newItem.trim();
     if (!name) return;
@@ -13690,8 +13816,18 @@ function _buildSystemPrompt({
     month: "long"
   });
   const st = window.storage;
-  const schedaData = (st ? st.get("schedaData", null) : null) || window.SCHEDA_TXT_FALLBACK || null;
-  const dietaData = (st ? st.get("dietaData", null) : null) || window.DIETA_TXT_FALLBACK || null;
+  const planW = st ? st.get("plan_workout", null) : null;
+  const planD = st ? st.get("plan_diet", null) : null;
+  const PC = window.PlanConv;
+  const planText = (w, d) => {
+    try {
+      return PC ? PC.planToText(w, d) : "";
+    } catch (_) {
+      return "";
+    }
+  };
+  const schedaData = planW && planW.data && planText(planW.data, null) || window.SCHEDA_TXT_FALLBACK || null;
+  const dietaData = planD && planD.data && planText(null, planD.data) || window.DIETA_TXT_FALLBACK || null;
   const today = window.todayKey ? window.todayKey() : now.toISOString().slice(0, 10);
   const sessionNotes = st ? st.get(`notes_${today}`, "") : "";
   const replyLang = lang === "en" ? "inglese" : "italiano";
@@ -13917,6 +14053,11 @@ const Coach = ({
   React.useEffect(() => {
     if (window.storage && messages.length > 1) window.storage.set(chatKey, messages.slice(-40));
   }, [messages]);
+  useSyncedData([chatKey], () => {
+    if (busy || !window.storage) return;
+    const saved = window.storage.get(chatKey, null);
+    if (Array.isArray(saved) && saved.length) setMessages(saved);
+  });
   const resetChat = () => {
     if (window.storage) window.storage.remove(chatKey);
     setMessages([{
@@ -14498,8 +14639,13 @@ const GoalRow = ({
     setGoal(v);
     const n = parseFloat(String(v).replace(",", "."));
     if (window.storage) window.storage.set("weightGoal", n > 0 ? n : "");
-    if (window._saveSettingRetry && n > 0) window._saveSettingRetry("weightGoal", n);
   };
+  const inputRef = React.useRef(null);
+  useSyncedData(["weightGoal"], () => {
+    if (!window.storage || document.activeElement === inputRef.current) return;
+    const g = window.storage.get("weightGoal", "");
+    setGoal(g ? String(g) : "");
+  });
   const proj = window.Insights && weightLog && weightLog.length >= 2 ? window.Insights.weightProjection(weightLog, goal || null) : null;
   const fmtEta = iso => {
     try {
@@ -14531,6 +14677,7 @@ const GoalRow = ({
       flex: 1
     }
   }, "🎯 ", t("Obiettivo")), React.createElement("input", {
+    ref: inputRef,
     inputMode: "decimal",
     value: goal,
     onChange: e => save(e.target.value.replace(/[^0-9.,]/g, "")),
@@ -14586,6 +14733,9 @@ const RegistroView = ({
       };
     });
   };
+  useSyncedData(k => /^(gym_|muscleSets_|notes_)\d{4}-\d{2}-\d{2}$/.test(k), () => {
+    setRows(r => r && r.length && !r[0].local ? r : localFallback());
+  });
   React.useEffect(() => {
     if (!window.sheetsAPI || !window.sheetsAPI.getSessioni) {
       setRows(localFallback());
@@ -14692,6 +14842,7 @@ const CheckInTrend = ({
 }) => {
   const t = useT();
   const [refreshKey, setRefreshKey] = React.useState(0);
+  useSyncedData(k => /^checkIn_\d{4}-\d{2}-\d{2}$/.test(k), () => setRefreshKey(n => n + 1));
   React.useEffect(() => {
     if (!window.sheetsAPI || !window.storage) return;
     window.sheetsAPI.getCheckIn().then(rows => {
@@ -14937,6 +15088,8 @@ const VolumeView = ({
   isDesktop
 }) => {
   const t = useT();
+  const [rev, setRev] = React.useState(0);
+  useSyncedData(k => /^muscleSets_\d{4}-\d{2}-\d{2}$/.test(k), () => setRev(n => n + 1));
   const data = React.useMemo(() => {
     if (!window.storage || !window.WorkoutProgress) return {
       byGroup: {},
@@ -14954,7 +15107,7 @@ const VolumeView = ({
     return Object.assign({}, agg, {
       days: hist.length
     });
-  }, []);
+  }, [rev]);
   if (!data.total) {
     return React.createElement("div", {
       style: {
@@ -15229,6 +15382,9 @@ const MisureView = ({
   const [editing, setEditing] = React.useState(false);
   const [vals, setVals] = React.useState({});
   const [savedMsg, setSavedMsg] = React.useState("");
+  useSyncedData(["bodyMeasures"], () => {
+    if (window.storage) setLog(window.storage.get("bodyMeasures", []) || []);
+  });
   React.useEffect(() => {
     if (!window.sheetsAPI || !window.sheetsAPI.getMisure || !window.storage) return;
     window.sheetsAPI.getMisure().then(rows => {
@@ -15472,10 +15628,16 @@ const Storico = ({
       setWeightLog(merged.slice(-60));
     }).catch(() => {});
   }, []);
+  const [actRev, setActRev] = React.useState(0);
+  useSyncedData(["weightLog", "activities"], keys => {
+    if (!window.storage) return;
+    if (keys.indexOf("weightLog") !== -1) setWeightLog((window.storage.get("weightLog", []) || []).slice(-60));
+    if (keys.indexOf("activities") !== -1) setActRev(n => n + 1);
+  });
   const activities = React.useMemo(() => {
     if (!window.storage) return [];
     return window.storage.get("activities", []).slice(0, 30);
-  }, []);
+  }, [actRev]);
   const weekSummary = React.useMemo(() => {
     if (!window.storage || !activities.length) return null;
     const totalMin = activities.reduce((s, a) => s + (a.min || 0), 0);
@@ -16076,6 +16238,13 @@ function _validateDietaText(text, t) {
 }
 function _fmtImportDate(iso) {
   try {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(iso))) {
+      return new Date(iso + "T12:00:00").toLocaleDateString(undefined, {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric"
+      });
+    }
     const d = new Date(iso);
     if (isNaN(d)) return "";
     return d.toLocaleDateString(undefined, {
@@ -16090,19 +16259,78 @@ function _fmtImportDate(iso) {
     return "";
   }
 }
+const _PLAN_IMPORT = {
+  scheda: {
+    collection: "workoutPlan",
+    prefix: "workout",
+    fromText: "workoutPlanFromText",
+    legacy: "toLegacyScheda",
+    local: "plan_workout",
+    textKey: "schedaData"
+  },
+  dieta: {
+    collection: "dietPlan",
+    prefix: "diet",
+    fromText: "dietPlanFromText",
+    legacy: "toLegacyDieta",
+    local: "plan_diet",
+    textKey: "dietaData"
+  }
+};
+function _importPlanChanges(kind, text, fileName, now) {
+  const cfg = _PLAN_IMPORT[kind],
+    PC = window.PlanConv;
+  const d = now || new Date();
+  const p2 = n => String(n).padStart(2, "0");
+  const today = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+  const id = `${cfg.prefix}-${today.replace(/-/g, "")}-${p2(d.getHours())}${p2(d.getMinutes())}`;
+  const name = String(fileName || "").replace(/\.txt$/i, "") || kind;
+  const plan = PC[cfg.fromText](text, {
+    id,
+    name,
+    validFrom: today
+  });
+  const prev = window.storage ? window.storage.get(cfg.local, null) : null;
+  if (prev && prev.data && JSON.stringify(PC[cfg.legacy](prev.data)) === JSON.stringify(PC[cfg.legacy](plan.data))) {
+    return {
+      identical: true,
+      changes: []
+    };
+  }
+  const changes = [{
+    collection: cfg.collection,
+    id: plan.id,
+    data: plan.data
+  }];
+  if (prev && prev.id && prev.id !== plan.id && prev.data) {
+    changes.push({
+      collection: cfg.collection,
+      id: prev.id,
+      data: Object.assign({}, prev.data, {
+        status: "archived",
+        validTo: today
+      })
+    });
+  }
+  return {
+    identical: false,
+    changes
+  };
+}
 const FileImporter = ({
   label,
   icon,
-  storageKey,
+  kind,
   accept = "",
   validate
 }) => {
   const t = useT();
-  const [loaded, setLoaded] = React.useState(() => !!(window.storage && window.storage.get(storageKey, null)));
-  const [fileName, setFileName] = React.useState(() => window.storage ? window.storage.get(storageKey + "_name", "") : "");
-  const [importedAt, setImportedAt] = React.useState(() => window.storage ? window.storage.get(storageKey + "_at", "") : "");
+  const cfg = _PLAN_IMPORT[kind];
+  const readPlan = () => window.storage ? window.storage.get(cfg.local, null) : null;
+  const [plan, setPlan] = React.useState(readPlan);
   const [status, setStatus] = React.useState(null);
   const inputRef = React.useRef(null);
+  useSyncedData([cfg.local], () => setPlan(readPlan()));
   const handleFile = e => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -16112,19 +16340,29 @@ const FileImporter = ({
       msg: t("Errore di lettura del file")
     });
     reader.onload = ev => {
-      const text = String(ev.target.result || "").replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+      const text = String(ev.target.result || "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
       const v = validate ? validate(text, t) : {
         ok: true,
         detail: ""
       };
-      if (!v.ok) {
+      if (!v.ok || !window.PlanConv || !window.SyncV2) {
         setStatus({
           type: "err",
           msg: t("Formato non valido — dati attuali conservati")
         });
         return;
       }
-      if (window.storage && text === window.storage.get(storageKey, null)) {
+      let res;
+      try {
+        res = _importPlanChanges(kind, text, file.name);
+      } catch (_) {
+        setStatus({
+          type: "err",
+          msg: t("Formato non valido — dati attuali conservati")
+        });
+        return;
+      }
+      if (res.identical) {
         setStatus({
           type: "ok",
           msg: t("File identico a quello attuale")
@@ -16132,23 +16370,24 @@ const FileImporter = ({
         setTimeout(() => setStatus(null), 4000);
         return;
       }
-      const now = new Date().toISOString();
-      if (window.storage) {
-        window.storage.set(storageKey, text);
-        window.storage.set(storageKey + "_name", file.name);
-        window.storage.set(storageKey + "_at", now);
-      }
-      setLoaded(true);
-      setFileName(file.name);
-      setImportedAt(now);
+      window.SyncV2.putRecords(res.changes);
+      if (window.storage) window.storage.set(cfg.textKey, text);
+      setPlan(readPlan());
       const okMsg = `${t("Importato")}${v.detail ? " · " + v.detail : ""}`;
+      if (!window.SyncV2.hasToken()) {
+        setStatus({
+          type: "warn",
+          msg: `${okMsg} · ${t("salvato sul device (non collegato)")}`
+        });
+        setTimeout(() => setStatus(null), 6000);
+        return;
+      }
       setStatus({
         type: "ok",
         msg: `${okMsg} · ${t("sync cloud…")}`
       });
-      const push = window._saveSettingRetry ? window._saveSettingRetry(storageKey, text) : Promise.resolve(false);
-      push.then(ok => {
-        setStatus(ok ? {
+      window.SyncV2.syncNow().then(r => {
+        setStatus(r && r.ok ? {
           type: "ok",
           msg: `${okMsg} · ${t("sincronizzato")}`
         } : {
@@ -16160,7 +16399,8 @@ const FileImporter = ({
     };
     reader.readAsText(file, "UTF-8");
   };
-  const subText = status ? status.msg : loaded ? `${fileName || t("Caricato")}${importedAt ? " · " + t("Ultimo import") + " " + _fmtImportDate(importedAt) : ""}` : t("Nessun file importato");
+  const loaded = !!(plan && plan.data);
+  const subText = status ? status.msg : loaded ? `${plan.data.name || t("Caricato")}${plan.data.validFrom ? " · " + t("dal") + " " + _fmtImportDate(plan.data.validFrom) : ""}` : t("Nessun file importato");
   return React.createElement("div", {
     className: "row"
   }, React.createElement("div", {
@@ -16287,14 +16527,17 @@ const SyncNowRow = () => {
     setSyncing(true);
     setSyncResult(null);
     try {
-      await window._cloudPushAll();
+      const r = window.SyncV2 ? await window.SyncV2.syncNow() : {
+        ok: false,
+        error: "assente"
+      };
       setSyncResult({
-        ok: true
+        ok: !!(r && r.ok),
+        unlinked: !!(r && r.error === "unlinked")
       });
     } catch (e) {
       setSyncResult({
-        ok: false,
-        msg: e.message
+        ok: false
       });
     } finally {
       setSyncing(false);
@@ -16305,7 +16548,7 @@ const SyncNowRow = () => {
     icon: "refresh",
     iconBg: "#0A84FF",
     title: t("Sincronizza ora"),
-    sub: t("Pusha tutti i dati locali al cloud"),
+    sub: t("Invia e ricevi le modifiche"),
     onClick: !syncing ? handleSync : undefined
   }, syncing ? React.createElement("span", {
     className: "spinner",
@@ -16320,7 +16563,7 @@ const SyncNowRow = () => {
       background: syncResult.ok ? "rgba(48,209,88,0.18)" : "rgba(255,69,58,0.14)",
       color: syncResult.ok ? "var(--success)" : "var(--danger)"
     }
-  }, syncResult.ok ? "✓ " + t("Sincronizzato") : "✗ " + t("Errore")) : React.createElement(Icon, {
+  }, syncResult.ok ? "✓ " + t("Sincronizzato") : "✗ " + (syncResult.unlinked ? t("Non collegato") : t("Errore"))) : React.createElement(Icon, {
     name: "chevron",
     size: 13,
     color: "var(--accent)"
@@ -16348,7 +16591,7 @@ const SyncStatusRow = () => {
     icon: "cloud",
     iconBg: "#30D158",
     title: t("Stato sincronizzazione"),
-    sub: time ? `${t("Ultimo sync")}: ${time} · ${t("Cloud: Google Sheets via proxy")}` : t("In attesa del primo sync")
+    sub: time ? `${t("Ultimo sync")}: ${time} · ${t("Cloud: Cloudflare")}` : s.status === "unlinked" ? t("Device non collegato: dati solo in locale") : t("In attesa del primo sync")
   }, window.SyncBadge ? React.createElement(SyncBadge, null) : null);
 };
 const BackupRows = () => {
@@ -17088,12 +17331,12 @@ const Impostazioni = ({
   }, React.createElement(FileImporter, {
     label: t("Importa scheda (.txt)"),
     icon: "dumbbell",
-    storageKey: "schedaData",
+    kind: "scheda",
     validate: _validateSchedaText
   }), React.createElement(FileImporter, {
     label: t("Importa dieta (.txt)"),
     icon: "fork",
-    storageKey: "dietaData",
+    kind: "dieta",
     validate: _validateDietaText
   }), React.createElement(PlanExportRow, {
     label: t("Esporta scheda (.txt)"),
@@ -17765,475 +18008,44 @@ function _applyTheme(theme) {
   const metas = document.querySelectorAll('meta[name="theme-color"]');
   metas.forEach(m => m.setAttribute("content", light ? "#f7f7fa" : "#0b0b0f"));
 }
-window._syncState = {
-  status: "idle",
-  last: null
-};
-function _setSyncState(status) {
-  const prev = window._syncState || {};
-  window._syncState = {
-    status,
-    last: status === "ok" ? Date.now() : prev.last || null
-  };
-  try {
-    window.dispatchEvent(new Event("lfh-sync"));
-  } catch (_) {}
-}
-function _safe(p, ms) {
-  return Promise.race([p.then(v => ({
-    ok: true,
-    value: v
-  })).catch(e => ({
-    ok: false,
-    err: String(e)
-  })), new Promise(resolve => setTimeout(() => resolve({
-    ok: false,
-    err: "timeout"
-  }), ms))]);
-}
-const _push = {};
-function _pendingSettings() {
-  return window.storage && window.storage.get("settingsPending", {}) || {};
-}
-function _setPending(key, value) {
-  if (!window.storage) return;
-  const p = Object.assign({}, _pendingSettings());
-  if (value === undefined) {
-    if (!(key in p)) return;
-    delete p[key];
-  } else p[key] = value;
-  window.storage.set("settingsPending", p);
-}
-const _MERGE = {
-  spesaChecked2: {
-    local: "spesaChecked",
-    list: false
-  },
-  spesaExtra: {
-    local: "spesaExtra",
-    list: true
-  },
-  exNotes: {
-    local: "exNotes",
-    list: false
-  }
-};
-function _toMap(val, list) {
-  if (!val || typeof val !== "object") return {};
-  if (!list) return val;
-  const m = {};
-  (Array.isArray(val) ? val : []).forEach(it => {
-    if (it && it.id != null) m[String(it.id)] = it;
-  });
-  return m;
-}
-function _fromMap(m, list) {
-  return list ? Object.values(m).sort((a, b) => Number(a.id) - Number(b.id)) : m;
-}
-function _edits() {
-  return window.storage && window.storage.get("settingsEdits", {}) || {};
-}
-function _markEdits(key, prev, next) {
-  const cfg = _MERGE[key];
-  if (!cfg || !window.storage) return;
-  const a = _toMap(prev, cfg.list),
-    b = _toMap(next, cfg.list);
-  const all = Object.assign({}, _edits());
-  const cur = all[key] || {
-    seq: 0,
-    e: {}
-  };
-  const e = Object.assign({}, cur.e);
-  let changed = false;
-  new Set([...Object.keys(a), ...Object.keys(b)]).forEach(id => {
-    if (JSON.stringify(a[id]) !== JSON.stringify(b[id])) {
-      e[id] = b[id] === undefined ? null : b[id];
-      changed = true;
-    }
-  });
-  if (!changed) return;
-  all[key] = {
-    seq: cur.seq + 1,
-    e
-  };
-  window.storage.set("settingsEdits", all);
-}
-window._markEdits = _markEdits;
-function _applyEdits(key, cloudVal) {
-  const cfg = _MERGE[key];
-  const m = Object.assign({}, _toMap(cloudVal, cfg.list));
-  const ed = (_edits()[key] || {}).e || {};
-  Object.entries(ed).forEach(([id, v]) => {
-    if (v === null) delete m[id];else m[id] = v;
-  });
-  return _fromMap(m, cfg.list);
-}
-function _pullMerged(key, cloudVal) {
-  const cfg = _MERGE[key];
-  const all = Object.assign({}, _edits());
-  const ed = all[key];
-  if (ed) {
-    const cm = _toMap(cloudVal, cfg.list);
-    const reflected = Object.entries(ed.e).every(([id, v]) => v === null ? !(id in cm) : JSON.stringify(cm[id]) === JSON.stringify(v));
-    const slot = _push[key];
-    if (reflected) {
-      if (!slot || slot.busy === 0) {
-        delete all[key];
-        window.storage.set("settingsEdits", all);
-      }
-    } else if (!slot || slot.busy === 0) {
-      _saveSettingRetry(key, JSON.stringify(_applyEdits(key, cloudVal)));
-    }
-  }
-  return _applyEdits(key, cloudVal);
-}
-function _saveSettingRetry(key, value, tries = 2) {
-  if (!window.sheetsAPI) return Promise.resolve(false);
-  const v = String(value);
-  _setPending(key, v);
-  const slot = _push[key] || (_push[key] = {
-    chain: Promise.resolve(),
-    latest: null,
-    busy: 0,
-    doneAt: 0
-  });
-  slot.latest = v;
-  slot.busy++;
-  const attempt = async n => {
-    let payload = v;
-    const cfg = _MERGE[key];
-    const ed = _edits()[key];
-    if (cfg && ed && Object.keys(ed.e).length && window.sheetsAPI.getSettings) {
-      const r = await _safe(window.sheetsAPI.getSettings(), 8000);
-      if (r.ok && r.value && typeof r.value === "object") {
-        const raw = r.value[key] || (key === "spesaChecked2" ? r.value.spesaChecked : null);
-        let cloud = null;
-        try {
-          cloud = raw ? JSON.parse(raw) : null;
-        } catch (_) {}
-        const merged = _applyEdits(key, cloud);
-        payload = JSON.stringify(merged);
-        window.storage.set(cfg.local, merged);
-        try {
-          window.dispatchEvent(new Event("lfh-merged"));
-        } catch (_) {}
-      }
-    }
-    return window.sheetsAPI.saveSettings({
-      key,
-      value: payload
-    }).then(() => {
-      slot.doneAt = Date.now();
-      if (_pendingSettings()[key] === v) _setPending(key, undefined);
-      console.log("[sync push]", key, "✓");
-      return true;
-    }).catch(e => {
-      if (n > 0) return new Promise(r => setTimeout(r, 800)).then(() => attempt(n - 1));
-      console.warn("[sync push err]", key, e);
-      return false;
-    });
-  };
-  const run = slot.chain.then(() => slot.latest !== v ? true : attempt(tries));
-  slot.chain = run.catch(() => {}).then(() => {
-    slot.busy--;
-  });
-  return run;
-}
-window._saveSettingRetry = _saveSettingRetry;
-function _cloudSkip(key, pullStart) {
-  if (key in _pendingSettings()) return true;
-  const s = _push[key];
-  return !!(s && (s.busy > 0 || s.doneAt && s.doneAt > pullStart - 1500));
-}
-function _repushPending() {
-  Object.entries(_pendingSettings()).forEach(([k, v]) => {
-    const s = _push[k];
-    if (!s || s.busy === 0) _saveSettingRetry(k, v);
-  });
-}
-const _repoOverride = {};
-async function _reconcileRepoFiles() {
-  if (!window.storage) return;
-  const st = window.storage;
-  const files = [{
-    file: "scheda.txt",
-    key: "schedaData",
-    parse: window.parseScheda,
-    valid: p => !!p && Array.isArray(p.days) && p.days.some(d => d && Array.isArray(d.exercises) && d.exercises.length)
-  }, {
-    file: "dieta.txt",
-    key: "dietaData",
-    parse: window.parseDieta,
-    valid: p => !!p && Object.keys(p || {}).some(k => p[k] && Array.isArray(p[k].meals) && p[k].meals.length)
-  }];
-  await Promise.all(files.map(async ({
-    file,
-    key,
-    parse,
-    valid
-  }) => {
+if (window.storage) {
+  window.storage.onReady(() => {
+    _cleanupOldDailyKeys();
     try {
-      const url = new URL(file, document.baseURI).href + "?_cb=" + Date.now();
-      const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-      const tid = ctrl && setTimeout(() => ctrl.abort(), 6000);
-      const res = await fetch(url, {
-        cache: "no-store",
-        signal: ctrl ? ctrl.signal : undefined
-      }).finally(() => clearTimeout(tid));
-      if (!res.ok) return;
-      const text = await res.text();
-      if (!text || !text.trim()) return;
-      if (parse) {
-        try {
-          if (!valid(parse(text))) return;
-        } catch (_) {
-          return;
-        }
-      }
-      const prevSrc = st.get(key + "_src", null);
-      if (text === prevSrc) return;
-      if (prevSrc === null) {
-        st.set(key + "_src", text);
-        if (!st.get(key, null)) {
-          st.set(key, text);
-          st.set(key + "_name", file);
-        }
-        return;
-      }
-      st.set(key, text);
-      st.set(key + "_src", text);
-      st.set(key + "_name", file);
-      st.set(key + "_at", new Date().toISOString());
-      _repoOverride[key] = true;
-      _saveSettingRetry(key, text);
-      console.log("[repo-file] " + key + " aggiornato da " + file + " → storage + cloud");
+      if (window.SyncV2) window.SyncV2.init({
+        storage: window.storage
+      });
     } catch (e) {
-      console.warn("[repo-file]", file, e);
+      if (window._logError) window._logError(e);else console.warn("[sync] init:", e);
     }
+  });
+}
+function _syncNow() {
+  if (!window.SyncV2) return Promise.resolve({
+    ok: false,
+    error: "assente"
+  });
+  return window.SyncV2.syncNow().catch(() => ({
+    ok: false
   }));
 }
-window._reconcileRepoFiles = _reconcileRepoFiles;
-let _getAllUnsupported = false;
-async function _cloudSync(opts) {
-  if (!window.sheetsAPI || !window.storage) return;
+function _autoSkipOnboarding() {
   const st = window.storage;
-  const {
-    pesiMs = 8000,
-    settingsMs = 15000
-  } = opts || {};
-  const pullStart = Date.now();
-  if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    _setSyncState("offline");
-    return;
-  }
-  _setSyncState("syncing");
-  try {
-    let pesiRes = null,
-      settingsRes = null;
-    if (_getAllUnsupported === false && window.sheetsAPI.getAll) {
-      const allRes = await _safe(window.sheetsAPI.getAll(), Math.max(pesiMs, settingsMs));
-      const v = allRes.ok ? allRes.value : null;
-      if (v && Array.isArray(v.pesoCorporeo) && v.settings && typeof v.settings === "object") {
-        pesiRes = {
-          ok: true,
-          value: v.pesoCorporeo
-        };
-        settingsRes = {
-          ok: true,
-          value: v.settings
-        };
-      } else if (allRes.ok) {
-        _getAllUnsupported = true;
-        console.log("[sync] getAll non supportato dal backend → fallback 2 chiamate");
-      } else {
-        pesiRes = settingsRes = {
-          ok: false,
-          err: allRes.err
-        };
-      }
-    }
-    if (!settingsRes) {
-      [pesiRes, settingsRes] = await Promise.all([_safe(window.sheetsAPI.getPesoCorporeo(), pesiMs), _safe(window.sheetsAPI.getSettings(), settingsMs)]);
-    }
-    if (pesiRes.ok) {
-      const pesi = pesiRes.value;
-      if (Array.isArray(pesi) && pesi.length > 0) {
-        if (window.WorkoutProgress) {
-          const merged = window.WorkoutProgress.mergeWeightLog(st.get("weightLog", []), pesi, "cloud");
-          st.set("weightLog", merged);
-          if (merged.length) st.set("bodyWeight", merged[merged.length - 1].weight);
-        } else {
-          st.set("bodyWeight", pesi[pesi.length - 1].weight);
-        }
-        console.log("[sync] weightLog merge ←", pesi.length, "cloud rows");
-      }
-    } else {
-      console.warn("[sync] getPesoCorporeo:", pesiRes.err);
-    }
-    let cloudKeys = null;
-    if (settingsRes.ok && settingsRes.value && typeof settingsRes.value === "object") {
-      const s = settingsRes.value;
-      cloudKeys = s;
-      const skip = k => _cloudSkip(k, pullStart);
-      ["schedaData", "dietaData"].forEach(k => {
-        if (_repoOverride[k] || skip(k)) return;
-        if (s[k] && s[k] !== st.get(k, null)) {
-          st.set(k, s[k]);
-          st.set(k + "_name", "cloud");
-          console.log("[sync pull]", k, "✓");
-        }
-      });
-      const spesaCloud = s.spesaChecked2 || s.spesaChecked;
-      if (spesaCloud) {
-        try {
-          st.set("spesaChecked", _pullMerged("spesaChecked2", JSON.parse(spesaCloud)));
-          console.log("[sync pull] spesaChecked ✓");
-        } catch (_) {}
-      }
-      if (s.spesaFreq && !skip("spesaFreq")) st.set("spesaFreq", Number(s.spesaFreq) || 1);
-      if (s.spesaExtra) {
-        try {
-          st.set("spesaExtra", _pullMerged("spesaExtra", JSON.parse(s.spesaExtra)));
-        } catch (_) {}
-      }
-      if (s.weightGoal && parseFloat(s.weightGoal) > 0 && !skip("weightGoal")) st.set("weightGoal", parseFloat(s.weightGoal));
-      if (s.exNotes) {
-        try {
-          st.set("exNotes", _pullMerged("exNotes", JSON.parse(s.exNotes)));
-        } catch (_) {}
-      }
-      if (s.bodyWeight && parseFloat(s.bodyWeight) > 0 && !skip("bodyWeight")) {
-        st.set("bodyWeight", parseFloat(s.bodyWeight));
-        console.log("[sync pull] bodyWeight (settings) →", s.bodyWeight);
-      }
-      if (s.onboardingDone === "true") st.set("onboardingDone", true);
-    } else {
-      console.warn("[sync] getSettings:", settingsRes.err);
-    }
-    const hasBW = parseFloat(st.get("bodyWeight", 0)) > 0;
-    const hasGroq = !!st.get("groqApiKey", "");
-    if (hasGroq || hasBW) {
-      st.set("onboardingDone", true);
-      if (cloudKeys && cloudKeys.onboardingDone !== "true") {
-        window.sheetsAPI.saveSettings({
-          key: "onboardingDone",
-          value: "true"
-        }).catch(() => {});
-      }
-      console.log("[sync] onboardingDone → true");
-    }
-    if (cloudKeys) {
-      _repushPending();
-      _cloudPushMissing(cloudKeys);
-    } else console.warn("[sync] pull settings fallito → push saltato (anti-clobber)");
-    _setSyncState(settingsRes.ok || pesiRes.ok ? "ok" : "error");
-    if (settingsRes.ok) _maybeAutoBackup();
-  } catch (e) {
-    console.warn("[sync] error:", e);
-    _setSyncState("error");
-  }
+  if (!st || st.get("onboardingDone", false)) return;
+  if (parseFloat(st.get("bodyWeight", 0)) > 0 || !!st.get("groqApiKey", "")) st.set("onboardingDone", true);
 }
-let _backupTriedThisSession = false;
-function _maybeAutoBackup() {
-  if (_backupTriedThisSession || !window.storage || !window.sheetsAPI) return;
-  const st = window.storage;
-  const last = st.get("lastAutoBackup", null);
-  if (last && Date.now() - last < 6.5 * 86400000) return;
-  _backupTriedThisSession = true;
-  try {
-    const data = {};
-    st.keys().sort().forEach(k => {
-      if (k === "groqApiKey" || k === "errorLog" || k === "sheetsQueue") return;
-      data[k] = st.get(k, null);
-    });
-    const json = JSON.stringify({
-      _lfhBackup: 1,
-      exportedAt: new Date().toISOString(),
-      auto: true,
-      data
-    });
-    if (json.length > 900000) {
-      console.warn("[backup] snapshot troppo grande, salto");
-      return;
-    }
-    window.sheetsAPI.post({
-      action: "saveBackup",
-      json
-    }).then(r => {
-      if (r && r.success && !r.queued) {
-        st.set("lastAutoBackup", Date.now());
-        console.log("[backup] auto-backup su Sheets ✓ (" + (r.chunks || "?") + " chunk)");
-      }
-    }).catch(e => console.warn("[backup] non riuscito (backend senza saveBackup?):", e.message));
-  } catch (_) {}
-}
-function _cloudPushMissing(cloudKeys) {
-  if (!window.sheetsAPI || !window.storage) return;
-  const st = window.storage;
-  const save = (key, value) => {
-    if (value !== undefined && value !== null && value !== "") {
-      _saveSettingRetry(key, value);
-    }
-  };
-  const KEYS = ["bodyWeight", "onboardingDone", "spesaFreq", "weightGoal"];
-  KEYS.forEach(k => {
-    const local = st.get(k, "");
-    if (local && !cloudKeys[k]) {
-      save(k, k === "onboardingDone" ? "true" : local);
-    }
-  });
-  ["schedaData", "dietaData"].forEach(k => {
-    const local = st.get(k, null);
-    if (local && !cloudKeys[k]) {
-      save(k, local);
-    }
-  });
-  const sc = st.get("spesaChecked", null);
-  if (sc && Object.keys(sc).length > 0 && !cloudKeys.spesaChecked2) {
-    save("spesaChecked2", JSON.stringify(sc));
-  }
-  [["spesaExtra", []], ["exNotes", {}]].forEach(([k, empty]) => {
-    const local = st.get(k, empty);
-    if (local && Object.keys(local).length > 0 && !cloudKeys[k]) {
-      save(k, JSON.stringify(local));
-    }
-  });
-}
-window._cloudPushAll = function () {
-  if (!window.sheetsAPI || !window.storage) return Promise.resolve();
-  const st = window.storage;
-  const saves = [];
-  const push = (key, value) => {
-    if (value !== undefined && value !== null && value !== "") {
-      saves.push(_saveSettingRetry(key, value));
-    }
-  };
-  push("bodyWeight", st.get("bodyWeight", ""));
-  push("spesaFreq", st.get("spesaFreq", ""));
-  push("weightGoal", st.get("weightGoal", ""));
-  push("onboardingDone", st.get("onboardingDone", false) ? "true" : "");
-  const sc = st.get("spesaChecked", null);
-  if (sc && Object.keys(sc).length > 0) push("spesaChecked2", JSON.stringify(sc));
-  const se = st.get("spesaExtra", []);
-  if (se && se.length > 0) push("spesaExtra", JSON.stringify(se));
-  const en = st.get("exNotes", {});
-  if (en && Object.keys(en).length > 0) push("exNotes", JSON.stringify(en));
-  const scheda = st.get("schedaData", null);
-  if (scheda) push("schedaData", scheda);
-  const dieta = st.get("dietaData", null);
-  if (dieta) push("dietaData", dieta);
-  return Promise.all(saves);
-};
 function _cleanupOldDailyKeys() {
   if (!window.storage || !window.storage.keys) return;
   try {
     const cut = new Date();
     cut.setDate(cut.getDate() - 90);
     const cutKey = `${cut.getFullYear()}-${String(cut.getMonth() + 1).padStart(2, "0")}-${String(cut.getDate()).padStart(2, "0")}`;
-    const re = /^(checkIn_|hydration_|notes_|gym_|integ_|coachChat_|schedaProg_|muscleSets_|dietaCheck_|gymStart_|gymSaved_|restDay_|nudgeDismissed_)(\d{4}-\d{2}-\d{2})$/;
+    const re = /^(checkIn_|hydration_|notes_|gym_|integ_|coachChat_|schedaProg_|muscleSets_|dietaCheck_|dietaVariant_|gymStart_|gymSaved_|restDay_|nudgeDismissed_)(\d{4}-\d{2}-\d{2})$/;
     window.storage.keys().forEach(k => {
       const m = k.match(re);
-      if (m && m[2] < cutKey) window.storage.remove(k);
+      if (m && m[2] < cutKey) window.storage.remove(k, {
+        silent: true
+      });
     });
   } catch (_) {}
 }
@@ -18394,37 +18206,44 @@ const AppFrame = ({
   const [lang, setLang] = React.useState(window.storage ? window.storage.get("lang", "it") : "it");
   const [initialized, setInitialized] = React.useState(false);
   const syncNowRef = React.useRef(null);
-  React.useEffect(() => {
-    const onMerged = () => {
-      if (window.storage && window.storage.isReady()) applySynced();
-    };
-    window.addEventListener("lfh-merged", onMerged);
-    return () => window.removeEventListener("lfh-merged", onMerged);
-  }, []);
-  const applySynced = () => {
+  const applySynced = keys => {
     const s = initState();
-    setStateRaw(prev => ({
-      ...prev,
-      bodyWeight: s.bodyWeight,
-      checkIn: s.checkIn,
-      spesaChecked: s.spesaChecked,
-      spesaFreq: s.spesaFreq
-    }));
+    const has = k => !keys || keys.indexOf(k) !== -1;
+    setStateRaw(prev => {
+      const next = {
+        ...prev
+      };
+      if (has("bodyWeight")) next.bodyWeight = s.bodyWeight;
+      if (has(`checkIn_${today}`)) next.checkIn = s.checkIn;
+      if (has("spesaChecked")) next.spesaChecked = s.spesaChecked;
+      if (has("spesaFreq")) next.spesaFreq = s.spesaFreq;
+      if (has("activities")) next.activities = s.activities;
+      if (has("theme")) next.theme = s.theme;
+      return next;
+    });
+    if (has("lang") && window.storage) setLang(window.storage.get("lang", "it"));
   };
   React.useEffect(() => {
+    const onData = e => {
+      if (!window.storage || !window.storage.isReady()) return;
+      const keys = e && e.detail && Array.isArray(e.detail.keys) ? e.detail.keys : null;
+      applySynced(keys);
+    };
+    window.addEventListener("lfh-data", onData);
+    return () => window.removeEventListener("lfh-data", onData);
+  }, []);
+  React.useEffect(() => {
     if (!storageReady || initialized) return;
-    _cleanupOldDailyKeys();
     const finish = () => {
       setStateRaw(initState());
       setLang(window.storage ? window.storage.get("lang", "it") : "it");
       setInitialized(true);
     };
-    const bootSync = _reconcileRepoFiles().finally(() => _cloudSync());
+    const bootSync = _syncNow().then(_autoSkipOnboarding);
     if (window.storage && window.storage.get("onboardingDone", false)) {
       finish();
-      bootSync.finally(applySynced);
     } else {
-      bootSync.finally(finish);
+      Promise.race([bootSync, new Promise(r => setTimeout(r, 10000))]).finally(finish);
     }
   }, [storageReady]);
   const setState = React.useCallback(updater => {
@@ -18433,32 +18252,10 @@ const AppFrame = ({
       if (!window.storage) return next;
       const t = window.todayKey ? window.todayKey() : today;
       if (next.activities !== prev.activities) window.storage.set("activities", next.activities.slice(0, 50));
-      if (next.checkIn !== prev.checkIn) {
-        window.storage.set(`checkIn_${t}`, next.checkIn);
-        if (window.sheetsAPI) window.sheetsAPI.saveCheckIn({
-          date: t,
-          sleep: next.checkIn.sleep,
-          energy: next.checkIn.energy,
-          ailments: next.checkIn.ailments || ""
-        }).catch(() => {});
-      }
-      if (next.bodyWeight !== prev.bodyWeight) {
-        window.storage.set("bodyWeight", next.bodyWeight);
-        _saveSettingRetry("bodyWeight", next.bodyWeight);
-        if (window.sheetsAPI) window.sheetsAPI.savePesoCorporeo({
-          date: t,
-          weight: next.bodyWeight
-        }).catch(() => {});
-      }
-      if (next.spesaChecked !== prev.spesaChecked) {
-        _markEdits("spesaChecked2", prev.spesaChecked, next.spesaChecked);
-        window.storage.set("spesaChecked", next.spesaChecked);
-        _saveSettingRetry("spesaChecked2", JSON.stringify(next.spesaChecked));
-      }
-      if (next.spesaFreq !== prev.spesaFreq) {
-        window.storage.set("spesaFreq", next.spesaFreq);
-        _saveSettingRetry("spesaFreq", next.spesaFreq);
-      }
+      if (next.checkIn !== prev.checkIn) window.storage.set(`checkIn_${t}`, next.checkIn);
+      if (next.bodyWeight !== prev.bodyWeight) window.storage.set("bodyWeight", next.bodyWeight);
+      if (next.spesaChecked !== prev.spesaChecked) window.storage.set("spesaChecked", next.spesaChecked);
+      if (next.spesaFreq !== prev.spesaFreq) window.storage.set("spesaFreq", next.spesaFreq);
       if (next.theme !== prev.theme) {
         window.storage.set("theme", next.theme);
         _applyTheme(next.theme);
@@ -18485,22 +18282,21 @@ const AppFrame = ({
   }, [state.screen, initialized]);
   React.useEffect(() => {
     if (!initialized) return;
-    const pullAndApply = () => {
+    const syncIfVisible = () => {
       if (document.visibilityState !== "visible") return Promise.resolve();
-      return _cloudSync({
-        pesiMs: 6000,
-        settingsMs: 8000
-      }).finally(applySynced);
+      return _syncNow();
     };
-    syncNowRef.current = pullAndApply;
+    syncNowRef.current = syncIfVisible;
     const handleVisibility = () => {
-      if (document.visibilityState === "visible") pullAndApply();
+      if (document.visibilityState === "visible") syncIfVisible();
     };
     document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("online", syncIfVisible);
     const POLL_MS = 45000;
-    const interval = setInterval(pullAndApply, POLL_MS);
+    const interval = setInterval(syncIfVisible, POLL_MS);
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("online", syncIfVisible);
       clearInterval(interval);
       syncNowRef.current = null;
     };
