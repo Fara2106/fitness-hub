@@ -1,8 +1,9 @@
 // Adattatore di test: imita l'API di D1 sopra node:sqlite (solo il necessario).
 import { DatabaseSync } from "node:sqlite";
 
-export function createD1() {
-  const sqlite = new DatabaseSync(":memory:");
+// `file`: percorso di un DB su disco (usato da dev/local-server.mjs); di default in memoria.
+export function createD1(file = ":memory:") {
+  const sqlite = new DatabaseSync(file);
   const prepare = (sql) => {
     const make = (args) => ({
       bind: (...a) => make(a),

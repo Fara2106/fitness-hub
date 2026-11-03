@@ -22,6 +22,18 @@ export async function checkToken(request, env) {
   return diff === 0;
 }
 
+// Chi è il proprietario del token. Oggi c'è un solo token (SYNC_TOKEN) e un solo proprietario
+// (PRIMARY_OWNER); in fase 5 è l'unico punto da estendere (tabella account). null = non autorizzato.
+// Token valido ma PRIMARY_OWNER assente: configurazione rotta → eccezione (500), mai record senza owner.
+export async function resolveOwner(request, env) {
+  if (!(await checkToken(request, env))) return null;
+  const owner = env.PRIMARY_OWNER;
+  if (typeof owner !== "string" || !owner) throw new ConfigError("configurazione mancante");
+  return owner;
+}
+
+class ConfigError extends Error {}
+
 const tooLarge = (cors) => json({ error: "richiesta troppo grande (massimo 2 MB)" }, 413, cors);
 
 function json(body, status, cors) {
@@ -31,7 +43,7 @@ function json(body, status, cors) {
   });
 }
 
-async function handleSync(request, env, cors) {
+async function handleSync(request, env, cors, owner) {
   // Content-Length dichiarato oltre il limite → 413 senza leggere il corpo.
   const declared = Number(request.headers.get("Content-Length"));
   if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return tooLarge(cors);
@@ -51,10 +63,10 @@ async function handleSync(request, env, cors) {
   const meta = await readMeta(env.DB);
   const reset = v.value.cursor > meta.seq;
   const cursor = reset ? 0 : v.value.cursor;
-  const { applied, stale, staleKeys } = await applyChanges(env.DB, deviceId, changes, Date.now());
+  const { applied, stale, staleKeys } = await applyChanges(env.DB, owner, deviceId, changes, Date.now());
   // conflicts = versione corrente del server per ogni change stale (il client la adotta).
-  const conflicts = await currentRecords(env.DB, staleKeys);
-  const pulled = await pullSince(env.DB, cursor, PULL_LIMIT);
+  const conflicts = await currentRecords(env.DB, owner, staleKeys);
+  const pulled = await pullSince(env.DB, owner, cursor, PULL_LIMIT);
   return json({
     cursor: pulled.cursor, more: pulled.more, changes: pulled.changes, applied, stale,
     conflicts, epoch: meta.epoch, reset,
@@ -85,13 +97,22 @@ export default {
       if (pathname === "/v1/health" && request.method === "GET") return json({ ok: true, version: "1" }, 200, cors);
       if (pathname === "/v1/sync") {
         if (request.method !== "POST") return json({ error: "metodo non consentito" }, 405, cors);
-        if (!(await checkToken(request, env))) return json({ error: "non autorizzato" }, 401, cors);
-        return await handleSync(request, env, cors);
+        const owner = await resolveOwner(request, env);
+        if (owner === null) return json({ error: "non autorizzato" }, 401, cors);
+        return await handleSync(request, env, cors, owner);
+      }
+      if (pathname === "/v1/me") {
+        if (request.method !== "GET") return json({ error: "metodo non consentito" }, 405, cors);
+        const owner = await resolveOwner(request, env);
+        if (owner === null) return json({ error: "non autorizzato" }, 401, cors);
+        const { epoch } = await readMeta(env.DB);
+        return json({ ownerId: owner, epoch }, 200, cors);
       }
       return json({ error: "non trovato" }, 404, cors);
     } catch (e) {
       // Solo il messaggio dell'errore: mai corpo, header o token della richiesta.
       console.error(`errore interno: ${e && e.message ? e.message : String(e)}`);
+      if (e instanceof ConfigError) return json({ error: e.message }, 500, cors);
       return json({ error: "errore interno" }, 500, cors);
     }
   },

@@ -7,3 +7,8 @@ binding = "DB"
 database_name = "fitness-hub-db"
 # Database D1 creato il 2026-11-03 (fase 1).
 database_id = "d97193e4-47e9-48ab-916d-9c0203d2b11a"
+
+[vars]
+# Proprietario dei record oggi esistenti (identificatore, non un segreto). Il token SYNC_TOKEN
+# corrisponde a questo proprietario (resolveOwner in src/worker.mjs).
+PRIMARY_OWNER = "7e8c37a9-62dd-4f25-8be3-1c209840db09"

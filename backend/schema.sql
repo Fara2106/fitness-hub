@@ -1,4 +1,7 @@
+-- Schema per i database NUOVI (idempotente). Un DB creato con lo schema precedente (senza `owner`)
+-- si porta avanti con migrations/0002_owner.sql PRIMA di rilanciare questo file.
 CREATE TABLE IF NOT EXISTS records (
+  owner TEXT NOT NULL,
   collection TEXT NOT NULL,
   id TEXT NOT NULL,
   data TEXT,
@@ -6,9 +9,10 @@ CREATE TABLE IF NOT EXISTS records (
   deleted INTEGER NOT NULL DEFAULT 0,
   device_id TEXT NOT NULL,
   seq INTEGER NOT NULL,
-  PRIMARY KEY (collection, id)
+  PRIMARY KEY (owner, collection, id)
 );
-CREATE INDEX IF NOT EXISTS idx_records_seq ON records (seq);
+CREATE INDEX IF NOT EXISTS idx_records_owner_seq ON records (owner, seq);
+-- meta è globale (seq ed epoch valgono per tutto il database, non per proprietario).
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value INTEGER NOT NULL

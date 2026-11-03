@@ -7,10 +7,11 @@ import { validateSyncBody, MAX_CHANGES, MAX_DATA_BYTES, MAX_ID_LEN } from "../sr
 
 const schema = readFileSync(new URL("../schema.sql", import.meta.url), "utf8");
 const TOKEN = "t".repeat(64);
+const OWNER = "owner-test";
 async function newEnv(extra = {}) {
   const DB = createD1();
   await DB.exec(schema);
-  return { DB, SYNC_TOKEN: TOKEN, ...extra };
+  return { DB, SYNC_TOKEN: TOKEN, PRIMARY_OWNER: OWNER, ...extra };
 }
 const NOW = Date.now();
 const ch = (id, over = {}) => ({ collection: "settings", id, data: { v: id }, updatedAt: NOW, ...over });
@@ -171,7 +172,7 @@ test("rotte: 404, 405, errore interno senza dettagli (console.error col solo mes
   assert.equal((await worker.fetch(req("/v1/nope"), env)).status, 404);
   assert.equal((await worker.fetch(req("/"), env)).status, 404);
   assert.equal((await worker.fetch(req("/v1/sync"), env)).status, 405);
-  const broken = { SYNC_TOKEN: TOKEN, DB: { prepare() { throw new Error("segreto interno"); }, batch() { throw new Error("segreto interno"); } } };
+  const broken = { SYNC_TOKEN: TOKEN, PRIMARY_OWNER: OWNER, DB: { prepare() { throw new Error("segreto interno"); }, batch() { throw new Error("segreto interno"); } } };
   const res = await sync(broken, { deviceId: "a", cursor: 0, changes: [ch("x")] }, { origin: "https://fara2106.github.io" });
   assert.equal(res.status, 500);
   assert.equal(res.headers.get("Access-Control-Allow-Origin"), "https://fara2106.github.io");

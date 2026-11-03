@@ -11,13 +11,15 @@ export const MAX_FUTURE_MS = 300000;
 // un upsert condizionale che vince solo se updated_at è maggiore (spareggio: device_id).
 // I change persi lasciano un buco in seq: innocuo, il pull usa `seq > cursor`.
 // staleKeys = { collection, id } dei change persi, senza doppioni (per i `conflicts`).
-export async function applyChanges(db, deviceId, changes, now) {
+// Ogni record appartiene a un proprietario (owner): chiave primaria (owner, collection, id),
+// quindi lo stesso collection/id di due proprietari sono due record distinti.
+export async function applyChanges(db, owner, deviceId, changes, now) {
   if (!changes.length) return { applied: 0, stale: 0, staleKeys: [] };
   const bump = db.prepare("UPDATE meta SET value = value + 1 WHERE key = 'seq'");
   const upsert = db.prepare(
-    `INSERT INTO records (collection, id, data, updated_at, deleted, device_id, seq)
-     VALUES (?, ?, ?, ?, ?, ?, (SELECT value FROM meta WHERE key = 'seq'))
-     ON CONFLICT (collection, id) DO UPDATE SET
+    `INSERT INTO records (owner, collection, id, data, updated_at, deleted, device_id, seq)
+     VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT value FROM meta WHERE key = 'seq'))
+     ON CONFLICT (owner, collection, id) DO UPDATE SET
        data = excluded.data, updated_at = excluded.updated_at, deleted = excluded.deleted,
        device_id = excluded.device_id, seq = excluded.seq
      WHERE excluded.updated_at > records.updated_at
@@ -28,7 +30,7 @@ export async function applyChanges(db, deviceId, changes, now) {
   for (const c of changes) {
     stmts.push(bump);
     stmts.push(upsert.bind(
-      c.collection, c.id, c.data == null ? null : JSON.stringify(c.data),
+      owner, c.collection, c.id, c.data == null ? null : JSON.stringify(c.data),
       Math.min(c.updatedAt, limit), c.deleted ? 1 : 0, deviceId
     ));
   }
@@ -55,10 +57,10 @@ const toRecord = (r) => ({
 });
 
 // Righe correnti del server per le chiavi date (un solo db.batch di SELECT), nello stesso ordine.
-export async function currentRecords(db, keys) {
+export async function currentRecords(db, owner, keys) {
   if (!keys.length) return [];
-  const sel = db.prepare(`SELECT ${COLUMNS} FROM records WHERE collection = ? AND id = ?`);
-  const results = await db.batch(keys.map((k) => sel.bind(k.collection, k.id)));
+  const sel = db.prepare(`SELECT ${COLUMNS} FROM records WHERE owner = ? AND collection = ? AND id = ?`);
+  const results = await db.batch(keys.map((k) => sel.bind(owner, k.collection, k.id)));
   return results.flatMap((r) => (r.results || []).map(toRecord));
 }
 
@@ -69,10 +71,10 @@ export async function readMeta(db) {
   return { seq: m.seq ?? 0, epoch: m.epoch ?? null };
 }
 
-export async function pullSince(db, cursor, limit) {
+export async function pullSince(db, owner, cursor, limit) {
   const { results } = await db
-    .prepare(`SELECT ${COLUMNS} FROM records WHERE seq > ? ORDER BY seq LIMIT ?`)
-    .bind(cursor, limit + 1)
+    .prepare(`SELECT ${COLUMNS} FROM records WHERE owner = ? AND seq > ? ORDER BY seq LIMIT ?`)
+    .bind(owner, cursor, limit + 1)
     .all();
   const more = results.length > limit;
   const page = more ? results.slice(0, limit) : results;

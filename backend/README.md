@@ -7,6 +7,10 @@ e tombstone per le eliminazioni. Zero dipendenze runtime.
 ## Endpoint
 
 - `GET /v1/health` → `{ ok: true, version: "1" }` (senza token)
+- `GET /v1/me` con `Authorization: Bearer <token>` → `{ ownerId, epoch }` (401 senza token o con token sbagliato).
+  Il token `SYNC_TOKEN` corrisponde al proprietario `PRIMARY_OWNER` (variabile in `wrangler.toml`, un UUID: è un
+  identificatore, non un segreto). Se `PRIMARY_OWNER` manca, `/v1/me` e `/v1/sync` rispondono 500
+  "configurazione mancante" senza scrivere nulla.
 - `POST /v1/sync` con `Authorization: Bearer <token>`
   - richiesta: `{ deviceId, cursor, changes: Change[] }` (al massimo 500 change, `data` al massimo 64 KB)
   - risposta: `{ cursor, more, changes: Record[], applied, stale, conflicts: Record[], epoch, reset }`
@@ -23,6 +27,48 @@ bodyWeight, bodyMeasure, shoppingCheck, shoppingExtra, exerciseNote, personalRec
 CORS: `https://fara2106.github.io` e `localhost`/`127.0.0.1`; le richieste senza `Origin` (app native) sono ammesse.
 Contratto completo e id deterministici: `.superpowers/sdd/2026-11-03-fase1-backend-sync/global-constraints.md` e piano fase 1
 (`docs/superpowers/plans/2026-11-03-fase1-backend-sync.md`).
+
+## Proprietario dei record (preparazione fase 5)
+
+Ogni riga di `records` ha un `owner` e la chiave primaria è `(owner, collection, id)`: lo stesso `collection/id` di
+due proprietari sono due record distinti, e pull, `conflicts` e LWW lavorano sempre dentro un solo proprietario.
+`meta` (`seq`, `epoch`) resta globale. `resolveOwner(request, env)` in `src/worker.mjs` è l'unico punto che decide di
+chi è la richiesta (oggi: confronto a tempo costante con `SYNC_TOKEN` → `PRIMARY_OWNER`; in fase 5 una tabella account).
+I client non vedono nulla di diverso: il contratto dei record è invariato.
+
+### Migrazione `0002_owner.sql` (DB con lo schema vecchio)
+
+`schema.sql` crea lo schema nuovo sui DB vergini; un DB esistente si porta avanti con `migrations/0002_owner.sql`, che
+ricostruisce `records` con la colonna `owner` mantenendo `seq` e `meta` (quindi i cursori dei client restano validi).
+Il file contiene il segnaposto `__PRIMARY_OWNER__`, da sostituire con `sed` al lancio (D1 esegue il file come un unico
+lotto transazionale: niente `BEGIN`/`COMMIT`; su un DB già migrato il lotto fallisce e non cambia nulla). Prima annotare
+il bookmark di Time Travel:
+
+```bash
+cd backend
+npx wrangler d1 time-travel info fitness-hub-db      # annota il bookmark
+OWNER=$(grep '^PRIMARY_OWNER' wrangler.toml | sed -E 's/.*"([^"]+)".*/\1/')
+sed "s/__PRIMARY_OWNER__/$OWNER/g" migrations/0002_owner.sql > /tmp/0002_owner.sql
+npx wrangler d1 execute fitness-hub-db --remote --file=/tmp/0002_owner.sql
+npx wrangler deploy                                  # il nuovo Worker richiede lo schema migrato (e viceversa)
+rm /tmp/0002_owner.sql
+```
+
+Se qualcosa non torna: `time-travel restore` al bookmark, ridistribuire la versione precedente del Worker e cambiare
+l'epoch (vedi "Backup del database").
+
+## Server locale per i test (`dev/local-server.mjs`)
+
+Il Worker vero con D1 su `node:sqlite` (riusa `test/d1-sqlite.mjs`), su `http://127.0.0.1` soltanto. Lo usano i test
+d'integrazione e gli UI test dell'app Swift, mai il backend di produzione.
+
+```bash
+node backend/dev/local-server.mjs --port 8787 --token <token-di-test> [--db <file>] [--seed <records.json>] [--owner <id>]
+```
+
+`--port 0` sceglie una porta libera; `--db` persiste su file (default in memoria); `--seed` è un array JSON di `Change`
+applicati all'avvio come device `seed` (passano dal Worker, quindi stessa validazione e stesso LWW); `--owner` cambia il
+proprietario (default `local-owner`). Stampa `ready http://127.0.0.1:<porta>` appena è in ascolto e non stampa mai il token.
 
 ## Contratto per i client (fase 2 PWA, fase 3 app)
 
