@@ -159,7 +159,8 @@ await scenario("Cambio scheda e dieta in giornata", async () => {
     if (!skip) keep.push(l);
   }
   const dietaFile = join(TMP, "dieta-2v.txt");
-  await writeFile(dietaFile, keep.join("\n").split("200g frutta fresca (no macedonie)").join("170g yogurt NUOVO"));
+  await writeFile(dietaFile, keep.join("\n").split("200g frutta fresca (no macedonie)").join("170g yogurt NUOVO")
+    .split("(2ª assunzione)\n").join("(2ª assunzione), Magnesio 300mg\n"));
 
   const st = newState(BASE_SETTINGS);
   const { ctx, page } = await openApp(IPHONE, st);
@@ -184,6 +185,7 @@ await scenario("Cambio scheda e dieta in giornata", async () => {
   const d = await page.evaluate(() => document.body.innerText);
   ok("variante assente → pasti del piano importato (non quelli preimpostati)", d.includes("170g yogurt NUOVO"));
   ok("variante assente → avviso con la variante usata", /non ha questa variante: mostro «Ore 17»/.test(d));
+  ok("integratori letti dal file (Magnesio aggiunto nel piano)", d.includes("Magnesio 300mg"));
   ok("nessun errore JS", page._errors.length === 0, page._errors.join(" | "));
   await ctx.close();
 });

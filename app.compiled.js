@@ -1163,6 +1163,98 @@ const _INTEGRATORI = {
     type: "gluta"
   }]
 };
+window._INTEGRATORI_DEFAULT = _INTEGRATORI;
+const _SUPP_TYPES = [["vitac", /vita\s*c/i], ["vitab", /vita\s*b/i], ["omega", /omega/i], ["ps", /\bps\+/i], ["gluta", /gluta/i], ["mgk", /mgk/i], ["fuel", /fuel/i], ["barretta", /barretta/i], ["omnia", /omnia/i]];
+const _SUPP_COLORS = {
+  vitac: "#FF9F0A",
+  vitab: "#FFD60A",
+  omega1: "#5AC8FA",
+  omega2: "#5AC8FA",
+  ps: "#BF5AF2",
+  gluta: "#30D158",
+  mgk: "#0A84FF",
+  fuel: "#0A84FF",
+  barretta: "#FF9F0A",
+  omnia: "#5AC8FA"
+};
+const _WO_START = {
+  mattina: "08:00",
+  ore17: "17:00",
+  ore21: "21:00",
+  ore22: "22:00"
+};
+const _toMin = hhmm => {
+  const m = /(\d{1,2})[:.](\d{2})/.exec(hhmm || "");
+  return m ? +m[1] * 60 + +m[2] : null;
+};
+const _fromMin = n => {
+  n = Math.max(0, Math.min(23 * 60 + 59, n));
+  return String(Math.floor(n / 60)).padStart(2, "0") + ":" + String(n % 60).padStart(2, "0");
+};
+function _parseSuppLine(line) {
+  const body = line.replace(/^-\s*/, "");
+  let ci = -1;
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] !== ":") continue;
+    if (/\d/.test(body[i - 1] || "") && /^\d{2}/.test(body.slice(i + 1, i + 3))) continue;
+    ci = i;
+    break;
+  }
+  if (ci < 0) return [];
+  const when = body.slice(0, ci).trim();
+  return body.slice(ci + 1).split(",").map(p => p.trim()).filter(Boolean).map(product => ({
+    when,
+    product
+  }));
+}
+function _suppTime(when, section, meals) {
+  const explicit = /ore\s*(\d{1,2}[:.]\d{2})/i.exec(when) || /(\d{1,2}:\d{2})/.exec(when);
+  const w = when.toLowerCase();
+  const meal = re => {
+    const m = meals.find(x => re.test(x.title || ""));
+    return m ? _toMin(m.time) : null;
+  };
+  const wo = _toMin(_WO_START[section]);
+  if (/pre[-\s]?(allenamento|wo|workout)/.test(w)) return explicit ? _toMin(explicit[1]) : wo != null ? wo - 45 : 7 * 60 + 15;
+  if (/durante|intra|prepar/.test(w)) return explicit ? _toMin(explicit[1]) : wo != null ? wo : 12 * 60;
+  if (explicit) return _toMin(explicit[1]);
+  if (/colazione|mattina|risveglio/.test(w)) return meal(/colazione/i) != null ? meal(/colazione/i) : 8 * 60;
+  if (/pranzo/.test(w)) return (meal(/pranzo/i) != null ? meal(/pranzo/i) : 13 * 60) + 60;
+  if (/merenda/.test(w)) return (meal(/merenda/i) != null ? meal(/merenda/i) : 16 * 60 + 30) + 30;
+  if (/cena/.test(w)) return (meal(/cena|post/i) != null ? meal(/cena|post/i) : 20 * 60) + 60;
+  if (/dormire|notte|sera/.test(w)) return 23 * 60;
+  return 12 * 60;
+}
+function _resolveSupps(section, items, meals) {
+  const base = _INTEGRATORI[section] || [];
+  const out = [],
+    seen = {};
+  let omegaN = 0;
+  items.forEach(({
+    when,
+    product
+  }) => {
+    const hit = _SUPP_TYPES.find(([, re]) => re.test(product));
+    let type = hit ? hit[0] : null;
+    if (type === "omega") type = ++omegaN === 1 ? "omega1" : "omega2";
+    const key = type || product.toLowerCase();
+    if (seen[key]) return;
+    seen[key] = true;
+    const known = type && base.find(b => b.type === type);
+    if (known) {
+      out.push(Object.assign({}, known));
+      return;
+    }
+    out.push({
+      name: product.length > 40 ? product.slice(0, 39) + "…" : product,
+      time: when,
+      sortTime: _fromMin(_suppTime(when, section, meals)),
+      color: type && _SUPP_COLORS[type] || "#8E8E93",
+      type: type || "custom-" + product.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
+    });
+  });
+  return out.sort((a, b) => _toMin(a.sortTime) - _toMin(b.sortTime));
+}
 const _FOOD_EMOJI = [[["proteina"], "🍗"], [["carboidrato"], "🍚"], [["verdure", "ortaggi", "insalata", "spinaci"], "🥦"], [["olio", "evo"], "🫒"], [["burro"], "🧈"], [["yogurt", "skyr", "yoeggs"], "🥛"], [["ricotta", "primo sale", "parmigiano", "feta", "mozzarella", "formaggio"], "🧀"], [["uova", "uovo"], "🥚"], [["tonno", "salmone", "orata", "merluzzo", "platessa", "branzino", "spigola", "pesce", "gamber"], "🐟"], [["pollo", "tacchino", "manzo", "vitello", "bresaola", "prosciutto", "hamburger", "chianina", "bistecca", "carne"], "🍗"], [["gallette", "cracker"], "🍘"], [["pane", "segale"], "🍞"], [["pasta", "gnocchi"], "🍝"], [["riso", "basmati", "parboiled", "arborio", "farro", "orzo", "couscous", "cereali", "avena"], "🍚"], [["patate"], "🥔"], [["muesli"], "🥣"], [["marmellata", "miele", "confettura"], "🍯"], [["frutta", "mela", "banana", "frutti", "macedonia"], "🍎"], [["noci", "mandorle", "nocciole", "semi"], "🥜"], [["barretta", "4plus", "endurance"], "🍫"], [["legumi", "ceci", "lenticchie", "fagioli"], "🫘"], [["caffè", "caffe"], "☕"], [["acqua"], "💧"], [["nessun"], "🚫"]];
 window.foodEmoji = function (text) {
   if (!text || typeof text !== "string") return "🍽️";
@@ -1178,6 +1270,8 @@ window.parseDieta = function (text) {
   const result = {};
   let currentSection = null;
   let currentMeal = null;
+  let inSupps = false;
+  const suppItems = {};
   function _findMealKey(line) {
     const up = line.toUpperCase();
     const keys = Object.keys(_MEAL_META).sort((a, b) => b.length - a.length);
@@ -1189,9 +1283,18 @@ window.parseDieta = function (text) {
     if (line === "---") {
       currentSection = null;
       currentMeal = null;
+      inSupps = false;
       continue;
     }
-    if (line.toUpperCase().startsWith("INTEGRATORI")) continue;
+    if (line.toUpperCase().startsWith("INTEGRATORI")) {
+      inSupps = !!currentSection;
+      currentMeal = null;
+      continue;
+    }
+    if (inSupps && line.startsWith("- ")) {
+      (suppItems[currentSection] = suppItems[currentSection] || []).push(..._parseSuppLine(line));
+      continue;
+    }
     if (line.startsWith("# NOTE") || /^# (Acqua|Caff|Frutta|Integr|Alimenti|PIANO|Dr\.|IMPORT)/i.test(line)) continue;
     const secKey = Object.keys(_SECTION_KEYS).find(k => line === `# ${k}`);
     if (secKey) {
@@ -1201,11 +1304,13 @@ window.parseDieta = function (text) {
         integratori: JSON.parse(JSON.stringify(_INTEGRATORI[currentSection] || []))
       };
       currentMeal = null;
+      inSupps = false;
       continue;
     }
     if (!currentSection) continue;
     const mealKey = _findMealKey(line);
     if (mealKey) {
+      inSupps = false;
       const meta = _MEAL_META[mealKey];
       currentMeal = {
         time: meta.time,
@@ -1283,6 +1388,9 @@ window.parseDieta = function (text) {
       }
     }
   }
+  Object.keys(suppItems).forEach(k => {
+    if (result[k] && suppItems[k].length) result[k].integratori = _resolveSupps(k, suppItems[k], result[k].meals);
+  });
   ["riposo", "mattina", "ore17", "ore21", "ore22"].forEach(k => {
     if (!result[k]) result[k] = {
       meals: [],

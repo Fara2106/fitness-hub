@@ -85,6 +85,29 @@ if (typeof W.parseDieta === "function") {
   ok("parseDieta: riposo ha 3 pasti", !!(d && d.riposo && d.riposo.meals.length === 3));
   ok("parseDieta: ore17 ha 2 pasti", !!(d && d.ore17 && d.ore17.meals.length === 2));
   ok("parseDieta: input vuoto -> null", W.parseDieta("") === null);
+
+  // Integratori letti dal blocco "INTEGRATORI:" del file (dal 2026-11-03).
+  const real = readFileSync(join(ROOT, "dieta.txt"), "utf8");
+  const pr = W.parseDieta(real), D = W._INTEGRATORI_DEFAULT;
+  ok("integratori dal file: riposo/mattina/ore17/ore21 identici alla lista curata",
+    ["riposo", "mattina", "ore17", "ore21"].every(k => JSON.stringify(pr[k].integratori) === JSON.stringify(D[k])));
+  ok("integratori dal file: ore22 include PS+ dopo merenda (scritto nel piano, mancava nella lista fissa)",
+    pr.ore22.integratori.some(x => x.type === "ps" && x.sortTime === "18:30") &&
+    pr.ore22.integratori.filter(x => x.type !== "ps").length === D.ore22.length);
+  const mod = real.replace("- Dopo merenda: PS+\n", "").replace("- Dopocena: Extra Omega+ Concentrated (2ª assunzione)\n",
+    "- Dopocena: Extra Omega+ Concentrated (2ª assunzione), Magnesio 300mg\n");
+  const pm = W.parseDieta(mod).riposo.integratori;
+  ok("integratori dal file: tolto dal file → sparisce dall'app", !pm.some(x => x.type === "ps"));
+  const mg = pm.find(x => /Magnesio/.test(x.name));
+  ok("integratori dal file: prodotto nuovo letto con orario dal momento (dopocena)", !!mg && mg.sortTime === "21:00" && mg.time === "Dopocena");
+  const two = W.parseDieta(mod.replace("Magnesio 300mg", "Magnesio 300mg, Zinco 15mg")).riposo.integratori.filter(x => /^custom-/.test(x.type));
+  ok("integratori nuovi: chiave di spunta distinta per prodotto", two.length === 2 && two[0].type !== two[1].type);
+  ok("integratori dal file: lista ordinata per orario", pm.every((x, i) => i === 0 || pm[i - 1].sortTime <= x.sortTime));
+  const noBlock = W.parseDieta("# GIORNO SENZA ALLENAMENTO\n\nCOLAZIONE:\n- 2 uova\n");
+  ok("senza blocco INTEGRATORI → lista fissa (come prima)", JSON.stringify(noBlock.riposo.integratori) === JSON.stringify(D.riposo));
+  const after = W.parseDieta("# GIORNO SENZA ALLENAMENTO\n\nCOLAZIONE:\n- 2 uova\nINTEGRATORI:\n- Pre-allenamento ore 06:45: Creatina 5g\n");
+  ok("blocco INTEGRATORI dopo un pasto: righe NON finiscono nel pasto",
+    after.riposo.meals[0].primary.length === 1 && after.riposo.integratori.some(x => /Creatina/.test(x.name) && x.sortTime === "06:45"));
 } else ok("parseDieta esiste", false);
 
 if (typeof W.foodEmoji === "function") {

@@ -250,6 +250,84 @@ const _INTEGRATORI = {
   ],
 };
 
+window._INTEGRATORI_DEFAULT = _INTEGRATORI; // per i test (confronto col file)
+
+// ── INTEGRATORI DAL FILE ────────────────────────────────────────────────────
+// Il blocco "INTEGRATORI:" di ogni sezione decide QUALI integratori ci sono e
+// QUANDO ("- Dopo pranzo: Extra Omega+ …"). Per i prodotti già noti si riusano
+// nome breve, colore e orario curati in _INTEGRATORI (così il dieta.txt attuale
+// dà esattamente la stessa lista); un prodotto nuovo prende l'orario dal
+// momento scritto (orario esplicito "ore 16:15" o parole chiave). Un file
+// senza blocco INTEGRATORI usa la lista fissa (comportamento storico).
+const _SUPP_TYPES = [
+  ["vitac", /vita\s*c/i], ["vitab", /vita\s*b/i], ["omega", /omega/i], ["ps", /\bps\+/i],
+  ["gluta", /gluta/i], ["mgk", /mgk/i], ["fuel", /fuel/i], ["barretta", /barretta/i], ["omnia", /omnia/i],
+];
+const _SUPP_COLORS = { vitac: "#FF9F0A", vitab: "#FFD60A", omega1: "#5AC8FA", omega2: "#5AC8FA", ps: "#BF5AF2",
+  gluta: "#30D158", mgk: "#0A84FF", fuel: "#0A84FF", barretta: "#FF9F0A", omnia: "#5AC8FA" };
+// Inizio allenamento per variante (pre-WO = 45' prima) se il file non lo scrive.
+const _WO_START = { mattina: "08:00", ore17: "17:00", ore21: "21:00", ore22: "22:00" };
+const _toMin = (hhmm) => { const m = /(\d{1,2})[:.](\d{2})/.exec(hhmm || ""); return m ? (+m[1]) * 60 + (+m[2]) : null; };
+const _fromMin = (n) => { n = Math.max(0, Math.min(23 * 60 + 59, n)); return String(Math.floor(n / 60)).padStart(2, "0") + ":" + String(n % 60).padStart(2, "0"); };
+
+// "- Momento: prodotto, prodotto" → [{ when, product }]
+function _parseSuppLine(line) {
+  const body = line.replace(/^-\s*/, "");
+  // Separatore = primo ":" che NON è dentro un orario ("ore 06:45: Creatina"):
+  // un ":" con una cifra prima e due cifre dopo è un orario.
+  let ci = -1;
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] !== ":") continue;
+    if (/\d/.test(body[i - 1] || "") && /^\d{2}/.test(body.slice(i + 1, i + 3))) continue;
+    ci = i; break;
+  }
+  if (ci < 0) return [];
+  const when = body.slice(0, ci).trim();
+  return body.slice(ci + 1).split(",").map(p => p.trim()).filter(Boolean).map(product => ({ when, product }));
+}
+
+// Orario di un momento descritto a parole, sui pasti della sezione.
+function _suppTime(when, section, meals) {
+  const explicit = /ore\s*(\d{1,2}[:.]\d{2})/i.exec(when) || /(\d{1,2}:\d{2})/.exec(when);
+  const w = when.toLowerCase();
+  const meal = (re) => { const m = meals.find(x => re.test(x.title || "")); return m ? _toMin(m.time) : null; };
+  const wo = _toMin(_WO_START[section]);
+  if (/pre[-\s]?(allenamento|wo|workout)/.test(w)) return explicit ? _toMin(explicit[1]) : (wo != null ? wo - 45 : 7 * 60 + 15);
+  if (/durante|intra|prepar/.test(w)) return explicit ? _toMin(explicit[1]) : (wo != null ? wo : 12 * 60);
+  if (explicit) return _toMin(explicit[1]);
+  if (/colazione|mattina|risveglio/.test(w)) return meal(/colazione/i) != null ? meal(/colazione/i) : 8 * 60;
+  if (/pranzo/.test(w)) return (meal(/pranzo/i) != null ? meal(/pranzo/i) : 13 * 60) + 60;
+  if (/merenda/.test(w)) return (meal(/merenda/i) != null ? meal(/merenda/i) : 16 * 60 + 30) + 30;
+  if (/cena/.test(w)) return (meal(/cena|post/i) != null ? meal(/cena|post/i) : 20 * 60) + 60;
+  if (/dormire|notte|sera/.test(w)) return 23 * 60;
+  return 12 * 60;
+}
+
+function _resolveSupps(section, items, meals) {
+  const base = _INTEGRATORI[section] || [];
+  const out = [], seen = {};
+  let omegaN = 0;
+  items.forEach(({ when, product }) => {
+    const hit = _SUPP_TYPES.find(([, re]) => re.test(product));
+    let type = hit ? hit[0] : null;
+    if (type === "omega") type = (++omegaN === 1 ? "omega1" : "omega2");
+    const key = type || product.toLowerCase();
+    if (seen[key]) return;                       // es. OMNIA+ "preparare" + "durante"
+    seen[key] = true;
+    const known = type && base.find(b => b.type === type);
+    if (known) { out.push(Object.assign({}, known)); return; }
+    out.push({
+      name: product.length > 40 ? product.slice(0, 39) + "…" : product,
+      time: when, sortTime: _fromMin(_suppTime(when, section, meals)),
+      // type = chiave delle spunte (integ_<data>): unico per prodotto nuovo,
+      // altrimenti spuntarne uno spuntava tutti i "custom".
+      color: (type && _SUPP_COLORS[type]) || "#8E8E93",
+      type: type || ("custom-" + product.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")),
+    });
+  });
+  return out.sort((a, b) => _toMin(a.sortTime) - _toMin(b.sortTime));
+}
+
 // ── FOOD EMOJI ─────────────────────────────────────────────────────────────
 // Emoji dinamica per ogni riga-alimento (keyword IT, valutate al render → si
 // aggiorna da sola quando cambia la dieta). Prima corrispondenza vince; le
@@ -298,6 +376,8 @@ window.parseDieta = function (text) {
   const result = {};
   let currentSection = null;
   let currentMeal    = null;
+  let inSupps        = false;   // dentro un blocco "INTEGRATORI:"
+  const suppItems    = {};      // sezione → [{ when, product }]
 
   // Helper: find meal key from line
   function _findMealKey(line) {
@@ -311,10 +391,15 @@ window.parseDieta = function (text) {
     const line = lines[i].trim();
 
     if (!line) continue;
-    if (line === "---") { currentSection = null; currentMeal = null; continue; }
+    if (line === "---") { currentSection = null; currentMeal = null; inSupps = false; continue; }
 
-    // Skip all INTEGRATORI lines (handled via static map)
-    if (line.toUpperCase().startsWith("INTEGRATORI")) continue;
+    // Blocco integratori della sezione: le righe "- Momento: prodotti" che
+    // seguono (fino al prossimo pasto/sezione) descrivono gli integratori.
+    if (line.toUpperCase().startsWith("INTEGRATORI")) { inSupps = !!currentSection; currentMeal = null; continue; }
+    if (inSupps && line.startsWith("- ")) {
+      (suppItems[currentSection] = suppItems[currentSection] || []).push(..._parseSuppLine(line));
+      continue;
+    }
 
     // Skip generic note comments
     if (line.startsWith("# NOTE") || /^# (Acqua|Caff|Frutta|Integr|Alimenti|PIANO|Dr\.|IMPORT)/i.test(line)) continue;
@@ -328,6 +413,7 @@ window.parseDieta = function (text) {
         integratori: JSON.parse(JSON.stringify(_INTEGRATORI[currentSection] || [])),
       };
       currentMeal = null;
+      inSupps = false;
       continue;
     }
 
@@ -336,6 +422,7 @@ window.parseDieta = function (text) {
     // Meal header
     const mealKey = _findMealKey(line);
     if (mealKey) {
+      inSupps = false;
       const meta = _MEAL_META[mealKey];
       currentMeal = {
         time:    meta.time,
@@ -407,6 +494,11 @@ window.parseDieta = function (text) {
       }
     }
   }
+
+  // Integratori dal file (dove la sezione ha il blocco INTEGRATORI)
+  Object.keys(suppItems).forEach(k => {
+    if (result[k] && suppItems[k].length) result[k].integratori = _resolveSupps(k, suppItems[k], result[k].meals);
+  });
 
   // Fallback: ensure all sections exist
   ["riposo","mattina","ore17","ore21","ore22"].forEach(k => {
