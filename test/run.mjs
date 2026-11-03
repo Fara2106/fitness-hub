@@ -768,6 +768,406 @@ console.log("\nSuite RecordMap — gruppi, round-trip chiavi ⇄ record, spunte 
   }
 }
 
+// ---- Suite SyncV2 (syncv2.jsx: motore offline-first sul backend v2) ----
+// Due "device" = due sandbox vm con storage.jsx (in memoria) + parser/planconv/schedaState/recordmap/syncv2;
+// fetch instradato in-process sul default export di backend/src/worker.mjs con D1 simulato (node:sqlite).
+// Mai la rete vera. Timer iniettati (debounce verificabile senza attese), orologio per device iniettato.
+console.log("\nSuite SyncV2 — due device sullo stesso backend in-process: coda, primo sync, conflitti, reset, finestre, lotti");
+await (async () => {
+  let worker, createD1;
+  try {
+    worker = (await import("../backend/src/worker.mjs")).default;
+    ({ createD1 } = await import("../backend/test/d1-sqlite.mjs"));
+  } catch (e) { ok("backend in-process importabile — " + e.message.split("\n")[0], false); return; }
+  const SCHEMA = readFileSync(join(ROOT, "backend", "schema.sql"), "utf8");
+  const TOKEN = "ab".repeat(32);
+  const API = "https://fitness-hub-api.lorefara97.workers.dev";
+  const FILES = ["storage.jsx", "parser.jsx", "planconv.jsx", "schedaState.jsx", "recordmap.jsx", "syncv2.jsx"];
+  let sources;
+  try { sources = FILES.map(f => [f, transform(join(ROOT, f))]); }
+  catch (e) { ok("syncv2.jsx e dipendenze compilano — " + e.message.split("\n")[0], false); return; }
+
+  const J = (x) => JSON.parse(JSON.stringify(x));
+  const pad = (n) => String(n).padStart(2, "0");
+  const dateOf = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+  const T0 = Date.now();
+  const TODAY = dateOf(T0);
+  const daysAgo = (n) => { const d = new Date(T0); return dateOf(new Date(d.getFullYear(), d.getMonth(), d.getDate() - n, 12).getTime()); };
+  const tick = () => new Promise(r => setImmediate(r));
+  const MB15 = 1.5 * 1024 * 1024;
+
+  // Piani attivi dal .txt del repo (stesso convertitore della migrazione).
+  const pcSb = { window: {}, console };
+  vm.createContext(pcSb);
+  for (const [f, code] of sources) if (f === "parser.jsx" || f === "planconv.jsx") vm.runInContext(code, pcSb, { filename: f });
+  const PC = pcSb.window.PlanConv;
+  const wp = J(PC.workoutPlanFromText(readFileSync(join(ROOT, "scheda.txt"), "utf8"), { id: "workout-test", name: "Scheda", validFrom: "2026-01-01" }));
+  const dp = J(PC.dietPlanFromText(readFileSync(join(ROOT, "dieta.txt"), "utf8"), { id: "diet-test", name: "Dieta", validFrom: "2026-01-01" }));
+
+  const call = (env, body, token = TOKEN) => worker.fetch(new Request(API + "/v1/sync", {
+    method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body),
+  }), env);
+  async function backend({ plans = true } = {}) {
+    const env = { DB: createD1(), SYNC_TOKEN: TOKEN };
+    await env.DB.exec(SCHEMA);
+    if (plans) await call(env, { deviceId: "migrate", cursor: 0, changes: [wp, dp].map(p => ({ ...p, updatedAt: T0 - 86400000 })) });
+    return env;
+  }
+  async function serverRecords(env) {
+    const out = []; let cursor = 0;
+    for (;;) {
+      const j = await (await call(env, { deviceId: "probe", cursor, changes: [] })).json();
+      out.push(...j.changes); cursor = j.cursor;
+      if (!j.more) return out;
+    }
+  }
+  const find = (list, c, id) => list.find(r => r.collection === c && r.id === id);
+  const count = (list, c) => list.filter(r => r.collection === c).length;
+
+  function device(env, { t = T0 } = {}) {
+    const events = [];
+    const sb = { window: {}, console };
+    sb.CustomEvent = class { constructor(type, init) { this.type = type; this.detail = init ? init.detail : undefined; } };
+    sb.Event = class { constructor(type) { this.type = type; } };
+    sb.window.dispatchEvent = (ev) => { events.push(ev); return true; };
+    vm.createContext(sb);
+    for (const [f, code] of sources) vm.runInContext(code, sb, { filename: f });
+    const net = { offline: false, requests: [], responses: [], hook: null, transform: null };
+    const fetchFn = async (url, init) => {
+      if (net.offline) throw new TypeError("Failed to fetch");
+      net.requests.push({ url, body: JSON.parse(init.body), bytes: Buffer.byteLength(init.body) });
+      const res = await worker.fetch(new Request(url, { method: init.method, headers: init.headers, body: init.body }), env);
+      const json = await res.json();
+      if (net.hook) { const h = net.hook; net.hook = null; await h(); }
+      const out = net.transform ? net.transform(json) : json;
+      net.transform = null;
+      net.responses.push(out);
+      return { ok: res.ok, status: res.status, json: async () => out };
+    };
+    const clock = { t };
+    const timers = [];
+    const SV = sb.window.SyncV2;
+    if (SV) SV.init({
+      storage: sb.window.storage, fetch: fetchFn, now: () => clock.t,
+      setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+      clearTimeout: (id) => { if (timers[id - 1]) timers[id - 1].fn = null; },
+    });
+    const S = sb.window.storage;
+    return {
+      sb, S, SV, net, events, timers, clock,
+      sync: () => SV.syncNow(),
+      outbox: () => Object.keys(S.get("v2outbox", {}) || {}),
+      sent: (from = 0) => net.requests.slice(from).flatMap(r => r.body.changes),
+    };
+  }
+
+  const probe = device(await backend({ plans: false }));
+  const SV0 = probe.SV;
+  ok("syncv2.jsx espone window.SyncV2 con l'interfaccia del piano", !!SV0 && SV0.API === API &&
+    ["init", "setToken", "hasToken", "syncNow", "putRecords", "getRecord", "listRecords", "activePlans", "status"].every(k => typeof SV0[k] === "function"));
+  if (!SV0) return;
+
+  try {
+    // ── A spunta un pasto, B spunta la spesa ──────────────────────────────────
+    {
+      const env = await backend();
+      const A = device(env), B = device(env, { t: T0 + 5 });
+      const la = await A.SV.setToken(TOKEN), lb = await B.SV.setToken(TOKEN);
+      ok("setToken: collega e fa il primo sync (ok)", la.ok && lb.ok && A.SV.hasToken() && B.SV.hasToken());
+      ok("primo sync: piani attivi in plan_workout / plan_diet", (A.S.get("plan_workout") || {}).id === wp.id && (B.S.get("plan_diet") || {}).id === dp.id);
+      ok("activePlans() = piani attivi locali", A.SV.activePlans().workout.id === wp.id && A.SV.activePlans().diet.id === dp.id);
+      const riposo = dp.data.variants.find(v => v.key === "riposo");
+      const mealKey = `${riposo.meals[0].time}|${riposo.meals[0].name}`;
+      A.S.set(`dietaVariant_${TODAY}`, "riposo");
+      A.S.set(`dietaCheck_${TODAY}`, { [mealKey]: true });
+      B.S.set("spesaChecked", { "proteine-0": true });
+      await tick();
+      for (let i = 0; i < 2; i++) { await A.sync(); await B.sync(); }
+      ok("due device: A vede la spesa di B", (A.S.get("spesaChecked") || {})["proteine-0"] === true);
+      ok("due device: B vede il pasto di A (e la variante)", (B.S.get(`dietaCheck_${TODAY}`) || {})[mealKey] === true && B.S.get(`dietaVariant_${TODAY}`) === "riposo");
+      const srv = await serverRecords(env);
+      ok("due device: nessun record doppio (1 mealCheck, 1 shoppingCheck, 1 dietVariant)",
+        count(srv, "mealCheck") === 1 && count(srv, "shoppingCheck") === 1 && srv.filter(r => r.id === `${TODAY}:dietVariant`).length === 1);
+      ok("due device: code vuote e cache uguali al server",
+        A.outbox().length === 0 && B.outbox().length === 0 &&
+        ["mealCheck", "shoppingCheck", "dayState"].every(c => A.SV.listRecords(c).length === count(srv, c) && B.SV.listRecords(c).length === count(srv, c)));
+      ok("getRecord legge la cache", A.SV.getRecord("shoppingCheck", "proteine-0").data.checked === true && A.SV.getRecord("shoppingCheck", "nope") === null);
+      ok("evento lfh-data con le chiavi ricostruite", B.events.some(e => e.type === "lfh-data" && e.detail.keys.includes(`dietaCheck_${TODAY}`)));
+      ok("_syncState ok + last + evento lfh-sync", A.sb.window._syncState.status === "ok" && A.sb.window._syncState.last === A.clock.t &&
+        A.events.some(e => e.type === "lfh-sync") && A.SV.status().status === "ok");
+      ok("i device non pushano i record ricevuti (B non rimanda il pasto di A)", !B.sent().some(c => c.collection === "mealCheck"));
+
+      // L'echo dei propri record non riscrive le chiavi locali (round-trip lossy: voce fuori piano).
+      A.S.set(`dietaCheck_${TODAY}`, { [mealKey]: false, "99:99|Pasto fuori piano": true });
+      await tick(); await A.sync();
+      ok("echo dei propri record: la chiave locale resta com'è (niente rebuild)", A.sent().some(c => c.collection === "mealCheck" && c.data.done === false) &&
+        A.S.get(`dietaCheck_${TODAY}`)["99:99|Pasto fuori piano"] === true);
+      A.S.set(`dietaCheck_${TODAY}`, { [mealKey]: true });
+      await tick(); await A.sync(); await B.sync();
+
+      // Dopo una ricostruzione v2grp segue lo stato locale: cancellare una voce arrivata da B la tombstona.
+      B.S.set("weightLog", [{ date: daysAgo(1), weight: 80 }, { date: TODAY, weight: 79.5 }]);
+      await tick(); await B.sync(); await A.sync();
+      ok("ricevuto da B: weightLog ricostruito su A", (A.S.get("weightLog") || []).length === 2);
+      A.S.set("weightLog", A.S.get("weightLog").filter(e => e.date !== TODAY));
+      await tick();
+      ok("voce ricevuta e poi cancellata in locale → tombstone", A.outbox().join() === `bodyWeight/${TODAY}` && A.S.get("v2outbox")[`bodyWeight/${TODAY}`].deleted === true);
+      await A.sync(); await B.sync();
+      ok("… e sparisce anche sull'altro device", B.S.get("weightLog").map(e => e.date).join() === daysAgo(1));
+
+      // Push debounced 1,5 s dopo una modifica non silenziosa; nessun timer per le scritture silenziose.
+      const nT = A.timers.length;
+      A.S.set("spesaChecked", { ...A.S.get("spesaChecked"), "verdura-1": true }, { silent: true });
+      await tick();
+      ok("scrittura silenziosa: niente coda, niente timer", A.outbox().length === 0 && A.timers.length === nT);
+      A.S.set("spesaChecked", { ...A.S.get("spesaChecked"), "verdura-1": true });
+      A.S.set("spesaChecked", { ...A.S.get("spesaChecked"), "verdura-2": true });
+      await tick();
+      const live = A.timers.slice(nT).filter(x => x.fn);
+      ok("push debounced: un solo timer attivo da 1500 ms", live.length === 1 && live[0].ms === 1500 && A.outbox().length === 2);
+      const n0 = A.net.requests.length;
+      live[0].fn(); await A.sync();
+      ok("timer scaduto → syncNow invia la coda", A.net.requests[n0].body.changes.length === 2 && A.outbox().length === 0);
+
+      // putRecords (piani): nuovo piano attivo + vecchio archiviato → plan_workout subito, e sull'altro device dopo il sync.
+      const nwp = { collection: "workoutPlan", id: "workout-new", data: { ...wp.data, name: "Nuova", validFrom: TODAY } };
+      const old = { collection: "workoutPlan", id: wp.id, data: { ...wp.data, status: "archived", validTo: TODAY } };
+      A.SV.putRecords([nwp, old]);
+      ok("putRecords: plan_workout aggiornato subito + lfh-data", A.S.get("plan_workout").id === "workout-new" &&
+        A.events.some(e => e.type === "lfh-data" && e.detail.keys.includes("plan_workout")));
+      await A.sync(); await B.sync();
+      ok("putRecords: l'altro device riceve il nuovo piano attivo", B.S.get("plan_workout").id === "workout-new" && B.SV.activePlans().workout.data.name === "Nuova" &&
+        B.SV.getRecord("workoutPlan", wp.id).data.status === "archived");
+    }
+
+    // ── offline: coda persistita, poi un solo invio ─────────────────────────────
+    {
+      const env = await backend();
+      const A = device(env);
+      await A.SV.setToken(TOKEN);
+      A.net.offline = true;
+      A.S.set(`checkIn_${TODAY}`, { sleep: 3, energy: 4, ailments: "" });
+      await tick();
+      let threw = false, r;
+      try { r = await A.sync(); } catch (_) { threw = true; }
+      ok("offline: syncNow non lancia, ok:false + stato offline", !threw && !r.ok && r.error === "offline" && A.SV.status().status === "offline");
+      ok("offline: coda persistita in v2outbox", A.outbox().join() === `dayState/${TODAY}:checkIn` && A.S.get("v2outbox")[`dayState/${TODAY}:checkIn`].data.value.sleep === 3);
+      A.net.offline = false;
+      const n0 = A.net.requests.length;
+      const r2 = await A.sync();
+      const reqs = A.net.requests.slice(n0);
+      ok("rete di nuovo ok: un solo invio", r2.ok && r2.pushed === 1 && reqs.length === 1 && reqs[0].body.changes.length === 1);
+      ok("rete di nuovo ok: v2outbox vuota", A.outbox().length === 0);
+      await A.sync();
+      ok("sync successivo: niente da rimandare", A.net.requests[A.net.requests.length - 1].body.changes.length === 0);
+      const srv = await serverRecords(env);
+      ok("server: check-in presente, una volta", srv.filter(x => x.id === `${TODAY}:checkIn`).length === 1 && find(srv, "dayState", `${TODAY}:checkIn`).data.value.sleep === 3);
+    }
+
+    // ── primo sync di un device con dati vecchi ─────────────────────────────────
+    {
+      const env = await backend();
+      const D = daysAgo(2);
+      await call(env, { deviceId: "phone", cursor: 0, changes: [
+        { collection: "dayState", id: `${D}:checkIn`, data: { date: D, field: "checkIn", value: { sleep: 5, energy: 5, ailments: "" } }, updatedAt: T0 - 1000 },
+      ] });
+      const B = device(env, { t: T0 + 3600000 });
+      B.S.set(`checkIn_${D}`, { sleep: 1, energy: 1, ailments: "vecchio" });
+      B.S.set(`hydration_${D}`, 4);
+      B.S.set("spesaChecked", { "solo-locale": true });
+      await tick();
+      ok("non collegato: le modifiche non finiscono in coda (le valuta il primo sync)", B.outbox().length === 0);
+      const r = await B.SV.setToken(TOKEN);
+      const srv = await serverRecords(env);
+      const ci = find(srv, "dayState", `${D}:checkIn`);
+      ok("primo sync: B adotta il check-in più recente del server", r.ok && B.S.get(`checkIn_${D}`).sleep === 5 && B.S.get(`checkIn_${D}`).ailments === "");
+      ok("primo sync: … e non lo ripusha", ci.deviceId === "phone" && ci.updatedAt === T0 - 1000 && !B.sent().some(c => c.id === `${D}:checkIn`));
+      ok("primo sync: i dati solo locali vanno sul server", find(srv, "dayState", `${D}:hydration`).data.value === 4 && find(srv, "shoppingCheck", "solo-locale").data.checked === true);
+      ok("primo sync: cursore + indice gruppi salvati", B.S.get("v2cursor") > 0 && JSON.stringify(B.S.get(`v2grp:day:${D}`)) === JSON.stringify([`dayState/${D}:checkIn`, `dayState/${D}:hydration`]));
+      B.S.set(`hydration_${D}`, 5);
+      await tick();
+      ok("dopo il primo sync: una modifica mette in coda solo il record cambiato", B.outbox().join() === `dayState/${D}:hydration`);
+    }
+
+    // ── modifica locale in coda + record in arrivo più vecchio ──────────────────
+    {
+      const env = await backend();
+      const A = device(env, { t: T0 + 60000 }), B = device(env, { t: T0 });
+      await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN);
+      B.S.set("spesaChecked", { x: true });
+      await tick(); await B.sync();
+      const seen = [];
+      A.S.onChange((k, v) => { if (k === "spesaChecked") seen.push(v && v.x); });
+      // La spunta di A arriva mentre la richiesta è in volo: la risposta porta x:true (più vecchia).
+      A.net.hook = async () => { A.S.set("spesaChecked", { x: false }); await tick(); };
+      const n0 = A.net.requests.length;
+      await A.sync();
+      ok("pull con modifica in coda: la chiave locale non cambia (mai x:true)", A.S.get("spesaChecked").x === false && !seen.includes(true));
+      ok("pull con modifica in coda: il primo giro ha ricevuto il record più vecchio", A.net.responses[A.net.responses.length - 2].changes.some(r => r.id === "x" && r.data.checked === true) &&
+        A.net.requests[n0].body.changes.length === 0);
+      await B.sync();
+      const srv = await serverRecords(env);
+      ok("dopo il push vince la locale (server e altro device)", find(srv, "shoppingCheck", "x").data.checked === false && B.S.get("spesaChecked").x === false && A.outbox().length === 0);
+    }
+
+    // ── stale + conflicts ───────────────────────────────────────────────────────
+    {
+      const env = await backend();
+      const A = device(env, { t: T0 }), B = device(env, { t: T0 + 60000 });
+      await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN);
+      A.net.offline = true;
+      A.S.set("spesaChecked", { y: true });
+      await tick(); await A.sync();
+      B.S.set("spesaChecked", { y: false });
+      await tick(); await B.sync();
+      A.net.offline = false;
+      A.net.transform = (j) => ({ ...j, changes: [] }); // solo `conflicts` può riallineare
+      await A.sync();
+      const resp = A.net.responses[A.net.responses.length - 1];
+      ok("stale: il server rifiuta la modifica più vecchia e la manda in conflicts", resp.stale === 1 && resp.conflicts.length === 1);
+      ok("stale + conflicts: la chiave locale si riallinea al server", A.S.get("spesaChecked").y === false && A.outbox().length === 0);
+      ok("stale + conflicts: cache = versione del server", A.SV.getRecord("shoppingCheck", "y").data.checked === false && A.SV.getRecord("shoppingCheck", "y").updatedAt === T0 + 60000);
+    }
+
+    // ── reset:true ed epoch cambiato ────────────────────────────────────────────
+    {
+      const env = await backend();
+      const A = device(env);
+      await A.SV.setToken(TOKEN);
+      A.net.offline = true;
+      A.S.set(`notes_${TODAY}`, "nota");
+      await tick(); await A.sync();
+      A.net.offline = false;
+      A.S.set("v2cursor", 999999, { silent: true });
+      const total = (await serverRecords(env)).length;
+      const n0 = A.net.responses.length;
+      const r = await A.sync();
+      ok("reset:true (cursore oltre meta.seq) → ripull da 0", A.net.responses[n0].reset === true && r.ok && r.pulled >= total && A.S.get("v2cursor") < 999999);
+      let srv = await serverRecords(env);
+      ok("reset: la coda non si perde", find(srv, "dayState", `${TODAY}:notes`).data.value === "nota" && A.outbox().length === 0);
+
+      A.net.offline = true;
+      A.S.set(`notes_${TODAY}`, "nota 2");
+      await tick(); await A.sync();
+      A.net.offline = false;
+      const ep = A.S.get("v2epoch");
+      await env.DB.prepare("UPDATE meta SET value = ? WHERE key = 'epoch'").bind(ep === 4242 ? 4243 : 4242).run();
+      const n1 = A.net.requests.length;
+      const r2 = await A.sync();
+      const reqs = A.net.requests.slice(n1);
+      srv = await serverRecords(env);
+      ok("epoch cambiato → nuovo epoch salvato e ripull da cursore 0", r2.ok && A.S.get("v2epoch") !== ep && reqs.length >= 2 && reqs[1].body.cursor === 0 && r2.pulled >= srv.length);
+      ok("epoch cambiato: la coda è stata inviata, non persa", find(srv, "dayState", `${TODAY}:notes`).data.value === "nota 2" && A.outbox().length === 0);
+    }
+
+    // ── finestre locali: weightLog oltre 90 voci, sweep silenzioso, cardio, noTouch ──
+    {
+      const env = await backend();
+      const A = device(env);
+      await A.SV.setToken(TOKEN);
+      const log = [];
+      for (let i = 90; i >= 1; i--) log.push({ date: daysAgo(i), weight: 80 + i / 10 });
+      A.S.set("weightLog", log);
+      A.S.set(`checkIn_${daysAgo(3)}`, { sleep: 3, energy: 3, ailments: "" });
+      await tick(); await A.sync();
+      ok("finestre: 90 pesate sul server", count(await serverRecords(env), "bodyWeight") === 90);
+      const n0 = A.net.requests.length;
+      A.S.set("weightLog", log.slice(1).concat([{ date: TODAY, weight: 79 }]));
+      await tick();
+      ok("weightLog oltre 90 voci: in coda solo la nuova pesata", A.outbox().join() === `bodyWeight/${TODAY}`);
+      await A.sync();
+      A.S.remove(`checkIn_${daysAgo(3)}`, { silent: true }); // come lo sweep
+      await tick(); await A.sync();
+      ok("finestra + sweep silenzioso: nessun tombstone inviato", !A.sent(n0).some(c => c.deleted));
+      let srv = await serverRecords(env);
+      ok("la pesata uscita dalla finestra e il check-in spazzato restano sul server",
+        !find(srv, "bodyWeight", daysAgo(90)).deleted && !find(srv, "dayState", `${daysAgo(3)}:checkIn`).deleted);
+
+      A.S.set("weightLog", A.S.get("weightLog").filter(e => e.date !== daysAgo(5)));
+      await tick();
+      const ob = A.S.get("v2outbox");
+      ok("pesata cancellata dentro la finestra → tombstone (deleted, data null)", A.outbox().join() === `bodyWeight/${daysAgo(5)}` && ob[`bodyWeight/${daysAgo(5)}`].deleted === true && ob[`bodyWeight/${daysAgo(5)}`].data === null);
+      await A.sync();
+
+      const act = { type: "walk", min: 30, km: 2.5, note: "", id: T0, when: "Oggi" };
+      A.S.set("activities", [act]);
+      await tick();
+      ok("nuova attività: 60 gruppi cardio ricalcolati, in coda solo il record nuovo", A.outbox().join() === `dayState/${TODAY}:cardio:${T0}`);
+      await A.sync();
+      A.S.set("activities", [{ ...act, id: T0 + 1 }, act]);
+      await tick();
+      ok("seconda attività: i gruppi invariati non producono change", A.outbox().join() === `dayState/${TODAY}:cardio:${T0 + 1}`);
+      await A.sync();
+
+      const riposo = dp.data.variants.find(v => v.key === "riposo");
+      const mealKey = `${riposo.meals[0].time}|${riposo.meals[0].name}`;
+      A.S.set(`dietaCheck_${TODAY}`, { [mealKey]: true });
+      await tick(); await A.sync();
+      const grp = JSON.stringify(A.S.get(`v2grp:meals:${TODAY}`));
+      const plan = A.S.get("plan_diet");
+      A.S.remove("plan_diet", { silent: true });
+      A.S.set(`dietaCheck_${TODAY}`, {});
+      await tick();
+      ok("noTouch (gruppo senza piano): niente tombstone e v2grp intatto", A.outbox().length === 0 && JSON.stringify(A.S.get(`v2grp:meals:${TODAY}`)) === grp && grp.includes("mealCheck/"));
+      A.S.set("plan_diet", plan, { silent: true });
+      srv = await serverRecords(env);
+      ok("finestre: nessun tombstone oltre quello voluto", srv.filter(r => r.deleted).map(r => r.id).join() === daysAgo(5));
+    }
+
+    // ── token assente o 401 ─────────────────────────────────────────────────────
+    {
+      const env = await backend();
+      const A = device(env);
+      const r0 = await A.sync();
+      ok("senza token: status unlinked, nessuna richiesta", !r0.ok && r0.error === "unlinked" && A.SV.status().status === "unlinked" && A.net.requests.length === 0);
+      await A.SV.setToken(TOKEN);
+      A.net.offline = true;
+      A.S.set(`notes_${TODAY}`, "x");
+      await tick(); await A.sync();
+      A.net.offline = false;
+      env.SYNC_TOKEN = "ff".repeat(32);
+      let threw = false, r;
+      try { r = await A.sync(); } catch (_) { threw = true; }
+      ok("401: status error, nessuna eccezione, coda intatta", !threw && !r.ok && r.error === "unauthorized" && A.SV.status().status === "error" && A.outbox().length === 1);
+      A.S.remove("syncToken");
+      const r2 = await A.sync();
+      ok("token rimosso: status unlinked, coda intatta", !r2.ok && r2.error === "unlinked" && A.SV.status().status === "unlinked" && A.outbox().length === 1);
+      const bad = await A.SV.setToken("00".repeat(32));
+      ok("setToken con token rifiutato (401): ok:false e token non salvato", !bad.ok && bad.error === "unauthorized" && !A.SV.hasToken());
+      env.SYNC_TOKEN = TOKEN;
+      const good = await A.SV.setToken(TOKEN);
+      ok("setToken giusto: la coda parte", good.ok && A.outbox().length === 0 && find(await serverRecords(env), "dayState", `${TODAY}:notes`).data.value === "x");
+    }
+
+    // ── lotti: ≤ 500 change e ≤ 1,5 MB per richiesta ───────────────────────────
+    {
+      const env = await backend();
+      const A = device(env);
+      await A.SV.setToken(TOKEN);
+      const many = [];
+      for (let i = 0; i < 1200; i++) many.push({ collection: "shoppingCheck", id: `item-${i}`, data: { checked: i % 2 === 0 } });
+      A.SV.putRecords(many);
+      ok("putRecords: 1.200 change in coda, chiave locale ricostruita", A.outbox().length === 1200 && Object.keys(A.S.get("spesaChecked")).length === 1200);
+      const n0 = A.net.requests.length;
+      const r = await A.sync();
+      const reqs = A.net.requests.slice(n0);
+      ok("lotti: 1.200 change → 3 richieste", r.ok && r.pushed === 1200 && reqs.length === 3);
+      ok("lotti: ogni richiesta ≤ 500 change e ≤ 1,5 MB", reqs.every(q => q.body.changes.length <= 500 && q.bytes <= MB15));
+      ok("lotti: 1.200 record sul server, coda vuota", count(await serverRecords(env), "shoppingCheck") === 1200 && A.outbox().length === 0);
+
+      const fat = [];
+      for (let i = 0; i < 60; i++) fat.push({ collection: "shoppingExtra", id: `fat-${i}`, data: { id: `fat-${i}`, name: "x".repeat(60000) } });
+      A.SV.putRecords(fat);
+      const n1 = A.net.requests.length;
+      const r2 = await A.sync();
+      const reqs2 = A.net.requests.slice(n1);
+      ok("lotti per dimensione: 60 × 60 KB → 3 richieste da ≤ 1,5 MB", r2.ok && r2.pushed === 60 && reqs2.length === 3 && reqs2.every(q => q.bytes <= MB15));
+    }
+  } catch (e) {
+    ok("Suite SyncV2 eseguibile — " + (e && e.stack ? e.stack.split("\n").slice(0, 3).join(" | ") : e), false);
+  }
+})();
+
 // ---- Suite bundle: app.compiled.js allineato ai sorgenti (no drift) ----
 // Il browser carica SOLO app.compiled.js: se un .jsx viene modificato senza
 // rigenerare il bundle (`npm run build`), l'app servirebbe codice vecchio.
