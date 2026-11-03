@@ -10,3 +10,7 @@ scratchpad/
 # Sistema / log
 .DS_Store
 *.log
+
+# Backend sync (Cloudflare Worker + D1): segreti locali e stato di wrangler
+backend/.dev.vars
+backend/.wrangler/
