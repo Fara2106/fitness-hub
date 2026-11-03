@@ -471,6 +471,7 @@ const I18N_DICT = {
   "I tuoi dati sono al sicuro. Il dettaglio è in Impostazioni → Diagnostica.": { en: "Your data is safe. Details are in Settings → Diagnostics." },
   "Riprova": { en: "Retry" },
   "Torna alla Home": { en: "Back to Home" },
+  "Il tuo piano non ha questa variante: mostro": { en: "Your plan has no such variant: showing" },
   "sync cloud…": { en: "cloud sync…" },
   "sincronizzato": { en: "synced" },
   "salvato sul device, sync cloud appena torna la rete": { en: "saved on device, cloud sync when back online" },

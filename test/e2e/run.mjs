@@ -144,6 +144,50 @@ await scenario("Upload scheda/dieta", async () => {
   await d2.ctx.close();
 });
 
+// ── 2b. Cambio piano in giornata ────────────────────────────────────────────
+await scenario("Cambio scheda e dieta in giornata", async () => {
+  const days = [["UPPER A", [["Panca piana manubri", 4], ["Rematore", 4], ["Military press", 3]]],
+                ["LOWER A", [["Squat", 4], ["Affondi", 3]]], ["UPPER B", [["Trazioni", 4]]], ["LOWER B", [["Stacco rumeno", 4]]]];
+  const scheda4 = days.map(([n, exs], i) => `# ${n} - Giorno ${i + 1}\n# Focus: Test\n\nEsercizio | Serie | Rip | Recupero | Note tecniche\n` +
+    exs.map(([e, k]) => `${e} | ${k} | 8 | 90 | nota\n`).join("")).join("\n---\n\n");
+  const schedaFile = join(TMP, "scheda-4g.txt"); await writeFile(schedaFile, scheda4);
+  // dieta con SOLO riposo + ore 17
+  const lines = (await readFile(join(ROOT, "dieta.txt"), "utf8")).split("\n"); const keep = []; let skip = false;
+  for (const l of lines) {
+    if (/^# ALLENAMENTO (MATTINA|ORE 21|ORE 22)/.test(l)) skip = true;
+    else if (/^# ALLENAMENTO ORE 17|^# NOTE GENERALI/.test(l)) skip = false;
+    if (!skip) keep.push(l);
+  }
+  const dietaFile = join(TMP, "dieta-2v.txt");
+  await writeFile(dietaFile, keep.join("\n").split("200g frutta fresca (no macedonie)").join("170g yogurt NUOVO"));
+
+  const st = newState(BASE_SETTINGS);
+  const { ctx, page } = await openApp(IPHONE, st);
+  await nav(page, "Scheda"); await page.waitForTimeout(500);
+  for (let k = 0; k < 2; k++) {
+    await page.locator(".card.lift").first().locator("button.check").nth(k).click(); await page.waitForTimeout(250);
+    const sk = page.getByRole("button", { name: /^(Salta|Riprendi)$/ }); if (await sk.count()) await sk.first().click();
+    await page.waitForTimeout(150);
+  }
+  ok("prima del cambio: 2 serie spuntate", /2\/12 serie completate/.test(await page.evaluate(() => document.body.innerText)));
+  await nav(page, "Setup"); await page.waitForTimeout(400);
+  await page.locator("input[type=file]").nth(0).setInputFiles(schedaFile); await page.waitForTimeout(600);
+  await nav(page, "Scheda"); await page.waitForTimeout(600);
+  const tabs = await page.evaluate(() => [...document.querySelectorAll("button")].map(b => b.innerText).filter(t => /^G\d/.test(t)).length);
+  ok("nuova scheda: 4 giorni", tabs === 4, String(tabs));
+  const txt = await page.evaluate(() => document.body.innerText);
+  ok("le spunte di oggi NON passano al nuovo esercizio", /UPPER A/.test(txt) && /0\/11 serie completate/.test(txt), (txt.match(/\d+\/\d+ serie completate/) || [])[0]);
+  await nav(page, "Setup"); await page.waitForTimeout(400);
+  await page.locator("input[type=file]").nth(1).setInputFiles(dietaFile); await page.waitForTimeout(600);
+  await nav(page, "Dieta"); await page.waitForTimeout(600);
+  await page.locator("button", { hasText: /Mattina$/ }).first().click(); await page.waitForTimeout(400);
+  const d = await page.evaluate(() => document.body.innerText);
+  ok("variante assente → pasti del piano importato (non quelli preimpostati)", d.includes("170g yogurt NUOVO"));
+  ok("variante assente → avviso con la variante usata", /non ha questa variante: mostro «Ore 17»/.test(d));
+  ok("nessun errore JS", page._errors.length === 0, page._errors.join(" | "));
+  await ctx.close();
+});
+
 // ── 3. Unione tra device ────────────────────────────────────────────────────
 await scenario("Spesa — spunte su due device nello stesso momento", async () => {
   const st = newState({ ...BASE_SETTINGS, spesaChecked2: "{}" });

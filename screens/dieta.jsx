@@ -7,6 +7,8 @@ const _DAY_TYPES = [
   { id: "ore22",   label: "Ore 22",   emoji: "🌃", hint: "tardi" },
 ];
 
+const _VARIANT_LABEL = { riposo: "Riposo", mattina: "Mattina", ore17: "Ore 17", ore21: "Ore 21", ore22: "Ore 22" };
+
 const _CARDIO_TYPES = [
   { id: "corsa",     label: "Corsa",     emoji: "🏃" },
   { id: "bike",      label: "Bike",      emoji: "🚴" },
@@ -181,15 +183,27 @@ function _getDieta() {
   try {
     const parsed = window.parseDieta(text);
     if (!parsed) return _FALLBACK;
-    ["riposo","mattina","ore17","ore21","ore22"].forEach(k => {
-      if (!parsed[k] || !parsed[k].meals || !parsed[k].meals.length) {
-        parsed[k] = _FALLBACK[k];
-      } else {
-        // Always override integratori from our canonical list (parser may be incomplete)
-        parsed[k].integratori = _SUPPS_MAP[k];
-        // Ensure sortTime on meals
-        parsed[k].meals.forEach(m => { if (!m.sortTime) m.sortTime = m.time; });
-      }
+    const has = (k) => parsed[k] && parsed[k].meals && parsed[k].meals.length;
+    const KEYS = ["riposo","mattina","ore17","ore21","ore22"];
+    if (!KEYS.some(has)) return _FALLBACK;
+    // Prima normalizza le varianti presenti nel TUO piano.
+    KEYS.filter(has).forEach(k => {
+      // Integratori dal file; la lista fissa solo se il file non ne ha (prima
+      // vinceva SEMPRE la lista fissa: cambiando piano gli integratori non
+      // cambiavano. Per il dieta.txt attuale le due coincidono).
+      if (!parsed[k].integratori || !parsed[k].integratori.length) parsed[k].integratori = _SUPPS_MAP[k];
+      parsed[k].meals.forEach(m => { if (!m.sortTime) m.sortTime = m.time; });
+    });
+    // Variante assente nel piano importato → la più vicina DEL TUO PIANO (prima:
+    // pasti di un vecchio piano scritto nel codice, senza avviso). _fallbackFrom
+    // fa comparire l'avviso nella schermata.
+    const NEAR = { riposo: ["ore17","mattina","ore21","ore22"], mattina: ["ore17","ore21","ore22","riposo"],
+                   ore17: ["mattina","ore21","ore22","riposo"], ore21: ["ore22","ore17","mattina","riposo"],
+                   ore22: ["ore21","ore17","mattina","riposo"] };
+    const present = KEYS.filter(has);           // prima di riempire i buchi
+    KEYS.filter(k => present.indexOf(k) === -1).forEach(k => {
+      const src = NEAR[k].find(x => present.indexOf(x) !== -1);
+      parsed[k] = Object.assign({}, parsed[src], { _fallbackFrom: src });
     });
     return parsed;
   } catch (_) {
@@ -591,7 +605,7 @@ const Dieta = ({ device, onNav }) => {
   const dayType    = training ? trainTime : "riposo";
   const section    = dieta[dayType] || dieta.riposo;
   const meals      = section.meals || [];
-  const supps      = _SUPPS_MAP[dayType] || _SUPPS_RIPOSO;
+  const supps      = (section.integratori && section.integratori.length) ? section.integratori : (_SUPPS_MAP[dayType] || _SUPPS_RIPOSO);
 
   const ct         = _CARDIO_TYPES.find(c => c.id === cardioType) || _CARDIO_TYPES[0];
 
@@ -734,6 +748,16 @@ const Dieta = ({ device, onNav }) => {
           </div>
         )}
       </div>
+
+      {/* Variante non presente nel piano importato */}
+      {section._fallbackFrom && (
+        <div className="fade-up" style={{
+          padding: "10px 14px", borderRadius: 12, fontSize: 13,
+          background: "rgba(255,159,10,0.12)", border: "1px solid rgba(255,159,10,0.25)",
+        }}>
+          ⚠️ {t("Il tuo piano non ha questa variante: mostro")} «{t(_VARIANT_LABEL[section._fallbackFrom] || section._fallbackFrom)}».
+        </div>
+      )}
 
       {/* Chronological timeline */}
       <div style={{ position: "relative" }}>

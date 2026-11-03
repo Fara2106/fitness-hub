@@ -125,6 +125,27 @@ if (typeof W.readSchedaProg === "function") {
   ok("writeSchedaProg: merge preserva chiavi precedenti",
     merged.completion["Upper A#0"][0] === true && merged.pesos["Upper A#0"][0] === "80");
   ok("schedaProgKey usa la data", W.schedaProgKey("2026-07-15") === "schedaProg_2026-07-15");
+
+  // Cambio scheda in giornata: il progresso non deve passare a un altro esercizio.
+  const mk = (names) => [{ key: "Giorno 1", exercises: names.map(([n, k]) => ({ name: n, sets: new Array(k).fill({}) })) }];
+  const vecchio = mk([["Push-up", 3], ["Chest press", 3]]);
+  const nuovo   = mk([["Panca piana", 4], ["Chest press", 4]]);
+  const sigV = W.schedaPlanSig(vecchio), sigN = W.schedaPlanSig(nuovo);
+  ok("schedaPlanSig cambia se cambiano esercizi/serie", sigV !== sigN);
+  const fk = { _d: {}, get(k, d) { return k in this._d ? this._d[k] : d; }, set(k, v) { this._d[k] = v; } };
+  W.writeSchedaProg(fk, "d", { completion: { "Giorno 1#0": [true, true, false], "Giorno 1#1": [true, false, false] },
+    pesos: { "Giorno 1#1": ["10", "", ""] } }, { names: { "Giorno 1#0": "push-up", "Giorno 1#1": "chest press" }, sig: sigV });
+  const r1 = W.sanitizeSchedaProg(W.readSchedaProg(fk, "d"), nuovo, sigN);
+  ok("sanitize: esercizio cambiato alla stessa posizione → progresso scartato", !("Giorno 1#0" in r1.prog.completion) && r1.changed);
+  ok("sanitize: stesso esercizio → progresso tenuto e adattato a 4 serie",
+    JSON.stringify(r1.prog.completion["Giorno 1#1"]) === JSON.stringify([true, false, false, false]) &&
+    r1.prog.pesos["Giorno 1#1"].length === 4 && r1.prog.pesos["Giorno 1#1"][0] === "10");
+  const r2 = W.sanitizeSchedaProg(W.readSchedaProg(fk, "d"), vecchio, sigV);
+  ok("sanitize: piano invariato → nulla cambia", !r2.changed && r2.prog.completion["Giorno 1#0"][1] === true);
+  const legacy = { completion: { "Giorno 1#0": [true, false, false] }, substitutions: {}, pesos: {}, names: {}, sig: sigV };
+  ok("sanitize: voce senza nome + piano cambiato → scartata", !("Giorno 1#0" in W.sanitizeSchedaProg(legacy, nuovo, sigN).prog.completion));
+  ok("sanitize: giorno sparito dal piano → scartato",
+    !("Giorno 9#0" in W.sanitizeSchedaProg({ completion: { "Giorno 9#0": [true] }, substitutions: {}, pesos: {}, names: {}, sig: null }, nuovo, sigN).prog.completion));
 }
 
 // ---- Suite Motion: motion.jsx (guard gsap/reduced-motion) ----

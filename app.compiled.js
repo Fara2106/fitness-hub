@@ -2660,6 +2660,9 @@ const I18N_DICT = {
   "Torna alla Home": {
     en: "Back to Home"
   },
+  "Il tuo piano non ha questa variante: mostro": {
+    en: "Your plan has no such variant: showing"
+  },
   "sync cloud…": {
     en: "cloud sync…"
   },
@@ -4549,24 +4552,79 @@ function readSchedaProg(storage, dateKey) {
   return {
     completion: all && all.completion || {},
     substitutions: all && all.substitutions || {},
-    pesos: all && all.pesos || {}
+    pesos: all && all.pesos || {},
+    names: all && all.names || {},
+    sig: all && all.sig || null
   };
 }
-function writeSchedaProg(storage, dateKey, patch) {
+function writeSchedaProg(storage, dateKey, patch, meta) {
   if (!storage) return;
   const cur = readSchedaProg(storage, dateKey);
   const next = {
     completion: Object.assign({}, cur.completion, patch.completion),
     substitutions: Object.assign({}, cur.substitutions, patch.substitutions),
-    pesos: Object.assign({}, cur.pesos, patch.pesos)
+    pesos: Object.assign({}, cur.pesos, patch.pesos),
+    names: Object.assign({}, cur.names, meta && meta.names),
+    sig: meta && meta.sig || cur.sig
   };
   storage.set(schedaProgKey(dateKey), next);
+}
+function schedaPlanSig(days) {
+  return (days || []).map(d => d.key + ":" + (d.exercises || []).map(e => String(e.name || "").toLowerCase() + "/" + (e.sets && e.sets.length || 0)).join(",")).join("|");
+}
+function schedaNameAt(days, id) {
+  const i = String(id).lastIndexOf("#");
+  const day = (days || []).find(d => d.key === String(id).slice(0, i));
+  const ex = day && (day.exercises || [])[Number(String(id).slice(i + 1))];
+  return ex ? {
+    name: String(ex.name || "").toLowerCase(),
+    n: ex.sets && ex.sets.length || 0
+  } : null;
+}
+function sanitizeSchedaProg(prog, days, sig) {
+  const planChanged = !!(prog.sig && sig && prog.sig !== sig);
+  const out = {
+    completion: {},
+    substitutions: {},
+    pesos: {},
+    names: {},
+    sig: sig || prog.sig
+  };
+  let changed = !!(sig && prog.sig !== sig);
+  const ids = new Set([].concat(Object.keys(prog.completion), Object.keys(prog.substitutions), Object.keys(prog.pesos)));
+  ids.forEach(id => {
+    const cur = schedaNameAt(days, id);
+    const saved = prog.names[id];
+    const valid = cur && (saved ? saved === cur.name : !planChanged);
+    if (!valid) {
+      changed = true;
+      return;
+    }
+    const fit = (arr, fill) => {
+      if (!Array.isArray(arr)) return arr;
+      if (arr.length === cur.n) return arr;
+      changed = true;
+      return arr.slice(0, cur.n).concat(new Array(Math.max(0, cur.n - arr.length)).fill(fill));
+    };
+    if (id in prog.completion) out.completion[id] = fit(prog.completion[id], false);
+    if (id in prog.pesos) out.pesos[id] = fit(prog.pesos[id], "");
+    if (id in prog.substitutions) out.substitutions[id] = prog.substitutions[id];
+    out.names[id] = cur.name;
+    if (!saved) changed = true;
+  });
+  return {
+    prog: out,
+    changed
+  };
 }
 window.exId = exId;
 window.getDayState = getDayState;
 window.schedaProgKey = schedaProgKey;
 window.readSchedaProg = readSchedaProg;
 window.writeSchedaProg = writeSchedaProg;
+window.schedaPlanSig = schedaPlanSig;
+window.schedaNameAt = schedaNameAt;
+window.sanitizeSchedaProg = sanitizeSchedaProg;
 })();
 
 // ══ progress.jsx ══
@@ -8206,7 +8264,13 @@ const Scheda = ({
     exercises: []
   };
   const dayK = React.useRef(_todayK()).current;
-  const [prog, setProg] = React.useState(() => window.readSchedaProg(window.storage, dayK));
+  const planSig = React.useMemo(() => window.schedaPlanSig(days), [days]);
+  const [prog, setProg] = React.useState(() => {
+    const raw = window.readSchedaProg(window.storage, dayK);
+    const res = window.sanitizeSchedaProg(raw, days, planSig);
+    if (res.changed && window.storage) window.storage.set(window.schedaProgKey(dayK), res.prog);
+    return res.prog;
+  });
   const completion = prog.completion;
   const substitutions = prog.substitutions;
   const [timer, setTimer] = React.useState(null);
@@ -8243,11 +8307,21 @@ const Scheda = ({
         window.storage.set(k, Date.now());
       }
     }
-    window.writeSchedaProg(window.storage, dayK, patch);
+    const names = {};
+    ["completion", "substitutions", "pesos"].forEach(f => Object.keys(patch[f] || {}).forEach(id => {
+      const cur = window.schedaNameAt(days, id);
+      if (cur) names[id] = cur.name;
+    }));
+    window.writeSchedaProg(window.storage, dayK, patch, {
+      names,
+      sig: planSig
+    });
     setProg(p => ({
       completion: Object.assign({}, p.completion, patch.completion),
       substitutions: Object.assign({}, p.substitutions, patch.substitutions),
-      pesos: Object.assign({}, p.pesos, patch.pesos)
+      pesos: Object.assign({}, p.pesos, patch.pesos),
+      names: Object.assign({}, p.names, names),
+      sig: planSig
     }));
   };
   const saveExNote = (name, text) => {
@@ -8853,6 +8927,13 @@ const _DAY_TYPES = [{
   emoji: "🌃",
   hint: "tardi"
 }];
+const _VARIANT_LABEL = {
+  riposo: "Riposo",
+  mattina: "Mattina",
+  ore17: "Ore 17",
+  ore21: "Ore 21",
+  ore22: "Ore 22"
+};
 const _CARDIO_TYPES = [{
   id: "corsa",
   label: "Corsa",
@@ -9504,15 +9585,28 @@ function _getDieta() {
   try {
     const parsed = window.parseDieta(text);
     if (!parsed) return _FALLBACK;
-    ["riposo", "mattina", "ore17", "ore21", "ore22"].forEach(k => {
-      if (!parsed[k] || !parsed[k].meals || !parsed[k].meals.length) {
-        parsed[k] = _FALLBACK[k];
-      } else {
-        parsed[k].integratori = _SUPPS_MAP[k];
-        parsed[k].meals.forEach(m => {
-          if (!m.sortTime) m.sortTime = m.time;
-        });
-      }
+    const has = k => parsed[k] && parsed[k].meals && parsed[k].meals.length;
+    const KEYS = ["riposo", "mattina", "ore17", "ore21", "ore22"];
+    if (!KEYS.some(has)) return _FALLBACK;
+    KEYS.filter(has).forEach(k => {
+      if (!parsed[k].integratori || !parsed[k].integratori.length) parsed[k].integratori = _SUPPS_MAP[k];
+      parsed[k].meals.forEach(m => {
+        if (!m.sortTime) m.sortTime = m.time;
+      });
+    });
+    const NEAR = {
+      riposo: ["ore17", "mattina", "ore21", "ore22"],
+      mattina: ["ore17", "ore21", "ore22", "riposo"],
+      ore17: ["mattina", "ore21", "ore22", "riposo"],
+      ore21: ["ore22", "ore17", "mattina", "riposo"],
+      ore22: ["ore21", "ore17", "mattina", "riposo"]
+    };
+    const present = KEYS.filter(has);
+    KEYS.filter(k => present.indexOf(k) === -1).forEach(k => {
+      const src = NEAR[k].find(x => present.indexOf(x) !== -1);
+      parsed[k] = Object.assign({}, parsed[src], {
+        _fallbackFrom: src
+      });
     });
     return parsed;
   } catch (_) {
@@ -10087,7 +10181,7 @@ const Dieta = ({
   const dayType = training ? trainTime : "riposo";
   const section = dieta[dayType] || dieta.riposo;
   const meals = section.meals || [];
-  const supps = _SUPPS_MAP[dayType] || _SUPPS_RIPOSO;
+  const supps = section.integratori && section.integratori.length ? section.integratori : _SUPPS_MAP[dayType] || _SUPPS_RIPOSO;
   const ct = _CARDIO_TYPES.find(c => c.id === cardioType) || _CARDIO_TYPES[0];
   const timeline = _buildTimeline(meals, supps);
   const doneCount = supps.filter(s => checked[s.type]).length;
@@ -10386,7 +10480,16 @@ const Dieta = ({
       fontSize: 10,
       color: "var(--text-3)"
     }
-  }, React.createElement("span", null, "10"), React.createElement("span", null, "30"), React.createElement("span", null, "60"), React.createElement("span", null, "90"), React.createElement("span", null, "120"))))), React.createElement("div", {
+  }, React.createElement("span", null, "10"), React.createElement("span", null, "30"), React.createElement("span", null, "60"), React.createElement("span", null, "90"), React.createElement("span", null, "120"))))), section._fallbackFrom && React.createElement("div", {
+    className: "fade-up",
+    style: {
+      padding: "10px 14px",
+      borderRadius: 12,
+      fontSize: 13,
+      background: "rgba(255,159,10,0.12)",
+      border: "1px solid rgba(255,159,10,0.25)"
+    }
+  }, "⚠️ ", t("Il tuo piano non ha questa variante: mostro"), " «", t(_VARIANT_LABEL[section._fallbackFrom] || section._fallbackFrom), "»."), React.createElement("div", {
     style: {
       position: "relative"
     }

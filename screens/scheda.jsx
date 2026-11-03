@@ -894,7 +894,16 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   // Giorno della sessione fissato all'apertura: un allenamento a cavallo della
   // mezzanotte non si spezza su due chiavi schedaProg_/gym_ diverse.
   const dayK = React.useRef(_todayK()).current;
-  const [prog, setProg] = React.useState(() => window.readSchedaProg(window.storage, dayK));
+  // Progresso di oggi ripulito rispetto al piano CORRENTE: se nel frattempo la
+  // scheda è cambiata (import/cloud), le spunte non passano a un altro
+  // esercizio nella stessa posizione (prima: "Push-up" → "Panca piana").
+  const planSig = React.useMemo(() => window.schedaPlanSig(days), [days]);
+  const [prog, setProg] = React.useState(() => {
+    const raw = window.readSchedaProg(window.storage, dayK);
+    const res = window.sanitizeSchedaProg(raw, days, planSig);
+    if (res.changed && window.storage) window.storage.set(window.schedaProgKey(dayK), res.prog);
+    return res.prog;
+  });
   const completion    = prog.completion;      // { "Day#pos": [bool,…] }
   const substitutions = prog.substitutions;   // { "Day#pos": "nome alt" }
   const [timer, setTimer]   = React.useState(null);
@@ -946,11 +955,19 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
         window.storage.set(k, Date.now());
       }
     }
-    window.writeSchedaProg(window.storage, dayK, patch);
+    // Registra a quale esercizio si riferisce ogni voce (vedi sanitizeSchedaProg).
+    const names = {};
+    ["completion", "substitutions", "pesos"].forEach(f => Object.keys(patch[f] || {}).forEach(id => {
+      const cur = window.schedaNameAt(days, id);
+      if (cur) names[id] = cur.name;
+    }));
+    window.writeSchedaProg(window.storage, dayK, patch, { names, sig: planSig });
     setProg(p => ({
       completion:    Object.assign({}, p.completion,    patch.completion),
       substitutions: Object.assign({}, p.substitutions, patch.substitutions),
       pesos:         Object.assign({}, p.pesos,          patch.pesos),
+      names:         Object.assign({}, p.names,          names),
+      sig:           planSig,
     }));
   };
 
