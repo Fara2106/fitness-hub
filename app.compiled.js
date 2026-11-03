@@ -3580,7 +3580,8 @@ window.buildDefaultNotifConfig = function () {
     return /^[0-9]+(\.[0-9]+)?$/.test(n) ? parseFloat(n) : s;
   }
   function plannedRepsIndex() {
-    const idx = new Map();
+    const idx = new Map(),
+      byName = new Map();
     const lower = reps => {
       const s = reps == null ? "" : String(reps);
       const m = s.match(/(\d+)[-–](\d+)/);
@@ -3588,7 +3589,10 @@ window.buildDefaultNotifConfig = function () {
     };
     const add = planData => {
       (planData && planData.days || []).forEach(d => (d.exercises || []).forEach(ex => {
-        if (ex && ex.id != null && ex.reps != null && !idx.has(ex.id)) idx.set(ex.id, lower(ex.reps));
+        if (!ex || ex.reps == null) return;
+        if (ex.id != null && !idx.has(ex.id)) idx.set(ex.id, lower(ex.reps));
+        const k = nameKey(ex.name);
+        if (k && !byName.has(k)) byName.set(k, lower(ex.reps));
       }));
     };
     const SV = window.SyncV2;
@@ -3597,7 +3601,10 @@ window.buildDefaultNotifConfig = function () {
       if (a && a.workout) add(a.workout.data);
     }
     list("workoutPlan").forEach(r => add(r.data));
-    return idx;
+    return {
+      idx,
+      byName
+    };
   }
   function doneSets(opts) {
     const before = opts && opts.before;
@@ -3610,7 +3617,12 @@ window.buildDefaultNotifConfig = function () {
       const name = typeof d.substitutedWith === "string" && d.substitutedWith.trim() ? d.substitutedWith : d.exerciseName;
       const key = nameKey(name);
       if (!key) return;
-      const rip = Number.isFinite(d.reps) && d.reps > 0 ? d.reps : reps.has(d.exerciseId) ? reps.get(d.exerciseId) : null;
+      let rip = Number.isFinite(d.reps) && d.reps > 0 ? d.reps : null;
+      if (rip == null && reps.idx.has(d.exerciseId)) rip = reps.idx.get(d.exerciseId);
+      if (rip == null) {
+        const nk = nameKey(d.exerciseName);
+        if (reps.byName.has(nk)) rip = reps.byName.get(nk);
+      }
       rows.push({
         key,
         date: d.date,
@@ -7247,6 +7259,12 @@ window.sanitizeSchedaProg = sanitizeSchedaProg;
     if (r === 1) return p;
     return Math.round(p * (1 + r / 30) * 10) / 10;
   }
+  function setLabel(s) {
+    const raw = s ? s.peso : null;
+    const p = raw == null || String(raw).trim() === "" ? "–" : String(raw).trim();
+    const r = s ? Number(s.rip) : NaN;
+    return Number.isFinite(r) && r > 0 ? `${p}×${r}` : p;
+  }
   function exerciseSessions(pesiMap, name, limit) {
     limit = limit || 3;
     const rows = pesiMap && pesiMap[String(name || "").toLowerCase().trim()] || [];
@@ -7614,6 +7632,7 @@ window.sanitizeSchedaProg = sanitizeSchedaProg;
   window.Insights = {
     e1rm,
     exerciseSessions,
+    setLabel,
     sessionSummary,
     weeklyReport,
     deloadAdvice,
@@ -10625,7 +10644,7 @@ const WorkoutPlayer = ({
       textOverflow: "ellipsis",
       whiteSpace: "nowrap"
     }
-  }, h.sets.map(s => `${s.peso}×${s.rip}`).join(" · ")), h.top != null && React.createElement("span", {
+  }, h.sets.map(s => window.Insights.setLabel(s)).join(" · ")), h.top != null && React.createElement("span", {
     className: "num",
     style: {
       fontSize: 12,

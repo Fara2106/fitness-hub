@@ -21,6 +21,15 @@
     return Math.round(p * (1 + r / 30) * 10) / 10;
   }
 
+  // Etichetta di una serie nella card "Ultime sessioni": "80×8"; peso vuoto/null → "–";
+  // ripetizioni sconosciute (null, 0) → solo il peso, senza "×…".
+  function setLabel(s) {
+    const raw = s ? s.peso : null;
+    const p = raw == null || String(raw).trim() === "" ? "–" : String(raw).trim();
+    const r = s ? Number(s.rip) : NaN;
+    return Number.isFinite(r) && r > 0 ? `${p}×${r}` : p;
+  }
+
   // ── Storico per-esercizio dal payload getPesi ─────────────────────────────
   // pesiMap: { "nome lower": [{date,setN,peso,rip,sessione}, …] (cronologico) }
   // → ultime `limit` sessioni (per data, desc): [{date, sets:[{peso,rip}], top, tonnage}]
@@ -309,7 +318,7 @@
   }
 
   window.Insights = {
-    e1rm, exerciseSessions, sessionSummary, weeklyReport,
+    e1rm, exerciseSessions, setLabel, sessionSummary, weeklyReport,
     deloadAdvice, deloadWeight, mealAdherence, foodSwaps,
     movingAverage, weightProjection,
   };

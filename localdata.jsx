@@ -17,7 +17,8 @@
 // peso è numerico ("82,5" → 82.5), altrimenti il testo (colore dell'elastico). Un esercizio sostituito
 // compare sotto il nome del SOSTITUTO (come sul foglio); `setN` = setIndex + 1. `rip`: il setLog non
 // conserva le ripetizioni (reps null) → quelle previste dal piano (limite inferiore, come parseScheda)
-// cercando l'id dell'esercizio in tutti i piani allenamento noti; null se non ricostruibili.
+// cercando l'id dell'esercizio in tutti i piani allenamento noti, e se l'id non c'è (`name:…` o esercizio
+// sparito) per NOME dell'esercizio (minuscolo), così e1RM/Forza restano anche fuori piano; null se non ricostruibili.
 (function () {
   const PESI_PER_ESERCIZIO = 12;
   const MAX_SESSIONI = 60, MAX_CHECKIN = 30, MAX_PESO = 90, MAX_MISURE = 120;
@@ -41,9 +42,10 @@
     return /^[0-9]+(\.[0-9]+)?$/.test(n) ? parseFloat(n) : s;
   }
 
-  // id esercizio → ripetizioni previste (limite inferiore) da TUTTI i piani allenamento noti.
+  // id esercizio → ripetizioni previste (limite inferiore) da TUTTI i piani allenamento noti (piano
+  // attivo per primo); byName: nome minuscolo → idem, per i setLog il cui id non si trova.
   function plannedRepsIndex() {
-    const idx = new Map();
+    const idx = new Map(), byName = new Map();
     const lower = (reps) => {
       const s = reps == null ? "" : String(reps);
       const m = s.match(/(\d+)[-–](\d+)/);
@@ -51,13 +53,16 @@
     };
     const add = (planData) => {
       ((planData && planData.days) || []).forEach((d) => (d.exercises || []).forEach((ex) => {
-        if (ex && ex.id != null && ex.reps != null && !idx.has(ex.id)) idx.set(ex.id, lower(ex.reps));
+        if (!ex || ex.reps == null) return;
+        if (ex.id != null && !idx.has(ex.id)) idx.set(ex.id, lower(ex.reps));
+        const k = nameKey(ex.name);
+        if (k && !byName.has(k)) byName.set(k, lower(ex.reps));
       }));
     };
     const SV = window.SyncV2;
     if (SV && SV.activePlans) { const a = SV.activePlans(); if (a && a.workout) add(a.workout.data); }
     list("workoutPlan").forEach((r) => add(r.data));
-    return idx;
+    return { idx, byName };
   }
 
   // Serie fatte, cronologiche: [{ key, date, setIndex, peso, rip, sessione }]
@@ -72,7 +77,9 @@
       const name = (typeof d.substitutedWith === "string" && d.substitutedWith.trim()) ? d.substitutedWith : d.exerciseName;
       const key = nameKey(name);
       if (!key) return;
-      const rip = Number.isFinite(d.reps) && d.reps > 0 ? d.reps : (reps.has(d.exerciseId) ? reps.get(d.exerciseId) : null);
+      let rip = Number.isFinite(d.reps) && d.reps > 0 ? d.reps : null;
+      if (rip == null && reps.idx.has(d.exerciseId)) rip = reps.idx.get(d.exerciseId);
+      if (rip == null) { const nk = nameKey(d.exerciseName); if (reps.byName.has(nk)) rip = reps.byName.get(nk); }
       rows.push({ key, date: d.date, setIndex: d.setIndex, peso: pesoOf(d.weight), rip, sessione: "" });
     });
     rows.sort((a, b) => byDate(a, b) || (a.setIndex - b.setIndex)); // stabile: a parità, ordine dei record

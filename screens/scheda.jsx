@@ -840,7 +840,7 @@ const WorkoutPlayer = ({
               <div key={h.date} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderTop: i > 0 ? "1px solid var(--border)" : 0 }}>
                 <span className="num muted" style={{ fontSize: 11.5, width: 40, flexShrink: 0 }}>{h.date.slice(5).replace("-", "/")}</span>
                 <span className="tnum" style={{ flex: 1, fontSize: 12, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {h.sets.map(s => `${s.peso}×${s.rip}`).join(" · ")}
+                  {h.sets.map(s => window.Insights.setLabel(s)).join(" · ")}
                 </span>
                 {h.top != null && <span className="num" style={{ fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{h.top}</span>}
               </div>

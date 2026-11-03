@@ -321,6 +321,12 @@ console.log("\nSuite Insights — e1RM, storico esercizio, riepilogo, report, de
     ok("e1rm('82,5',8) usa la virgola", I.e1rm("82,5", 8) === 104.5);
     ok("e1rm('elastico',5) = null", I.e1rm("elastico", 5) === null);
 
+    // setLabel (card "Ultime sessioni" del Player): mai "null×8" / "80×null"
+    ok("setLabel: peso e rip → 80×8", I.setLabel({ peso: 80, rip: 8 }) === "80×8");
+    ok("setLabel: peso null o vuoto → –×8", I.setLabel({ peso: null, rip: 8 }) === "–×8" && I.setLabel({ peso: "", rip: 8 }) === "–×8" && I.setLabel({ rip: 8 }) === "–×8");
+    ok("setLabel: rip null/0 → solo il peso", I.setLabel({ peso: 80, rip: null }) === "80" && I.setLabel({ peso: 80, rip: 0 }) === "80");
+    ok("setLabel: tutto vuoto → –; testo (elastico) tenuto", I.setLabel({ peso: null, rip: null }) === "–" && I.setLabel(null) === "–" && I.setLabel({ peso: "rosso", rip: 12 }) === "rosso×12");
+
     // exerciseSessions
     const pesiMap = { "panca piana": [
       { date: "2026-07-10", setN: 1, peso: 80, rip: 8 },
@@ -1469,6 +1475,22 @@ console.log("\nSuite LocalData — getPesi/getUltimiPesi/getSessioni/getCheckIn/
     ok("getPesi: rip dalle ripetizioni previste dal piano (limite inferiore), anche per un piano archiviato",
       p["panca piana"][0].rip === 8 && p["stacco"][0].rip === 5);
     ok("getPesi: esercizio senza piano (name:) → rip null", p["military press"][0].rip === null);
+    ok("getPesi: id non trovato (name: o esercizio sparito) → rip dal NOME in tutti i piani noti (e1RM/Forza restano)", (() => {
+      const recs = [
+        sl("2026-11-04", "name:stacco", "Stacco", 0, "125"),                  // fuori piano, nome nel piano archiviato
+        sl("2026-11-04", "gone/d0/e9", "Rematore", 0, "60"),                  // id di un piano sconosciuto, nome nel piano attivo
+        sl("2026-11-04", "name:panca piana", "panca piana", 0, "80", { reps: 6 }), // reps registrate: vincono
+        sl("2026-11-04", "name:curl", "Curl", 0, "12"),                       // nome in nessun piano → null
+      ];
+      const sb3 = { window: { SyncV2: {
+        listRecords: (c) => (c === "setLog" ? recs : c === "workoutPlan" ? [rec("workoutPlan", "old", oldPlan)] : []),
+        activePlans: () => ({ workout: { id: "workout-2026-11", data: planData }, diet: null }),
+      } }, console };
+      vm.createContext(sb3);
+      vm.runInContext(transform(join(ROOT, "localdata.jsx")), sb3, { filename: "localdata.jsx" });
+      const r = J(sb3.window.LocalData.getPesi());
+      return r["stacco"][0].rip === 5 && r["rematore"][0].rip === 12 && r["panca piana"][0].rip === 6 && r["curl"][0].rip === null;
+    })());
     ok("getPesi: forma {date,setN,peso,rip,sessione}", Object.keys(p["stacco"][0]).sort().join() === "date,peso,rip,sessione,setN");
     ok("getPesi: esercizio sostituito sotto il nome del sostituto", p["croci"].length === 1 && p["croci"][0].peso === 20);
     const pb = J(L.getPesi({ before: "2026-11-03" }));
