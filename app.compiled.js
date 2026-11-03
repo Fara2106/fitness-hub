@@ -2011,11 +2011,11 @@ window.buildDefaultNotifConfig = function () {
             date: e.date,
             kg
           } : null;
-        });
+        }, CAP.weightLog);
       case "measures":
         return listGroup(get("bodyMeasures", []), "bodyMeasure", e => isObj(e) ? {
           ...e
-        } : null);
+        } : null, CAP.bodyMeasures);
       case "exNotes":
         {
           const notes = get("exNotes", {}),
@@ -2100,21 +2100,25 @@ window.buildDefaultNotifConfig = function () {
     const n = Number(s);
     return Number.isFinite(n) ? n : null;
   }
-  function listGroup(list, collection, toData) {
+  function listGroup(list, collection, toData, cap) {
     const byDate = new Map();
+    const arr = Array.isArray(list) ? list : [];
     let minId = NONE;
-    for (const e of Array.isArray(list) ? list : []) {
+    for (const e of arr) {
       if (!e || !isDate(e.date)) continue;
       if (e.date < minId) minId = e.date;
       const data = toData(e);
       if (data) byDate.set(e.date, rec(collection, e.date, data));else byDate.delete(e.date);
     }
-    return {
-      records: [...byDate.values()],
+    const records = [...byDate.values()];
+    return arr.length >= cap ? {
+      records,
       window: {
         collection,
         minId
       }
+    } : {
+      records
     };
   }
   function dayGroup(date, get) {

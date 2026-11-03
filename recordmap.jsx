@@ -25,6 +25,8 @@
 // `window` di buildGroup: il motore NON tombstona id della collezione < minId (date in ordine
 // lessicale). Serve per le liste locali a finestra (weightLog 90, bodyMeasures 120, activities 50)
 // e per ciò che lo sweep a 90 giorni ha già tolto: ciò che esce dalla finestra resta sul server.
+// Le liste hanno la finestra SOLO quando sono al limite (Ruling 15): sotto il limite nessuna voce
+// è uscita, quindi una cancellazione (anche della più vecchia) è un tombstone.
 // minId = NONE ("\uffff") = "non toccare niente del gruppo" (dati locali incompleti).
 //
 // rebuildKeys: chiave nel risultato con valore → scrivi; con undefined → rimuovi; chiave ASSENTE
@@ -204,8 +206,8 @@
       case "weights": return listGroup(get("weightLog", []), "bodyWeight", (e) => {
         const kg = toNumber(e.weight);
         return kg !== null && kg > 0 ? { date: e.date, kg } : null;
-      });
-      case "measures": return listGroup(get("bodyMeasures", []), "bodyMeasure", (e) => (isObj(e) ? { ...e } : null));
+      }, CAP.weightLog);
+      case "measures": return listGroup(get("bodyMeasures", []), "bodyMeasure", (e) => (isObj(e) ? { ...e } : null), CAP.bodyMeasures);
       case "exNotes": {
         const notes = get("exNotes", {}), records = [];
         for (const [name, text] of Object.entries(isObj(notes) ? notes : {})) {
@@ -264,18 +266,22 @@
     return Number.isFinite(n) ? n : null;
   }
 
-  // Lista locale a finestra → un record per data; tombstone solo da la data più vecchia in poi.
-  function listGroup(list, collection, toData) {
+  // Lista locale a finestra → un record per data. Al limite (cap, stesso taglio della PWA) la
+  // finestra parte dalla data più vecchia presente: ciò che è prima resta sul server. Sotto il
+  // limite niente finestra: nessuna voce è uscita, ogni voce sparita è una cancellazione vera.
+  function listGroup(list, collection, toData, cap) {
     const byDate = new Map(); // stessa data ripetuta → vince l'ultima voce
+    const arr = Array.isArray(list) ? list : [];
     let minId = NONE;
-    for (const e of Array.isArray(list) ? list : []) {
+    for (const e of arr) {
       if (!e || !isDate(e.date)) continue;
       if (e.date < minId) minId = e.date;
       const data = toData(e);
       if (data) byDate.set(e.date, rec(collection, e.date, data));
       else byDate.delete(e.date);
     }
-    return { records: [...byDate.values()], window: { collection, minId } };
+    const records = [...byDate.values()];
+    return arr.length >= cap ? { records, window: { collection, minId } } : { records };
   }
 
   // dayState del giorno, un record per campo: checkIn_/hydration_/notes_/restDay_. Un campo tolto

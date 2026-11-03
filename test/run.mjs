@@ -712,7 +712,14 @@ console.log("\nSuite RecordMap — gruppi, round-trip chiavi ⇄ record, spunte 
     for (let i = 0; i < 90; i++) { const d = new Date(2026, 7, 5 + i, 12); wl.push({ date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`, weight: 80 - i / 10 }); }
     const wg = J(RM.buildGroup("weights", getter({ weightLog: wl }), ctx));
     ok("finestra: weightLog 90 voci dal 2026-08-05 → window { bodyWeight, minId 2026-08-05 }", wg.records.length === 90 && same(wg.window, { collection: "bodyWeight", minId: "2026-08-05" }));
-    ok("finestra: bodyMeasures → window bodyMeasure dalla data più vecchia", same(J(RM.buildGroup("measures", getter(store), ctx)).window, { collection: "bodyMeasure", minId: "2026-10-20" }));
+    ok("finestra (Ruling 15): weightLog sotto il limite (89) → nessuna window (la più vecchia cancellata è un tombstone)",
+      (() => { const g = J(RM.buildGroup("weights", getter({ weightLog: wl.slice(1) }), ctx)); return g.records.length === 89 && g.window === undefined; })());
+    ok("finestra (Ruling 15): bodyMeasures sotto il limite (2 voci) → nessuna window", J(RM.buildGroup("measures", getter(store), ctx)).window === undefined);
+    const ms = [];
+    for (let i = 0; i < 120; i++) { const d = new Date(2026, 0, 1 + i, 12); ms.push({ date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`, vita: 84 }); }
+    ok("finestra: bodyMeasures al limite (120) → window bodyMeasure dalla data più vecchia", same(J(RM.buildGroup("measures", getter({ bodyMeasures: ms }), ctx)).window, { collection: "bodyMeasure", minId: "2026-01-01" }));
+    ok("finestra: limite contato sulle voci della lista (anche ripetute per data), come il taglio della PWA",
+      (() => { const g = J(RM.buildGroup("weights", getter({ weightLog: wl.slice(1).concat([wl[89]]) }), ctx)); return g.records.length === 89 && same(g.window, { collection: "bodyWeight", minId: wl[1].date }); })());
     const longWl = rebuildFrom(wl.concat([{ date: "2026-11-03", weight: 70 }]).map(e => ({ collection: "bodyWeight", id: e.date, data: { date: e.date, kg: e.weight } })), ["weightLog"]).weightLog;
     ok("rebuild weightLog: ultime 90 in ordine di data", longWl.length === 90 && longWl[0].date === "2026-08-06" && longWl[89].date === "2026-11-03");
     const oldDay = J(RM.buildGroup("day:2026-07-31", getter({ "checkIn_2026-07-31": { sleep: 1, energy: 1 } }), ctx));
@@ -1244,6 +1251,20 @@ await (async () => {
       const ob = A.S.get("v2outbox");
       ok("pesata cancellata dentro la finestra → tombstone (deleted, data null)", A.outbox().join() === `bodyWeight/${daysAgo(5)}` && ob[`bodyWeight/${daysAgo(5)}`].deleted === true && ob[`bodyWeight/${daysAgo(5)}`].data === null);
       await A.sync();
+      // Ruling 15: sotto il limite (89 voci) anche la pesata più vecchia cancellata è un tombstone;
+      // quella uscita prima dalla finestra (daysAgo(90)) resta sul server.
+      A.S.set("weightLog", A.S.get("weightLog").filter(e => e.date !== daysAgo(89)));
+      await tick();
+      ok("sotto il limite: cancellare la pesata più vecchia → tombstone (solo quella)", A.outbox().join() === `bodyWeight/${daysAgo(89)}` && A.S.get("v2outbox")[`bodyWeight/${daysAgo(89)}`].deleted === true);
+      await A.sync();
+      srv = await serverRecords(env);
+      ok("… cancellata sul server, la pesata uscita dalla finestra resta", find(srv, "bodyWeight", daysAgo(89)).deleted && !find(srv, "bodyWeight", daysAgo(90)).deleted);
+      A.S.set("bodyMeasures", [{ date: daysAgo(20), vita: 85 }, { date: daysAgo(10), vita: 84 }]);
+      await tick(); await A.sync();
+      A.S.set("bodyMeasures", [{ date: daysAgo(10), vita: 84 }]);
+      await tick();
+      ok("misure sotto il limite: cancellare la più vecchia → tombstone", A.outbox().join() === `bodyMeasure/${daysAgo(20)}` && A.S.get("v2outbox")[`bodyMeasure/${daysAgo(20)}`].deleted === true);
+      await A.sync();
 
       const act = { type: "walk", min: 30, km: 2.5, note: "", id: T0, when: "Oggi" };
       A.S.set("activities", [act]);
@@ -1267,7 +1288,8 @@ await (async () => {
       ok("noTouch (gruppo senza piano): niente tombstone e v2grp intatto", A.outbox().length === 0 && JSON.stringify(A.S.get(`v2grp:meals:${TODAY}`)) === grp && grp.includes("mealCheck/"));
       A.S.set("plan_diet", plan, { silent: true });
       srv = await serverRecords(env);
-      ok("finestre: nessun tombstone oltre quello voluto", srv.filter(r => r.deleted).map(r => r.id).join() === daysAgo(5));
+      ok("finestre: nessun tombstone oltre quelli voluti", srv.filter(r => r.deleted).map(r => `${r.collection}/${r.id}`).sort().join() ===
+        [`bodyMeasure/${daysAgo(20)}`, `bodyWeight/${daysAgo(5)}`, `bodyWeight/${daysAgo(89)}`].sort().join());
     }
 
     // ── token assente o 401 ─────────────────────────────────────────────────────
