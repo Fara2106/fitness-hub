@@ -4,7 +4,7 @@
  * (le chiamate API richiedono sempre internet)
  */
 
-const CACHE_NAME = "fitness-hub-v3-20261103102431";
+const CACHE_NAME = "fitness-hub-v3-20261103104241";
 const BASE = "/fitness-hub";
 
 const STATIC_ASSETS = [
