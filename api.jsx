@@ -1,167 +1,27 @@
-// api.jsx — Google Sheets REST API  +  Groq API
+// api.jsx — Groq API (Coach) + helper condivisi (beep, giorno, sessione di oggi)
+// Dati e sync NON passano più di qui: vivono in syncv2.jsx (backend D1) e localdata.jsx.
 
 // ── Default credentials (sovrascritti dalle Impostazioni se cambiati) ───────
 (function _setDefaults() {
-  // sheetsUrl: inserisci qui l'URL del tuo Google Apps Script deployato
-  // (es. https://script.google.com/macros/s/XXXX/exec)
-  // NB: l'URL del foglio non funziona come endpoint — serve quello dello script
-  const DEFAULT_SHEETS_URL = "https://script.google.com/macros/s/AKfycbz7dHQg8Q3HOZ37vx-QLRT8jqHCSHXFPODKhU1uyoS8wyezgFV292MlnH8gRcOdRhQN/exec";
-  const DEFAULT_GROQ_KEY   = ""; // Inserisci la chiave in Impostazioni → AI Coach
+  const DEFAULT_GROQ_KEY = ""; // Inserisci la chiave in Impostazioni → AI Coach
 
   // IMPORTANTE: eseguire DOPO che IndexedDB ha caricato i valori salvati.
   // Se girasse subito (db non ancora pronto) get() tornerebbe sempre vuoto e
-  // sovrascriverebbe la chiave Groq / l'URL già salvati dall'utente con i default.
+  // sovrascriverebbe la chiave Groq già salvata dall'utente con il default.
   const apply = () => {
-    if (!window.storage.get("sheetsUrl",  "")) window.storage.set("sheetsUrl",  DEFAULT_SHEETS_URL);
     if (!window.storage.get("groqApiKey", "")) window.storage.set("groqApiKey", DEFAULT_GROQ_KEY);
+    // Residui del vecchio motore Google Sheets (URL, coda offline, pending/edits
+    // delle settings): ormai inutili → via, in silenzio (nessun push).
+    ["sheetsUrl", "sheetsQueue", "settingsPending", "settingsEdits"].forEach(k => {
+      if (window.storage.get(k, null) !== null) window.storage.remove(k, { silent: true });
+    });
   };
   if (window.storage.onReady) window.storage.onReady(apply);
   else apply();
 })();
 
-// ── Google Sheets — chiamate tramite Cloudflare Worker proxy ─────────────
-// Il Worker chiama Apps Script server-to-server evitando i blocchi CORS.
-// Sostituisci con il tuo URL Cloudflare Worker dopo il deploy.
+// Proxy legacy: serve SOLO la route /groq (ponte verso Groq col secret del Worker).
 const _PROXY = "https://fitness-hub-proxy.lorefara97.workers.dev";
-
-// ── Coda offline ────────────────────────────────────────────────────────────
-// Le scritture DATI (righe: serie, sessioni, peso, check-in, movimenti, misure)
-// fallite per RETE finiscono in una coda persistita ("sheetsQueue") e vengono
-// ritentate in ordine al ritorno online / in foreground. Senza, una sessione
-// chiusa in palestra senza segnale non arrivava MAI su Sheets → storico
-// esercizio, e1RM e riepiloghi restavano bucati per sempre.
-// NB: gli errori LOGICI del backend ("Non autorizzato", azione sconosciuta)
-// NON vanno in coda: ritentarli è inutile. Le settings restano fuori (le
-// ri-pusha già la sync con _saveSettingRetry/_cloudPushMissing).
-const _QUEUEABLE = { savePeso: 1, savePesoCorporeo: 1, saveSessione: 1, saveMovimento: 1, saveCheckIn: 1, saveMisure: 1 };
-let _draining = false;
-
-window.sheetsAPI = {
-  async get(params) {
-    const url = new URL(_PROXY, location.origin);
-    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-    // Cache-buster + no-store: senza questo il browser serve risposte GET
-    // vecchie dalla cache HTTP (stessa URL ogni volta) → il sync cross-device
-    // leggeva dati stale. Fondamentale per far propagare le modifiche tra device.
-    url.searchParams.set("_cb", Date.now());
-    const res = await fetch(url.toString(), { cache: "no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    if (json && json.success === false) throw new Error(json.error || "Sheets error");
-    return json;
-  },
-
-  // Invio grezzo: distingue gli errori di rete (err._net = true, ritentabili)
-  // dagli errori logici del backend (success:false → throw semplice).
-  async _send(body) {
-    let res;
-    try {
-      res = await fetch(_PROXY, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-    } catch (e) {
-      const err = new Error(e.message || "rete non disponibile");
-      err._net = true;
-      throw err;
-    }
-    if (!res.ok) {
-      const err = new Error(`HTTP ${res.status}`);
-      err._net = true;
-      throw err;
-    }
-    const json = await res.json();
-    if (json && json.success === false) throw new Error(json.error || "Sheets error");
-    return json;
-  },
-
-  async post(body) {
-    try {
-      return await this._send(body);
-    } catch (e) {
-      if (e._net && _QUEUEABLE[body.action] && window.storage) {
-        const q = window.storage.get("sheetsQueue", []) || [];
-        q.push({ body, ts: Date.now() });
-        window.storage.set("sheetsQueue", q.slice(-300));
-        console.warn("[queue] rete giù → accodata", body.action, `(${q.length} in coda)`);
-        return { success: true, queued: true };
-      }
-      throw e;
-    }
-  },
-
-  // Svuota la coda in ordine. Errore di rete → stop (ancora offline, riproverà);
-  // errore logico → l'operazione viene scartata (ritentarla non può riuscire).
-  async drainQueue() {
-    if (_draining || !window.storage) return;
-    let q = window.storage.get("sheetsQueue", []) || [];
-    if (!q.length) return;
-    _draining = true;
-    console.log("[queue] drain:", q.length, "operazioni in coda");
-    try {
-      while (q.length) {
-        const head = q[0];
-        try {
-          await this._send(head.body);
-        } catch (e) {
-          if (e._net) return; // ancora offline: riprova al prossimo trigger
-          console.warn("[queue] scartata (errore backend):", head.body.action, e.message);
-        }
-        // Rimuovi SOLO l'elemento inviato rileggendo la coda persistita: mentre
-        // la send era in volo un'altra scrittura fallita può essere stata
-        // accodata — riscrivere la copia locale la cancellava (dato perso).
-        q = (window.storage.get("sheetsQueue", []) || []).filter(x => x !== head &&
-          !(x.ts === head.ts && JSON.stringify(x.body) === JSON.stringify(head.body)));
-        window.storage.set("sheetsQueue", q);
-      }
-      console.log("[queue] coda svuotata ✓");
-    } finally { _draining = false; }
-  },
-
-  // ── GET endpoints ──
-  async getPesi()          { return this.get({ action: "getPesi" }); },
-  async getPesoCorporeo()  { return this.get({ action: "getPesoCorporeo" }); },
-  async getUltimiPesi()    { return this.get({ action: "getUltimiPesi" }); },
-  async getCheckIn(date)   { return this.get(date ? { action: "getCheckIn", date } : { action: "getCheckIn" }); },
-
-  // ── Misure corporee (cm) — richiede il .gs con getMisure/saveMisure;
-  //    col backend vecchio le chiamate falliscono in silenzio (local-only). ──
-  async getMisure()        { return this.get({ action: "getMisure" }); },
-  async saveMisure(d)      { return this.post({ action: "saveMisure", ...d }); },
-
-  // ── POST endpoints ──
-  async savePeso(d)        { return this.post({ action: "savePeso",        ...d }); },
-  async savePesoCorporeo(d){ return this.post({ action: "savePesoCorporeo",...d }); },
-  async saveSessione(d)    { return this.post({ action: "saveSessione",    ...d }); },
-  async saveMovimento(d)   { return this.post({ action: "saveMovimento",   ...d }); },
-  async saveCheckIn(d)     { return this.post({ action: "saveCheckIn",     ...d }); },
-
-  // ── Settings sync (cross-device) ──
-  async getSettings()    { return this.get({ action: "getSettings" }); },
-  async saveSettings(d)  { return this.post({ action: "saveSettings", ...d }); },
-  // Peso + settings in UNA chiamata (metà latenza/quota). Backend vecchio senza
-  // getAll → risponde col messaggio info di default: _cloudSync lo rileva
-  // (manca .settings) e ricade sulle due chiamate separate.
-  async getAll()         { return this.get({ action: "getAll" }); },
-  // Registro sessioni (foglio Sessioni) — richiede il .gs aggiornato.
-  async getSessioni()    { return this.get({ action: "getSessioni" }); },
-
-  // Test connessione
-  async testConnection() {
-    const data = await this.get({ action: "getPesoCorporeo" });
-    return { ok: true, rows: Array.isArray(data) ? data.length : "?" };
-  },
-};
-
-// Trigger del drain: ritorno online, rientro in foreground, avvio (post-init).
-window.addEventListener("online", () => { window.sheetsAPI.drainQueue(); });
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") window.sheetsAPI.drainQueue();
-});
-if (window.storage && window.storage.onReady) {
-  window.storage.onReady(() => setTimeout(() => window.sheetsAPI.drainQueue(), 4000));
-}
 
 // ── Groq API ───────────────────────────────────────────────────────────────
 // Due strade, in ordine di preferenza:

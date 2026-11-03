@@ -28,12 +28,21 @@ function _buildSystemPrompt({ activities, checkIn, bodyWeight, lang }) {
   // Piani attivi (plan_workout / plan_diet, tenuti da SyncV2) in testo compatto;
   // senza piano strutturato → il testo embedded (defaults.jsx), come la Scheda/Dieta.
   const st = window.storage;
-  const planW = st ? st.get("plan_workout", null) : null;
-  const planD = st ? st.get("plan_diet", null) : null;
+  const SV = window.SyncV2;
+  const ap = SV && SV.activePlans ? SV.activePlans() : null;
+  const planW = ap ? ap.workout : (st ? st.get("plan_workout", null) : null);
+  const planD = ap ? ap.diet : (st ? st.get("plan_diet", null) : null);
   const PC = window.PlanConv;
   const planText = (w, d) => { try { return PC ? PC.planToText(w, d) : ""; } catch (_) { return ""; } };
   const schedaData = (planW && planW.data && planText(planW.data, null)) || window.SCHEDA_TXT_FALLBACK || null;
   const dietaData  = (planD && planD.data && planText(null, planD.data)) || window.DIETA_TXT_FALLBACK  || null;
+
+  // Alimenti da escludere: record settings `excludedFoods` ({ value: string[] }, dal backend);
+  // senza record (device mai collegato) la lista storica.
+  const exRec = SV && SV.getRecord ? SV.getRecord("settings", "excludedFoods") : null;
+  const exList = exRec && !exRec.deleted && exRec.data && Array.isArray(exRec.data.value)
+    ? exRec.data.value.filter(x => typeof x === "string" && x.trim()) : [];
+  const excludedFoods = exList.length ? exList : ["pasta di ceci", "lenticchie", "piselli", "bevanda di mandorla"];
 
   // Check-in e note sessione di oggi
   const today = window.todayKey ? window.todayKey() : now.toISOString().slice(0, 10);
@@ -48,7 +57,7 @@ Lorenzo: ${bodyWeight || 77.5}kg, 178cm.
 Oggi: ${dateStr} — ${sessLabel}.
 Ora: ${timeStr} (${timeOfDay}).
 Piano (${_dayCount} giorni, selezione manuale): ${_dayNames || "n/d"}. Cardio: camminata + ellittica nei giorni di riposo.
-ESCLUDERE SEMPRE dalla dieta: pasta di ceci, lenticchie, piselli, bevanda di mandorla.`;
+ESCLUDERE SEMPRE dalla dieta: ${excludedFoods.join(", ")}.`;
 
   // ── Check-in ───────────────────────────────────────────────────────────────
   if (checkIn) {

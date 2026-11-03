@@ -157,10 +157,6 @@ const MovimentoCard = ({ activities, addActivity, isDesktop }) => {
       {open && (
         <ActivityLogger isDesktop={isDesktop} onClose={() => setOpen(false)} onSave={(a) => {
           addActivity && addActivity(a);
-          if (window.sheetsAPI) {
-            const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
-            window.sheetsAPI.saveMovimento({ date: today, type: a.type, min: a.min, km: a.km || 0, note: a.note || "" }).catch(() => {});
-          }
           setOpen(false);
         }} />
       )}
@@ -376,7 +372,6 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
     const trimmed = log.slice(-90);
     if (window.storage) window.storage.set("weightLog", trimmed);
     setWeightLog(trimmed);
-    if (window.sheetsAPI) window.sheetsAPI.savePesoCorporeo({ date: today, weight: val }).catch(() => {});
     setNewWeight("");
   };
 

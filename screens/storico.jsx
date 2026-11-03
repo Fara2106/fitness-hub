@@ -185,7 +185,7 @@ const GoalRow = ({ weightLog }) => {
   );
 };
 
-// ── Registro sessioni: dal foglio Sessioni (o fallback locale gym_/muscleSets_) ─
+// ── Registro sessioni: dai record locali (workoutSession) o, senza, dalle chiavi gym_/muscleSets_ ─
 const RegistroView = ({ isDesktop }) => {
   const t = useT();
   const [rows, setRows] = React.useState(null); // null = caricamento
@@ -206,17 +206,15 @@ const RegistroView = ({ isDesktop }) => {
       });
   };
 
-  // Righe locali (fallback): si aggiornano con le sessioni arrivate dal sync.
-  useSyncedData((k) => /^(gym_|muscleSets_|notes_)\d{4}-\d{2}-\d{2}$/.test(k), () => {
-    setRows(r => (r && r.length && !r[0].local) ? r : localFallback());
-  });
-
-  React.useEffect(() => {
-    if (!window.sheetsAPI || !window.sheetsAPI.getSessioni) { setRows(localFallback()); return; }
-    window.sheetsAPI.getSessioni()
-      .then(r => setRows(Array.isArray(r) && r.length ? r.slice().reverse() : localFallback()))
-      .catch(() => setRows(localFallback()));
-  }, []);
+  // Sessioni dai record locali (le più recenti per prime); se non ce n'è
+  // (device mai collegato) ripiego sulle chiavi locali gym_/muscleSets_.
+  const load = () => {
+    const r = window.LocalData ? window.LocalData.getSessioni() : [];
+    setRows(r.length ? r.slice().reverse() : localFallback());
+  };
+  React.useEffect(load, []);
+  // Sessioni arrivate dal sync (altro device).
+  useSyncedData((k) => /^(gym_|muscleSets_|notes_)\d{4}-\d{2}-\d{2}$/.test(k), load);
 
   if (rows === null) return <UISkeleton h={140} r={14} />;
   if (!rows.length) {
@@ -251,11 +249,6 @@ const RegistroView = ({ isDesktop }) => {
           </div>
         </div>
       ))}
-      {rows[0] && rows[0].local && (
-        <div className="muted" style={{ fontSize: 10.5, marginTop: 8, textAlign: "center" }}>
-          {t("Solo dati locali — aggiorna il backend per lo storico completo")}
-        </div>
-      )}
     </div>
   );
 };
@@ -264,32 +257,11 @@ const RegistroView = ({ isDesktop }) => {
 const CheckInTrend = ({ isDesktop }) => {
   const t = useT();
 
-  // refreshKey cambia dopo il fetch da Sheets o un check-in arrivato dal sync,
-  // forzando il ricalcolo dei dati
+  // refreshKey cambia quando arriva un check-in dal sync, forzando il ricalcolo dei dati
   const [refreshKey, setRefreshKey] = React.useState(0);
   useSyncedData((k) => /^checkIn_\d{4}-\d{2}-\d{2}$/.test(k), () => setRefreshKey(n => n + 1));
 
-  // Sync check-in da Sheets → storage locale (ultimi 30 giorni)
-  React.useEffect(() => {
-    if (!window.sheetsAPI || !window.storage) return;
-    window.sheetsAPI.getCheckIn()
-      .then(rows => {
-        if (!Array.isArray(rows) || !rows.length) return;
-        rows.forEach(r => {
-          if (r.date && (r.sleep || r.energy)) {
-            window.storage.set(`checkIn_${r.date}`, {
-              sleep:    r.sleep   || 0,
-              energy:   r.energy  || 0,
-              ailments: r.ailments || "",
-            });
-          }
-        });
-        setRefreshKey(k => k + 1);
-      })
-      .catch(() => {});
-  }, []);
-
-  // Read last 14 days of check-in data (si aggiorna dopo il sync da Sheets)
+  // Read last 14 days of check-in data (si aggiorna con i check-in arrivati dal sync)
   const data = React.useMemo(() => {
     if (!window.storage) return [];
     const days = [];
@@ -463,18 +435,16 @@ const VolumeView = ({ isDesktop }) => {
   );
 };
 
-// ── Forza: e1RM stimato (Epley) per esercizio, dai dati SerieAllenamento ────
+// ── Forza: e1RM stimato (Epley) per esercizio, dai record delle serie ─────────────
 const ForzaView = ({ isDesktop }) => {
   const t = useT();
   const [pesiMap, setPesiMap] = React.useState(null); // null = caricamento
   const [selected, setSelected] = React.useState(null);
 
-  React.useEffect(() => {
-    if (!window.sheetsAPI) { setPesiMap({}); return; }
-    window.sheetsAPI.getPesi()
-      .then(d => setPesiMap(d && typeof d === "object" ? d : {}))
-      .catch(() => setPesiMap({}));
-  }, []);
+  const loadPesi = () => setPesiMap(window.LocalData ? window.LocalData.getPesi() : {});
+  React.useEffect(loadPesi, []);
+  // Serie arrivate dal sync (altro device).
+  useSyncedData((k) => /^(schedaProg_|gym_)\d{4}-\d{2}-\d{2}$/.test(k), loadPesi);
 
   // Recharts arriva on-demand (ensureRecharts): poll finché non è pronto,
   // così il grafico del trend appare appena caricato (come in WeightChart).
@@ -584,21 +554,6 @@ const MisureView = ({ isDesktop }) => {
   // Misure arrivate dal sync (l'editor aperto ha i suoi valori in `vals`: non si tocca).
   useSyncedData(["bodyMeasures"], () => { if (window.storage) setLog(window.storage.get("bodyMeasures", []) || []); });
 
-  // Pull dal foglio Misure (merge per data, cloud vince). Finché il .gs non è
-  // rideployato la chiamata fallisce → si resta local-only, senza errori.
-  React.useEffect(() => {
-    if (!window.sheetsAPI || !window.sheetsAPI.getMisure || !window.storage) return;
-    window.sheetsAPI.getMisure().then(rows => {
-      if (!Array.isArray(rows) || !rows.length) return;
-      const map = {};
-      window.storage.get("bodyMeasures", []).forEach(e => { if (e && e.date) map[e.date] = e; });
-      rows.forEach(e => { if (e && e.date) map[e.date] = Object.assign({}, map[e.date], e); });
-      const merged = Object.values(map).sort((a, b) => a.date.localeCompare(b.date)).slice(-120);
-      window.storage.set("bodyMeasures", merged);
-      setLog(merged);
-    }).catch(() => {});
-  }, []);
-
   const latest = log.length ? log[log.length - 1] : {};
   const firstVal = (id) => { for (const e of log) { if (e[id] > 0) return e[id]; } return null; };
 
@@ -624,7 +579,6 @@ const MisureView = ({ isDesktop }) => {
     setEditing(false);
     setSavedMsg("✓ " + t("Misure salvate"));
     setTimeout(() => setSavedMsg(""), 2500);
-    if (window.sheetsAPI && window.sheetsAPI.saveMisure) window.sheetsAPI.saveMisure(entry).catch(() => {});
   };
 
   return (
@@ -710,29 +664,6 @@ const Storico = ({ device, onNav }) => {
     if (!window.storage) return [];
     return window.storage.get("weightLog", []).slice(-60);
   });
-
-  // Sync peso corporeo da Sheets → storage locale
-  React.useEffect(() => {
-    if (!window.sheetsAPI || !window.storage) return;
-    window.sheetsAPI.getPesoCorporeo()
-      .then(rows => {
-        if (!Array.isArray(rows) || !rows.length) return;
-        // Merge canonico (dedup per data, Sheets ha priorità) — stessa logica
-        // testata usata dalla sync in app.jsx.
-        const local = window.storage.get("weightLog", []);
-        const merged = window.WorkoutProgress
-          ? window.WorkoutProgress.mergeWeightLog(local, rows, "cloud")
-          : (() => {
-              const map = {};
-              local.forEach(e => { if (e.date) map[e.date] = e; });
-              rows.forEach(e => { if (e.date) map[e.date] = e; });
-              return Object.values(map).sort((a, b) => a.date.localeCompare(b.date));
-            })();
-        window.storage.set("weightLog", merged);
-        setWeightLog(merged.slice(-60));
-      })
-      .catch(() => {});
-  }, []);
 
   // Peso e attività arrivati dal sync (altro device).
   const [actRev, setActRev] = React.useState(0);

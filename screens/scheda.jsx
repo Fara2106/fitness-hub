@@ -1,4 +1,4 @@
-// scheda.jsx — Workout tracker: sets, timer, vibration, Sheets sync
+// scheda.jsx — Workout tracker: sets, timer, vibration (sync dal ponte SyncV2)
 
 // Lista ordinata dei giorni: sempre da getSchedule() (che ha il fallback
 // testuale embedded in defaults.jsx quando storage è vuoto).
@@ -280,7 +280,7 @@ const ExerciseCard = ({
 }) => {
   const t = useT();
   const [pesos, setPesos] = React.useState(() => {
-    // 1) pesi già digitati oggi (ripristino sessione) → 2) Sheets → 3) default scheda
+    // 1) pesi già digitati oggi (ripristino sessione) → 2) ultime sessioni (record locali) → 3) default scheda
     if (savedPesos && savedPesos.length === ex.sets.length) return savedPesos.slice();
     return ex.sets.map((s, i) => {
       const key = ex.name.toLowerCase();
@@ -293,9 +293,9 @@ const ExerciseCard = ({
   const [showHistory, setShowHistory] = React.useState(false);
   const [showSubs, setShowSubs]       = React.useState(false);
 
-  // Update pesos when sheetsWeights arrives
+  // Update pesos when sheetsWeights (ultimi pesi) arrives
   React.useEffect(() => {
-    // i pesi digitati/ripristinati di oggi vincono sui dati Sheets
+    // i pesi digitati/ripristinati di oggi vincono sugli ultimi pesi
     if (savedPesos && savedPesos.length === ex.sets.length) return;
     const key = ex.name.toLowerCase();
     if (sheetsWeights && sheetsWeights[key]) {
@@ -318,7 +318,7 @@ const ExerciseCard = ({
     }
   }, [savedPesos]);
 
-  // Notifica il parent quando i pesos cambiano (per il salvataggio su Sheets)
+  // Notifica il parent quando i pesos cambiano (stato condiviso con il Player)
   const handlePesoChange = (i, v) => {
     setPesos(p => {
       const n = [...p]; n[i] = v;
@@ -636,7 +636,7 @@ const WorkoutPlayer = ({
   const [restSecs, setRestSecs] = React.useState(null);
 
   const ex = exercises[cursor];
-  // Storico reale dell'esercizio (ultime 3 sessioni da Sheets/getPesi).
+  // Storico reale dell'esercizio (ultime 3 sessioni, LocalData.getPesi).
   // Hook PRIMA di ogni return: dopo il return condizionale l'ordine degli hook
   // cambiava fra render ("Rendered fewer hooks") e React smontava l'app.
   const exName = ex ? (substitutions[window.exId(dayKey, cursor)] || ex.name) : "";
@@ -660,7 +660,7 @@ const WorkoutPlayer = ({
   const curSet = rawIdx === -1 ? Math.max(0, ex.sets.length - 1) : rawIdx;
   const allSetsDone = done.length > 0 && done.every(Boolean);
 
-  // Peso della serie corrente: pesi digitati oggi → Sheets → default scheda.
+  // Peso della serie corrente: pesi digitati oggi → ultime sessioni → default scheda.
   const savedP = pesosRef.current[id];
   const pesoVal = (savedP && savedP[curSet] != null)
     ? savedP[curSet]
@@ -705,7 +705,7 @@ const WorkoutPlayer = ({
 
   // ── Progressione + PR (coach silenzioso) ──────────────────────────────────
   const WP = window.WorkoutProgress;
-  // Ultimo peso reale della serie: pesi Sheets (getUltimiPesi) → history esercizio.
+  // Ultimo peso reale della serie: ultimi pesi (LocalData.getUltimiPesi) → history esercizio.
   const lastRaw = (() => {
     const k = (exName || "").toLowerCase(), ko = (ex.name || "").toLowerCase();
     const row = sheetsWeights && (sheetsWeights[k] || sheetsWeights[ko]);
@@ -830,7 +830,7 @@ const WorkoutPlayer = ({
           ))}
         </div>
 
-        {/* Storico reale: ultime sessioni di QUESTO esercizio (da Sheets) */}
+        {/* Storico reale: ultime sessioni di QUESTO esercizio (dai record locali) */}
         {exHistory.length > 0 && (
           <div className="card" style={{ width: "100%", maxWidth: 340, padding: "10px 14px", marginTop: 10, textAlign: "left" }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text-3)", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>
@@ -911,7 +911,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   const [showConfetti, setShowConfetti] = React.useState(false);
   const [notes, setNotes]   = React.useState(() => window.storage ? window.storage.get(`notes_${dayK}`, "") : "");
   const [sheetsWeights, setSheetsWeights] = React.useState(null);
-  // Storico completo per-esercizio da Sheets (getPesi): alimenta la card
+  // Storico completo per-esercizio dai record locali (getPesi): alimenta la card
   // "Ultime sessioni" nel Player e il confronto nel riepilogo di chiusura.
   const [pesiHistory, setPesiHistory] = React.useState(null);
   // Note setup persistenti per esercizio ("sedile 4, presa media"), sincate.
@@ -925,7 +925,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   const [saving, setSaving] = React.useState(false);
   const [saveMsg, setSaveMsg] = React.useState("");
   const prevDoneRef = React.useRef(null); // null = da inizializzare al primo render
-  // Ref pesi condiviso per il salvataggio Sheets, keyed-by-id.
+  // Ref pesi condiviso per il salvataggio, keyed-by-id.
   const pesosRef = React.useRef(null);
   if (pesosRef.current === null) pesosRef.current = Object.assign({}, prog.pesos);
 
@@ -1040,21 +1040,22 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
     prevDoneRef.current = tot > 0 && done === tot; // no confetti rientrando in sessione completa
   };
 
-  // Load last weights from Sheets on mount
-  React.useEffect(() => {
-    if (!window.sheetsAPI) return;
-    window.sheetsAPI.getUltimiPesi().then(data => {
-      if (!data || typeof data !== "object") return;
-      // data: { "nome esercizio": [peso_set1, peso_set2, ...] }
-      setSheetsWeights(data);
-    }).catch(() => {});
+  // Ultimi pesi e storico per esercizio dai record locali (cache SyncV2: già
+  // allineata al backend). Solo giorni PRIMA di oggi: le serie spuntate adesso
+  // sono già nei record e falserebbero confronto e pre-compilazione.
+  const loadHistory = () => {
+    const LD = window.LocalData;
+    if (!LD) return;
+    const before = dayK;
+    // data: { "nome esercizio": [peso_set1, peso_set2, ...] }
+    setSheetsWeights(LD.getUltimiPesi({ before }));
     // Storico completo (ultime 12 serie per esercizio, raggruppate per data
     // da Insights.exerciseSessions): card nel Player + confronto nel riepilogo.
-    window.sheetsAPI.getPesi().then(data => {
-      if (!data || typeof data !== "object") return;
-      setPesiHistory(data);
-    }).catch(() => {});
-  }, []);
+    setPesiHistory(LD.getPesi({ before }));
+  };
+  React.useEffect(loadHistory, []);
+  // Record di altri device arrivati dal sync (serie di giorni passati) → rileggi.
+  useSyncedData((k) => /^(schedaProg_|gym_)\d{4}-\d{2}-\d{2}$/.test(k), loadHistory);
 
   // On mount: apri il giorno persistito (o il primo). Persiste la scelta.
   React.useEffect(() => {
@@ -1160,8 +1161,8 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
 
       // Riepilogo di fine sessione: durata reale (gymStart_), tonnellaggio,
       // confronto con le sessioni precedenti (getPesi) e PR appena battuti.
-      // PRIMA del push a Sheets: il riepilogo riguarda l'allenamento (già
-      // persistito in locale) e deve apparire anche se la rete manca.
+      // Il riepilogo riguarda l'allenamento (già persistito in locale) e
+      // appare anche se la rete manca.
       if (window.Insights) {
         const startTs = window.storage ? window.storage.get(`gymStart_${today}`, null) : null;
         const s = window.Insights.sessionSummary({
@@ -1172,67 +1173,9 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
         setSummary(Object.assign({}, s, { prs: sessionPRs }));
       }
 
-      let queuedOffline = false;
-      let nothingNew = false;
-      if (window.sheetsAPI) {
-        // Serie già inviate oggi ("Day#pos#set" → peso): richiudere la sessione
-        // (Player che risalva a fine giro + "Chiudi sessione", o riapertura)
-        // NON deve duplicare le righe su Sheets — si inviano solo le novità.
-        const savedKey = `gymSaved_${today}`;
-        const saved = (window.storage && window.storage.get(savedKey, {})) || {};
-        const toSend = [];
-        exercises.forEach((ex, exIdx) => {
-          const id = window.exId(scheda, exIdx);
-          const exCompletion = completion[id] || [];
-          const exName = substitutions[id] || ex.name;
-          const exPesos = pesosRef.current[id] || ex.sets.map(s => String(s.peso));
-          ex.sets.forEach((s, setIdx) => {
-            if (!exCompletion[setIdx]) return;
-            const raw = exPesos[setIdx];
-            const peso = (raw != null && String(raw).trim() !== "") ? raw : s.peso;
-            const k = `${id}#${setIdx}`;
-            if (saved[k] === `${exName}|${peso}`) return;
-            toSend.push({ k, sig: `${exName}|${peso}`, exName, setIdx, peso, rip: s.rip });
-          });
-        });
-        nothingNew = toSend.length === 0;
-
-        // 1. Salva riepilogo sessione (se la rete manca finisce nella coda
-        //    offline di api.jsx e riparte da sola al ritorno online)
-        if (!nothingNew) {
-          const sessRes = await window.sheetsAPI.saveSessione({
-            date: today,
-            type: scheda,
-            setsCompleted: completedSets,
-            totalSets,
-            notes,
-          });
-          queuedOffline = !!(sessRes && sessRes.queued);
-        }
-
-        // 2. Salva ogni serie NUOVA su SerieAllenamento (testo libero: il peso
-        //    può essere "rosso"/"medio" per gli elastici — salvato com'è).
-        const results = await Promise.allSettled(toSend.map(r =>
-          window.sheetsAPI.savePeso({
-            date: today,
-            esercizio: r.exName,
-            setN: r.setIdx + 1,
-            peso: r.peso,
-            rip: r.rip,
-            sessione: current.name || scheda,
-          })
-        ));
-        if (toSend.length && window.storage) {
-          const next = Object.assign({}, window.storage.get(savedKey, {}) || {});
-          results.forEach((res, i) => { if (res.status === "fulfilled") next[toSend[i].k] = toSend[i].sig; });
-          window.storage.set(savedKey, next);
-        }
-      }
-      setSaveMsg("✓ " + (nothingNew
-        ? t("Sessione già salvata")
-        : queuedOffline
-          ? t("Sessione salvata — sync quando torni online")
-          : t("Sessione salvata")));
+      // Le serie e la sessione arrivano al backend dal ponte di sync (chiavi
+      // locali schedaProg_/gym_/notes_ scritte sopra): niente invio da qui.
+      setSaveMsg("✓ " + t("Sessione salvata"));
     } catch (err) {
       setSaveMsg("⚠️ " + (err.message || t("Errore salvataggio")));
     } finally {
@@ -1391,7 +1334,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
         {saving ? <span className="spinner" style={{ width: 18, height: 18 }} /> : (
           <>
             <Icon name="check" size={16} color={allDone ? "#062810" : "#fff"} />
-            {allDone ? t("Sessione completa — Salva su Sheets") : `${t("Chiudi sessione")} (${completedSets}/${totalSets})`}
+            {allDone ? t("Sessione completa — Salva") : `${t("Chiudi sessione")} (${completedSets}/${totalSets})`}
           </>
         )}
       </button>
@@ -1432,7 +1375,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
             // Fine dell'ultimo esercizio → chiudi il player e salva la sessione
             // (con riepilogo). Salvataggio DIFFERITO al render successivo: qui
             // la closure vedeva ancora lo stato PRIMA dell'ultima "Serie fatta"
-            // → l'ultima serie mancava da Sheets, PR e riepilogo.
+            // → l'ultima serie mancava da record, PR e riepilogo.
             setMode("list");
             setSaveRequested(true);
           }}

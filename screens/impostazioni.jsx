@@ -417,7 +417,7 @@ const SyncStatusRow = () => {
 // ── Backup: esporta/ripristina TUTTO lo storage locale in un .json ─────────
 // Protezione contro l'eviction di IndexedDB su iOS: i dati per-giorno
 // (schedaProg_/gym_/coachChat_…) vivono SOLO sul device finché la sessione non
-// è chiusa su Sheets. Il file include anche la chiave Groq (device-local).
+// è chiusa e sincronizzata. Il file include anche la chiave Groq (device-local).
 const BackupRows = () => {
   const t = useT();
   const [status, setStatus] = React.useState(null); // {type:'ok'|'err', msg}
@@ -825,15 +825,6 @@ const Impostazioni = ({ device, onNav, theme, setTheme, bodyWeight, setBodyWeigh
           storageKey="groqApiKey"
           placeholder="gsk_…"
           testFn={() => window.groqAPI.testConnection()}
-        />
-        <ApiKeyRow
-          icon="doc"
-          iconBg="#0A84FF"
-          title="Google Apps Script URL"
-          sub={t("Sheets: pesi, sessioni, movimenti")}
-          storageKey="sheetsUrl"
-          placeholder="https://script.google.com/macros/s/…/exec"
-          testFn={() => window.sheetsAPI.testConnection()}
         />
       </ISection>
 

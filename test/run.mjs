@@ -1318,6 +1318,146 @@ await (async () => {
   }
 })();
 
+// ---- Suite LocalData (localdata.jsx: storico e progressione dai record locali) ----
+// Cache finta di SyncV2 (listRecords/activePlans) con record da fixture; stesse forme e ordinamenti
+// che le schermate ricevevano da sheetsAPI.
+console.log("\nSuite LocalData — getPesi/getUltimiPesi/getSessioni/getCheckIn/getPesoCorporeo/getMisure dai record");
+{
+  const J = (x) => JSON.parse(JSON.stringify(x));
+  const rec = (collection, id, data, extra) => Object.assign({ collection, id, data, updatedAt: 1, deleted: false, deviceId: "d", seq: 1 }, extra || {});
+  const sl = (date, exerciseId, exerciseName, setIndex, weight, over) =>
+    rec("setLog", `${date}:${exerciseId}:${setIndex}`, Object.assign({ date, exerciseId, exerciseName, planId: exerciseId.startsWith("name:") ? null : "workout-2026-11", setIndex, weight, reps: null, done: true, substitutedWith: null }, over || {}));
+  const planData = { name: "P", status: "active", validFrom: "2026-11-01", validTo: null, days: [
+    { id: "w/d0", name: "Upper A", focus: [], exercises: [
+      { id: "w/d0/e0", name: "Panca Piana", sets: 3, reps: "8-10", restSec: 90, notes: "", muscles: [], alternatives: [] },
+      { id: "w/d0/e1", name: "Rematore", sets: 3, reps: "12", restSec: 90, notes: "", muscles: [], alternatives: [] },
+    ] },
+  ] };
+  const oldPlan = { name: "Vecchio", status: "archived", validFrom: "2026-09-01", validTo: "2026-10-31", days: [
+    { id: "old/d0", name: "Giorno A", focus: [], exercises: [{ id: "old/d0/e0", name: "Stacco", sets: 3, reps: "5", restSec: 120, notes: "", muscles: [], alternatives: [] }] },
+  ] };
+  const records = [
+    rec("workoutPlan", "w", planData),
+    rec("workoutPlan", "old", oldPlan),
+    // Panca Piana: 2 sessioni (inserite in disordine); peso con virgola e a testo
+    sl("2026-11-03", "w/d0/e0", "Panca Piana", 1, "82,5"),
+    sl("2026-11-03", "w/d0/e0", "Panca Piana", 0, "80"),
+    sl("2026-10-27", "w/d0/e0", "Panca Piana", 0, "77.5"),
+    sl("2026-10-27", "w/d0/e0", "Panca Piana", 1, "rosso"),
+    sl("2026-10-27", "w/d0/e0", "Panca Piana", 2, "75", { done: false }),           // non fatta: esclusa
+    sl("2026-11-03", "w/d0/e0", "Panca Piana", 2, "70", { deleted: false }),
+    // sostituzione: fatto "Croci" al posto di Rematore
+    sl("2026-11-03", "w/d0/e1", "Rematore", 0, "20", { substitutedWith: "Croci" }),
+    // piano archiviato e id name:
+    sl("2026-10-10", "old/d0/e0", "Stacco", 0, "120"),
+    sl("2026-10-20", "name:military press", "military press", 0, "40"),
+    // tombstone: escluso
+    rec("setLog", "2026-11-03:w/d0/e0:9", null, { deleted: true }),
+    // sessioni, note, check-in
+    rec("workoutSession", "2026-11-03:w/d0", { date: "2026-11-03", dayId: "w/d0", dayName: "Upper A", startedAt: new Date(2026, 10, 3, 18, 5).getTime(), done: true }),
+    rec("workoutSession", "2026-10-27:w/d0", { date: "2026-10-27", dayId: "w/d0", dayName: "Upper A", startedAt: null, done: true }),
+    rec("workoutSession", "2026-10-10:old/d0", { date: "2026-10-10", dayId: "old/d0", dayName: "Giorno A", startedAt: null, done: true }),
+    rec("workoutSession", "2026-10-30:w/d0", { date: "2026-10-30", dayId: "w/d0", dayName: "Upper A", startedAt: null, done: false }), // non chiusa
+    rec("dayState", "2026-11-03:notes", { date: "2026-11-03", field: "notes", value: "buona sessione" }),
+    rec("dayState", "2026-11-03:checkIn", { date: "2026-11-03", field: "checkIn", value: { sleep: 4, energy: 3, ailments: "spalla" } }),
+    rec("dayState", "2026-11-01:checkIn", { date: "2026-11-01", field: "checkIn", value: { sleep: 2, energy: 2, ailments: "" } }),
+    rec("dayState", "2026-11-02:checkIn", null, { deleted: true }),
+    rec("dayState", "2026-11-03:hydration", { date: "2026-11-03", field: "hydration", value: 5 }),
+    rec("bodyWeight", "2026-11-03", { date: "2026-11-03", kg: 90.4 }),
+    rec("bodyWeight", "2026-11-01", { date: "2026-11-01", kg: 91 }),
+    rec("bodyWeight", "2026-10-30", { date: "2026-10-30", kg: 0 }),
+    rec("bodyMeasure", "2026-11-03", { date: "2026-11-03", vita: 92.5, fianchi: 0, braccio: 38 }),
+    rec("bodyMeasure", "2026-10-01", { date: "2026-10-01", vita: 95 }),
+  ];
+  const sb = { window: {}, console };
+  vm.createContext(sb);
+  sb.window.SyncV2 = {
+    listRecords: (c) => records.filter((r) => r.collection === c),
+    activePlans: () => ({ workout: { id: "w", data: planData }, diet: null }),
+  };
+  let loaded = true;
+  try { vm.runInContext(transform(join(ROOT, "localdata.jsx")), sb, { filename: "localdata.jsx" }); }
+  catch (e) { loaded = false; ok("localdata.jsx si carica sotto vm — " + e.message.split("\n")[0], false); }
+  const L = sb.window.LocalData;
+  ok("window.LocalData espone le 6 letture", !!L && ["getPesi", "getUltimiPesi", "getSessioni", "getCheckIn", "getPesoCorporeo", "getMisure"].every((f) => typeof L[f] === "function"));
+  if (loaded && L) {
+    // getPesi
+    const p = J(L.getPesi());
+    ok("getPesi: chiavi = nome esercizio minuscolo (piano, archiviato, name:, sostituto)",
+      ["panca piana", "stacco", "military press", "croci"].every((k) => Array.isArray(p[k])) && !p["rematore"]);
+    ok("getPesi: ordine cronologico, poi per serie; setN = setIndex + 1",
+      JSON.stringify(p["panca piana"].map((r) => [r.date, r.setN])) === JSON.stringify([["2026-10-27", 1], ["2026-10-27", 2], ["2026-11-03", 1], ["2026-11-03", 2], ["2026-11-03", 3]]));
+    ok("getPesi: solo serie fatte (la non spuntata e il tombstone non ci sono)", p["panca piana"].length === 5);
+    ok("getPesi: peso numerico → numero (virgola ok), testo (elastico) → testo",
+      p["panca piana"][0].peso === 77.5 && p["panca piana"][1].peso === "rosso" && p["panca piana"][3].peso === 82.5);
+    ok("getPesi: rip dalle ripetizioni previste dal piano (limite inferiore), anche per un piano archiviato",
+      p["panca piana"][0].rip === 8 && p["stacco"][0].rip === 5);
+    ok("getPesi: esercizio senza piano (name:) → rip null", p["military press"][0].rip === null);
+    ok("getPesi: forma {date,setN,peso,rip,sessione}", Object.keys(p["stacco"][0]).sort().join() === "date,peso,rip,sessione,setN");
+    ok("getPesi: esercizio sostituito sotto il nome del sostituto", p["croci"].length === 1 && p["croci"][0].peso === 20);
+    const pb = J(L.getPesi({ before: "2026-11-03" }));
+    ok("getPesi({before}): esclude oggi e dopo", pb["panca piana"].length === 2 && !pb["croci"] && pb["stacco"].length === 1);
+    ok("getPesi: ultime 12 per esercizio", (() => {
+      const many = [];
+      for (let i = 0; i < 20; i++) many.push(sl(`2026-09-${String(i + 1).padStart(2, "0")}`, "w/d0/e1", "Rematore", 0, String(50 + i)));
+      const sb2 = { window: { SyncV2: { listRecords: (c) => (c === "setLog" ? many : []), activePlans: () => ({ workout: null, diet: null }) } }, console };
+      vm.createContext(sb2);
+      vm.runInContext(transform(join(ROOT, "localdata.jsx")), sb2, { filename: "localdata.jsx" });
+      const r = J(sb2.window.LocalData.getPesi())["rematore"];
+      return r.length === 12 && r[0].peso === 58 && r[11].peso === 69;
+    })());
+
+    // getUltimiPesi
+    const u = J(L.getUltimiPesi());
+    ok("getUltimiPesi(): { nome: [peso per serie] } con l'ultimo peso noto",
+      JSON.stringify(u["panca piana"]) === JSON.stringify([80, 82.5, 70]) && JSON.stringify(u["stacco"]) === JSON.stringify([120]));
+    ok("getUltimiPesi(): peso a testo conservato", JSON.stringify(J(L.getUltimiPesi({ before: "2026-11-03" }))["panca piana"]) === JSON.stringify([77.5, "rosso"]));
+    const un = J(L.getUltimiPesi("Panca Piana"));
+    ok("getUltimiPesi(nome) → [{setN,peso,rip}] dell'ultima sessione",
+      JSON.stringify(un) === JSON.stringify([{ setN: 1, peso: 80, rip: 8 }, { setN: 2, peso: 82.5, rip: 8 }, { setN: 3, peso: 70, rip: 8 }]));
+    ok("getUltimiPesi(nome sconosciuto) → []", J(L.getUltimiPesi("zzz")).length === 0);
+
+    // getSessioni
+    const s = J(L.getSessioni());
+    ok("getSessioni: solo sessioni chiuse, cronologiche", s.length === 3 && s[0].date === "2026-10-10" && s[1].date === "2026-10-27" && s[2].date === "2026-11-03");
+    ok("getSessioni: forma {date,type,setsCompleted,totalSets,notes,ora}",
+      Object.keys(s[2]).sort().join() === "date,notes,ora,setsCompleted,totalSets,type");
+    ok("getSessioni: type = nome del giorno, serie fatte del giorno, totale dal piano, note, ora di inizio",
+      s[2].type === "Upper A" && s[2].setsCompleted === 4 && s[2].totalSets === 6 && s[2].notes === "buona sessione" && s[2].ora === "18:05");
+    ok("getSessioni: senza note/inizio → '' ; giorno non nel piano attivo → totale 0",
+      s[1].notes === "" && s[1].ora === "" && s[1].setsCompleted === 2 && s[0].setsCompleted === 1 && s[0].totalSets === 0);
+
+    // getCheckIn
+    const c = J(L.getCheckIn());
+    ok("getCheckIn: [{date,sleep,energy,ailments}] cronologico, tombstone e altri campi esclusi",
+      JSON.stringify(c) === JSON.stringify([{ date: "2026-11-01", sleep: 2, energy: 2, ailments: "" }, { date: "2026-11-03", sleep: 4, energy: 3, ailments: "spalla" }]));
+    ok("getCheckIn(date) → solo quella data", J(L.getCheckIn("2026-11-03")).length === 1 && J(L.getCheckIn("2026-11-02")).length === 0);
+
+    // getPesoCorporeo
+    ok("getPesoCorporeo: [{date,weight}] cronologico, peso 0 escluso",
+      JSON.stringify(J(L.getPesoCorporeo())) === JSON.stringify([{ date: "2026-11-01", weight: 91 }, { date: "2026-11-03", weight: 90.4 }]));
+
+    // getMisure
+    ok("getMisure: [{date, misure > 0}] cronologico",
+      JSON.stringify(J(L.getMisure())) === JSON.stringify([{ date: "2026-10-01", vita: 95 }, { date: "2026-11-03", vita: 92.5, braccio: 38 }]));
+
+    // Senza SyncV2 pronto: vuoto, nessun crash
+    const sb3 = { window: {}, console };
+    vm.createContext(sb3);
+    vm.runInContext(transform(join(ROOT, "localdata.jsx")), sb3, { filename: "localdata.jsx" });
+    const L3 = sb3.window.LocalData;
+    ok("senza SyncV2: tutte le letture tornano vuote", Object.keys(J(L3.getPesi())).length === 0 && L3.getSessioni().length === 0 &&
+      L3.getCheckIn().length === 0 && L3.getPesoCorporeo().length === 0 && L3.getMisure().length === 0);
+  }
+
+  // Sorgente: nessun residuo del client Sheets
+  const SRC = [".", "screens"].flatMap((d) => readdirSync(join(ROOT, d)).filter((f) => f.endsWith(".jsx")).map((f) => [d + "/" + f, readFileSync(join(ROOT, d, f), "utf8")]));
+  const code = (src) => src.replace(/\/\/.*$/gm, "");
+  ok("nessun sorgente usa sheetsAPI / drainQueue", SRC.every(([, src]) => !/sheetsAPI|drainQueue/.test(code(src))));
+  ok("sheetsQueue compare solo nella pulizia silenziosa di api.jsx", SRC.every(([f, src]) => f === "./api.jsx" ? /remove\(k,\s*\{\s*silent:\s*true\s*\}\)/.test(src) : !/sheetsQueue/.test(code(src))));
+  ok("localdata.jsx in BUNDLE_FILES dopo syncv2.jsx", (() => { const b = readFileSync(join(ROOT, "dev", "build.mjs"), "utf8"); return b.indexOf('"syncv2.jsx"') > 0 && b.indexOf('"localdata.jsx"') > b.indexOf('"syncv2.jsx"'); })());
+}
+
 // ---- Suite App v2: piani dal modello strutturato + vecchio motore Sheets rimosso ----
 // getSchedule()/getDieta() leggono plan_workout/plan_diet (copie locali di SyncV2) via PlanConv;
 // senza piano → testo embedded (defaults.jsx). Più controlli sul sorgente: app.jsx non parla più

@@ -1,18 +1,7 @@
-// onboarding.jsx — 3-step onboarding: Apps Script URL → Groq API key → Peso corporeo
+// onboarding.jsx — 2-step onboarding: Groq API key → Peso corporeo
 // Salta automaticamente i passi già configurati in storage
 
 const STEPS = [
-  {
-    label:       "Sorgente",
-    title:       "Collega Google Sheets",
-    sub:         "Incolla l'URL del tuo Google Apps Script (doGet/doPost). Configuri il foglio in Impostazioni.",
-    icon:        "doc",
-    iconColor:   "#0A84FF",
-    field:       "sheets",
-    placeholder: "https://script.google.com/macros/s/…/exec",
-    mono:        false,
-    storageKey:  "sheetsUrl",
-  },
   {
     label:       "Coach",
     title:       "API key Groq",
@@ -71,7 +60,7 @@ const Onboarding = ({ device, onDone }) => {
 
   // Pre-popola i valori da storage (mostra quello già salvato nel campo)
   const [values, setValues] = React.useState(() => {
-    const init = { sheets: "", api: "", weight: "" };
+    const init = { api: "", weight: "" };
     STEPS.forEach(s => {
       if (window.storage) {
         const val = window.storage.get(s.storageKey, "");

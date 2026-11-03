@@ -133,208 +133,18 @@
 // ══ api.jsx ══
 ;(function () {
 (function _setDefaults() {
-  const DEFAULT_SHEETS_URL = "https://script.google.com/macros/s/AKfycbz7dHQg8Q3HOZ37vx-QLRT8jqHCSHXFPODKhU1uyoS8wyezgFV292MlnH8gRcOdRhQN/exec";
   const DEFAULT_GROQ_KEY = "";
   const apply = () => {
-    if (!window.storage.get("sheetsUrl", "")) window.storage.set("sheetsUrl", DEFAULT_SHEETS_URL);
     if (!window.storage.get("groqApiKey", "")) window.storage.set("groqApiKey", DEFAULT_GROQ_KEY);
+    ["sheetsUrl", "sheetsQueue", "settingsPending", "settingsEdits"].forEach(k => {
+      if (window.storage.get(k, null) !== null) window.storage.remove(k, {
+        silent: true
+      });
+    });
   };
   if (window.storage.onReady) window.storage.onReady(apply);else apply();
 })();
 const _PROXY = "https://fitness-hub-proxy.lorefara97.workers.dev";
-const _QUEUEABLE = {
-  savePeso: 1,
-  savePesoCorporeo: 1,
-  saveSessione: 1,
-  saveMovimento: 1,
-  saveCheckIn: 1,
-  saveMisure: 1
-};
-let _draining = false;
-window.sheetsAPI = {
-  async get(params) {
-    const url = new URL(_PROXY, location.origin);
-    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-    url.searchParams.set("_cb", Date.now());
-    const res = await fetch(url.toString(), {
-      cache: "no-store"
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    if (json && json.success === false) throw new Error(json.error || "Sheets error");
-    return json;
-  },
-  async _send(body) {
-    let res;
-    try {
-      res = await fetch(_PROXY, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(body)
-      });
-    } catch (e) {
-      const err = new Error(e.message || "rete non disponibile");
-      err._net = true;
-      throw err;
-    }
-    if (!res.ok) {
-      const err = new Error(`HTTP ${res.status}`);
-      err._net = true;
-      throw err;
-    }
-    const json = await res.json();
-    if (json && json.success === false) throw new Error(json.error || "Sheets error");
-    return json;
-  },
-  async post(body) {
-    try {
-      return await this._send(body);
-    } catch (e) {
-      if (e._net && _QUEUEABLE[body.action] && window.storage) {
-        const q = window.storage.get("sheetsQueue", []) || [];
-        q.push({
-          body,
-          ts: Date.now()
-        });
-        window.storage.set("sheetsQueue", q.slice(-300));
-        console.warn("[queue] rete giù → accodata", body.action, `(${q.length} in coda)`);
-        return {
-          success: true,
-          queued: true
-        };
-      }
-      throw e;
-    }
-  },
-  async drainQueue() {
-    if (_draining || !window.storage) return;
-    let q = window.storage.get("sheetsQueue", []) || [];
-    if (!q.length) return;
-    _draining = true;
-    console.log("[queue] drain:", q.length, "operazioni in coda");
-    try {
-      while (q.length) {
-        const head = q[0];
-        try {
-          await this._send(head.body);
-        } catch (e) {
-          if (e._net) return;
-          console.warn("[queue] scartata (errore backend):", head.body.action, e.message);
-        }
-        q = (window.storage.get("sheetsQueue", []) || []).filter(x => x !== head && !(x.ts === head.ts && JSON.stringify(x.body) === JSON.stringify(head.body)));
-        window.storage.set("sheetsQueue", q);
-      }
-      console.log("[queue] coda svuotata ✓");
-    } finally {
-      _draining = false;
-    }
-  },
-  async getPesi() {
-    return this.get({
-      action: "getPesi"
-    });
-  },
-  async getPesoCorporeo() {
-    return this.get({
-      action: "getPesoCorporeo"
-    });
-  },
-  async getUltimiPesi() {
-    return this.get({
-      action: "getUltimiPesi"
-    });
-  },
-  async getCheckIn(date) {
-    return this.get(date ? {
-      action: "getCheckIn",
-      date
-    } : {
-      action: "getCheckIn"
-    });
-  },
-  async getMisure() {
-    return this.get({
-      action: "getMisure"
-    });
-  },
-  async saveMisure(d) {
-    return this.post({
-      action: "saveMisure",
-      ...d
-    });
-  },
-  async savePeso(d) {
-    return this.post({
-      action: "savePeso",
-      ...d
-    });
-  },
-  async savePesoCorporeo(d) {
-    return this.post({
-      action: "savePesoCorporeo",
-      ...d
-    });
-  },
-  async saveSessione(d) {
-    return this.post({
-      action: "saveSessione",
-      ...d
-    });
-  },
-  async saveMovimento(d) {
-    return this.post({
-      action: "saveMovimento",
-      ...d
-    });
-  },
-  async saveCheckIn(d) {
-    return this.post({
-      action: "saveCheckIn",
-      ...d
-    });
-  },
-  async getSettings() {
-    return this.get({
-      action: "getSettings"
-    });
-  },
-  async saveSettings(d) {
-    return this.post({
-      action: "saveSettings",
-      ...d
-    });
-  },
-  async getAll() {
-    return this.get({
-      action: "getAll"
-    });
-  },
-  async getSessioni() {
-    return this.get({
-      action: "getSessioni"
-    });
-  },
-  async testConnection() {
-    const data = await this.get({
-      action: "getPesoCorporeo"
-    });
-    return {
-      ok: true,
-      rows: Array.isArray(data) ? data.length : "?"
-    };
-  }
-};
-window.addEventListener("online", () => {
-  window.sheetsAPI.drainQueue();
-});
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") window.sheetsAPI.drainQueue();
-});
-if (window.storage && window.storage.onReady) {
-  window.storage.onReady(() => setTimeout(() => window.sheetsAPI.drainQueue(), 4000));
-}
 const GROQ_MODELS = ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b"];
 window.groqAPI = {
   hasLocalKey() {
@@ -3644,6 +3454,189 @@ window.buildDefaultNotifConfig = function () {
 })();
 })();
 
+// ══ localdata.jsx ══
+;(function () {
+(function () {
+  const PESI_PER_ESERCIZIO = 12;
+  const MAX_SESSIONI = 60,
+    MAX_CHECKIN = 30,
+    MAX_PESO = 90,
+    MAX_MISURE = 120;
+  const MISURE = ["vita", "fianchi", "torace", "braccio", "coscia"];
+  function list(collection) {
+    const SV = window.SyncV2;
+    if (!SV || !SV.listRecords) return [];
+    return SV.listRecords(collection).filter(r => r && !r.deleted && r.data && typeof r.data === "object");
+  }
+  const byDate = (a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+  const isDate = s => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+  const nameKey = s => String(s == null ? "" : s).toLowerCase().trim();
+  function pesoOf(raw) {
+    if (raw == null) return null;
+    const s = String(raw).trim();
+    if (!s) return null;
+    const n = s.replace(",", ".");
+    return /^[0-9]+(\.[0-9]+)?$/.test(n) ? parseFloat(n) : s;
+  }
+  function plannedRepsIndex() {
+    const idx = new Map();
+    const lower = reps => {
+      const s = reps == null ? "" : String(reps);
+      const m = s.match(/(\d+)[-–](\d+)/);
+      return m ? parseInt(m[1]) : parseInt(s) || 10;
+    };
+    const add = planData => {
+      (planData && planData.days || []).forEach(d => (d.exercises || []).forEach(ex => {
+        if (ex && ex.id != null && ex.reps != null && !idx.has(ex.id)) idx.set(ex.id, lower(ex.reps));
+      }));
+    };
+    const SV = window.SyncV2;
+    if (SV && SV.activePlans) {
+      const a = SV.activePlans();
+      if (a && a.workout) add(a.workout.data);
+    }
+    list("workoutPlan").forEach(r => add(r.data));
+    return idx;
+  }
+  function doneSets(opts) {
+    const before = opts && opts.before;
+    const reps = plannedRepsIndex();
+    const rows = [];
+    list("setLog").forEach(r => {
+      const d = r.data;
+      if (!d.done || !isDate(d.date) || !Number.isInteger(d.setIndex) || d.setIndex < 0) return;
+      if (before && !(d.date < before)) return;
+      const name = typeof d.substitutedWith === "string" && d.substitutedWith.trim() ? d.substitutedWith : d.exerciseName;
+      const key = nameKey(name);
+      if (!key) return;
+      const rip = Number.isFinite(d.reps) && d.reps > 0 ? d.reps : reps.has(d.exerciseId) ? reps.get(d.exerciseId) : null;
+      rows.push({
+        key,
+        date: d.date,
+        setIndex: d.setIndex,
+        peso: pesoOf(d.weight),
+        rip,
+        sessione: ""
+      });
+    });
+    rows.sort((a, b) => byDate(a, b) || a.setIndex - b.setIndex);
+    return rows;
+  }
+  function getPesi(opts) {
+    const map = {};
+    doneSets(opts).forEach(r => {
+      (map[r.key] = map[r.key] || []).push({
+        date: r.date,
+        setN: r.setIndex + 1,
+        peso: r.peso,
+        rip: r.rip,
+        sessione: r.sessione
+      });
+    });
+    Object.keys(map).forEach(k => {
+      map[k] = map[k].slice(-PESI_PER_ESERCIZIO);
+    });
+    return map;
+  }
+  function getUltimiPesi(a, b) {
+    const named = typeof a === "string";
+    const opts = named ? b : a;
+    const map = {};
+    doneSets(opts).forEach(r => {
+      if (r.peso == null || r.peso === 0) return;
+      const arr = map[r.key] = map[r.key] || [];
+      while (arr.length < r.setIndex) arr.push(null);
+      arr[r.setIndex] = r.peso;
+    });
+    if (!named) return map;
+    const rows = doneSets(opts).filter(r => r.key === nameKey(a) && r.peso != null && r.peso !== 0);
+    if (!rows.length) return [];
+    const last = rows[rows.length - 1].date;
+    return rows.filter(r => r.date === last).map(r => ({
+      setN: r.setIndex + 1,
+      peso: r.peso,
+      rip: r.rip
+    }));
+  }
+  function getSessioni() {
+    const plan = (() => {
+      const a = window.SyncV2 && window.SyncV2.activePlans ? window.SyncV2.activePlans() : null;
+      return a && a.workout ? a.workout.data : null;
+    })();
+    const doneByDate = {};
+    list("setLog").forEach(r => {
+      if (r.data.done && isDate(r.data.date)) doneByDate[r.data.date] = (doneByDate[r.data.date] || 0) + 1;
+    });
+    const notes = {};
+    list("dayState").forEach(r => {
+      if (r.data.field === "notes" && isDate(r.data.date) && typeof r.data.value === "string") notes[r.data.date] = r.data.value;
+    });
+    const ora = ms => {
+      if (!Number.isFinite(ms) || ms <= 0) return "";
+      const d = new Date(ms);
+      return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+    };
+    const rows = list("workoutSession").filter(r => r.data.done && isDate(r.data.date)).map(r => {
+      const d = r.data;
+      const setsCompleted = doneByDate[d.date] || 0;
+      const day = plan && (plan.days || []).find(x => x.id === d.dayId);
+      let totalSets = day ? (day.exercises || []).reduce((n, ex) => n + (Number(ex.sets) || 0), 0) : 0;
+      if (totalSets < setsCompleted) totalSets = 0;
+      return {
+        date: d.date,
+        type: d.dayName || "",
+        setsCompleted,
+        totalSets,
+        notes: notes[d.date] || "",
+        ora: ora(d.startedAt)
+      };
+    });
+    rows.sort(byDate);
+    return rows.slice(-MAX_SESSIONI);
+  }
+  function getCheckIn(date) {
+    let rows = list("dayState").filter(r => r.data.field === "checkIn" && isDate(r.data.date) && r.data.value && typeof r.data.value === "object").map(r => ({
+      date: r.data.date,
+      sleep: Number(r.data.value.sleep) || 0,
+      energy: Number(r.data.value.energy) || 0,
+      ailments: String(r.data.value.ailments || "")
+    }));
+    rows.sort(byDate);
+    return date ? rows.filter(r => r.date === date) : rows.slice(-MAX_CHECKIN);
+  }
+  function getPesoCorporeo() {
+    const rows = list("bodyWeight").filter(r => isDate(r.data.date)).map(r => ({
+      date: r.data.date,
+      weight: Number(r.data.kg) || 0
+    })).filter(r => r.weight > 0);
+    rows.sort(byDate);
+    return rows.slice(-MAX_PESO);
+  }
+  function getMisure() {
+    const rows = list("bodyMeasure").filter(r => isDate(r.data.date)).map(r => {
+      const out = {
+        date: r.data.date
+      };
+      MISURE.forEach(c => {
+        const v = Number(r.data[c]);
+        if (v > 0) out[c] = v;
+      });
+      return out;
+    });
+    rows.sort(byDate);
+    return rows.slice(-MAX_MISURE);
+  }
+  window.LocalData = {
+    getPesi,
+    getUltimiPesi,
+    getSessioni,
+    getCheckIn,
+    getPesoCorporeo,
+    getMisure
+  };
+})();
+})();
+
 // ══ i18n.jsx ══
 ;(function () {
 const I18N_DICT = {
@@ -4004,8 +3997,8 @@ const I18N_DICT = {
   "Macchina occupata — clicca per segnalare": {
     en: "Machine busy — tap to flag"
   },
-  "Sessione completa — Salva su Sheets": {
-    en: "Session complete — Save to Sheets"
+  "Sessione completa — Salva": {
+    en: "Session complete — Save"
   },
   "Chiudi sessione": {
     en: "Close session"
@@ -4892,9 +4885,6 @@ const I18N_DICT = {
   "Coach AI · Groq gpt-oss-120b": {
     en: "AI Coach · Groq gpt-oss-120b"
   },
-  "Sheets: pesi, sessioni, movimenti": {
-    en: "Sheets: weights, sessions, activities"
-  },
   "Sorgente scheda + dieta": {
     en: "Workout + diet source"
   },
@@ -4948,9 +4938,6 @@ const I18N_DICT = {
   },
   "File identico a quello attuale": {
     en: "Same as the current file"
-  },
-  "Sessione già salvata": {
-    en: "Session already saved"
   },
   "Qualcosa è andato storto qui": {
     en: "Something went wrong here"
@@ -5102,9 +5089,6 @@ const I18N_DICT = {
   "Chiudi una sessione dalla Scheda per vederla qui": {
     en: "Close a session from the Workout tab to see it here"
   },
-  "Solo dati locali — aggiorna il backend per lo storico completo": {
-    en: "Local data only — update the backend for the full history"
-  },
   "Media 7 giorni": {
     en: "7-day average"
   },
@@ -5125,9 +5109,6 @@ const I18N_DICT = {
   },
   "il trend attuale si allontana dall'obiettivo": {
     en: "the current trend is moving away from the goal"
-  },
-  "Sessione salvata — sync quando torni online": {
-    en: "Session saved — will sync when you're back online"
   },
   "Condividi": {
     en: "Share"
@@ -5354,20 +5335,11 @@ const I18N_DICT = {
   "Tutti i dati verranno eliminati: check-in, storico pesi, attività, impostazioni e file importati. Questa operazione non è reversibile.": {
     en: "All data will be deleted: check-ins, weight history, activities, settings and imported files. This cannot be undone."
   },
-  "Sorgente": {
-    en: "Source"
-  },
   "Collega il tuo Sheets": {
     en: "Connect your Sheets"
   },
-  "Collega Google Sheets": {
-    en: "Connect Google Sheets"
-  },
   "L'URL del foglio Google con scheda e dieta.": {
     en: "Google Sheet URL with workout & diet."
-  },
-  "Incolla l'URL del tuo Google Apps Script (doGet/doPost). Configuri il foglio in Impostazioni.": {
-    en: "Paste your Google Apps Script URL (doGet/doPost). You can configure the sheet in Settings."
   },
   "Per attivare il coach AI in chat.": {
     en: "To enable the AI coach in chat."
@@ -7520,16 +7492,6 @@ window.sanitizeSchedaProg = sanitizeSchedaProg;
 // ══ screens/onboarding.jsx ══
 ;(function () {
 const STEPS = [{
-  label: "Sorgente",
-  title: "Collega Google Sheets",
-  sub: "Incolla l'URL del tuo Google Apps Script (doGet/doPost). Configuri il foglio in Impostazioni.",
-  icon: "doc",
-  iconColor: "#0A84FF",
-  field: "sheets",
-  placeholder: "https://script.google.com/macros/s/…/exec",
-  mono: false,
-  storageKey: "sheetsUrl"
-}, {
   label: "Coach",
   title: "API key Groq",
   sub: "Per attivare l'AI Coach. Ottienila su console.groq.com — gratuita.",
@@ -7576,7 +7538,6 @@ const Onboarding = ({
   const [step, setStep] = React.useState(0);
   const [values, setValues] = React.useState(() => {
     const init = {
-      sheets: "",
       api: "",
       weight: ""
     };
@@ -8217,16 +8178,6 @@ const MovimentoCard = ({
     onClose: () => setOpen(false),
     onSave: a => {
       addActivity && addActivity(a);
-      if (window.sheetsAPI) {
-        const today = window.todayKey ? window.todayKey() : new Date().toISOString().slice(0, 10);
-        window.sheetsAPI.saveMovimento({
-          date: today,
-          type: a.type,
-          min: a.min,
-          km: a.km || 0,
-          note: a.note || ""
-        }).catch(() => {});
-      }
       setOpen(false);
     }
   }));
@@ -8637,10 +8588,6 @@ const Dashboard = ({
     const trimmed = log.slice(-90);
     if (window.storage) window.storage.set("weightLog", trimmed);
     setWeightLog(trimmed);
-    if (window.sheetsAPI) window.sheetsAPI.savePesoCorporeo({
-      date: today,
-      weight: val
-    }).catch(() => {});
     setNewWeight("");
   };
   const weekGymDays = React.useMemo(() => {
@@ -10734,17 +10681,19 @@ const Scheda = ({
     setOccupied({});
     prevDoneRef.current = tot > 0 && done === tot;
   };
-  React.useEffect(() => {
-    if (!window.sheetsAPI) return;
-    window.sheetsAPI.getUltimiPesi().then(data => {
-      if (!data || typeof data !== "object") return;
-      setSheetsWeights(data);
-    }).catch(() => {});
-    window.sheetsAPI.getPesi().then(data => {
-      if (!data || typeof data !== "object") return;
-      setPesiHistory(data);
-    }).catch(() => {});
-  }, []);
+  const loadHistory = () => {
+    const LD = window.LocalData;
+    if (!LD) return;
+    const before = dayK;
+    setSheetsWeights(LD.getUltimiPesi({
+      before
+    }));
+    setPesiHistory(LD.getPesi({
+      before
+    }));
+  };
+  React.useEffect(loadHistory, []);
+  useSyncedData(k => /^(schedaProg_|gym_)\d{4}-\d{2}-\d{2}$/.test(k), loadHistory);
   React.useEffect(() => {
     const saved = window.storage ? window.storage.get("schedaSelectedDay", null) : null;
     const target = days.find(d => d.key === saved) || days[0];
@@ -10850,61 +10799,7 @@ const Scheda = ({
           prs: sessionPRs
         }));
       }
-      let queuedOffline = false;
-      let nothingNew = false;
-      if (window.sheetsAPI) {
-        const savedKey = `gymSaved_${today}`;
-        const saved = window.storage && window.storage.get(savedKey, {}) || {};
-        const toSend = [];
-        exercises.forEach((ex, exIdx) => {
-          const id = window.exId(scheda, exIdx);
-          const exCompletion = completion[id] || [];
-          const exName = substitutions[id] || ex.name;
-          const exPesos = pesosRef.current[id] || ex.sets.map(s => String(s.peso));
-          ex.sets.forEach((s, setIdx) => {
-            if (!exCompletion[setIdx]) return;
-            const raw = exPesos[setIdx];
-            const peso = raw != null && String(raw).trim() !== "" ? raw : s.peso;
-            const k = `${id}#${setIdx}`;
-            if (saved[k] === `${exName}|${peso}`) return;
-            toSend.push({
-              k,
-              sig: `${exName}|${peso}`,
-              exName,
-              setIdx,
-              peso,
-              rip: s.rip
-            });
-          });
-        });
-        nothingNew = toSend.length === 0;
-        if (!nothingNew) {
-          const sessRes = await window.sheetsAPI.saveSessione({
-            date: today,
-            type: scheda,
-            setsCompleted: completedSets,
-            totalSets,
-            notes
-          });
-          queuedOffline = !!(sessRes && sessRes.queued);
-        }
-        const results = await Promise.allSettled(toSend.map(r => window.sheetsAPI.savePeso({
-          date: today,
-          esercizio: r.exName,
-          setN: r.setIdx + 1,
-          peso: r.peso,
-          rip: r.rip,
-          sessione: current.name || scheda
-        })));
-        if (toSend.length && window.storage) {
-          const next = Object.assign({}, window.storage.get(savedKey, {}) || {});
-          results.forEach((res, i) => {
-            if (res.status === "fulfilled") next[toSend[i].k] = toSend[i].sig;
-          });
-          window.storage.set(savedKey, next);
-        }
-      }
-      setSaveMsg("✓ " + (nothingNew ? t("Sessione già salvata") : queuedOffline ? t("Sessione salvata — sync quando torni online") : t("Sessione salvata")));
+      setSaveMsg("✓ " + t("Sessione salvata"));
     } catch (err) {
       setSaveMsg("⚠️ " + (err.message || t("Errore salvataggio")));
     } finally {
@@ -11181,7 +11076,7 @@ const Scheda = ({
     name: "check",
     size: 16,
     color: allDone ? "#062810" : "#fff"
-  }), allDone ? t("Sessione completa — Salva su Sheets") : `${t("Chiudi sessione")} (${completedSets}/${totalSets})`)), saveMsg && React.createElement("div", {
+  }), allDone ? t("Sessione completa — Salva") : `${t("Chiudi sessione")} (${completedSets}/${totalSets})`)), saveMsg && React.createElement("div", {
     className: "fade-up",
     style: {
       textAlign: "center",
@@ -13844,8 +13739,10 @@ function _buildSystemPrompt({
     month: "long"
   });
   const st = window.storage;
-  const planW = st ? st.get("plan_workout", null) : null;
-  const planD = st ? st.get("plan_diet", null) : null;
+  const SV = window.SyncV2;
+  const ap = SV && SV.activePlans ? SV.activePlans() : null;
+  const planW = ap ? ap.workout : st ? st.get("plan_workout", null) : null;
+  const planD = ap ? ap.diet : st ? st.get("plan_diet", null) : null;
   const PC = window.PlanConv;
   const planText = (w, d) => {
     try {
@@ -13856,6 +13753,9 @@ function _buildSystemPrompt({
   };
   const schedaData = planW && planW.data && planText(planW.data, null) || window.SCHEDA_TXT_FALLBACK || null;
   const dietaData = planD && planD.data && planText(null, planD.data) || window.DIETA_TXT_FALLBACK || null;
+  const exRec = SV && SV.getRecord ? SV.getRecord("settings", "excludedFoods") : null;
+  const exList = exRec && !exRec.deleted && exRec.data && Array.isArray(exRec.data.value) ? exRec.data.value.filter(x => typeof x === "string" && x.trim()) : [];
+  const excludedFoods = exList.length ? exList : ["pasta di ceci", "lenticchie", "piselli", "bevanda di mandorla"];
   const today = window.todayKey ? window.todayKey() : now.toISOString().slice(0, 10);
   const sessionNotes = st ? st.get(`notes_${today}`, "") : "";
   const replyLang = lang === "en" ? "inglese" : "italiano";
@@ -13865,7 +13765,7 @@ Lorenzo: ${bodyWeight || 77.5}kg, 178cm.
 Oggi: ${dateStr} — ${sessLabel}.
 Ora: ${timeStr} (${timeOfDay}).
 Piano (${_dayCount} giorni, selezione manuale): ${_dayNames || "n/d"}. Cardio: camminata + ellittica nei giorni di riposo.
-ESCLUDERE SEMPRE dalla dieta: pasta di ceci, lenticchie, piselli, bevanda di mandorla.`;
+ESCLUDERE SEMPRE dalla dieta: ${excludedFoods.join(", ")}.`;
   if (checkIn) {
     const lvl = v => ["", "pessimo", "basso", "medio", "buono", "ottimo"][Math.max(1, Math.min(5, v || 3))];
     prompt += `\n\nCheck-in oggi: sonno ${lvl(checkIn.sleep)} (${checkIn.sleep}/5), energia ${lvl(checkIn.energy)} (${checkIn.energy}/5)${checkIn.ailments ? `, fastidi: "${checkIn.ailments}"` : ""}.`;
@@ -14761,16 +14661,12 @@ const RegistroView = ({
       };
     });
   };
-  useSyncedData(k => /^(gym_|muscleSets_|notes_)\d{4}-\d{2}-\d{2}$/.test(k), () => {
-    setRows(r => r && r.length && !r[0].local ? r : localFallback());
-  });
-  React.useEffect(() => {
-    if (!window.sheetsAPI || !window.sheetsAPI.getSessioni) {
-      setRows(localFallback());
-      return;
-    }
-    window.sheetsAPI.getSessioni().then(r => setRows(Array.isArray(r) && r.length ? r.slice().reverse() : localFallback())).catch(() => setRows(localFallback()));
-  }, []);
+  const load = () => {
+    const r = window.LocalData ? window.LocalData.getSessioni() : [];
+    setRows(r.length ? r.slice().reverse() : localFallback());
+  };
+  React.useEffect(load, []);
+  useSyncedData(k => /^(gym_|muscleSets_|notes_)\d{4}-\d{2}-\d{2}$/.test(k), load);
   if (rows === null) return React.createElement(UISkeleton, {
     h: 140,
     r: 14
@@ -14856,14 +14752,7 @@ const RegistroView = ({
       textOverflow: "ellipsis",
       whiteSpace: "nowrap"
     }
-  }, r.groups || r.notes)))), rows[0] && rows[0].local && React.createElement("div", {
-    className: "muted",
-    style: {
-      fontSize: 10.5,
-      marginTop: 8,
-      textAlign: "center"
-    }
-  }, t("Solo dati locali — aggiorna il backend per lo storico completo")));
+  }, r.groups || r.notes)))));
 };
 const CheckInTrend = ({
   isDesktop
@@ -14871,22 +14760,6 @@ const CheckInTrend = ({
   const t = useT();
   const [refreshKey, setRefreshKey] = React.useState(0);
   useSyncedData(k => /^checkIn_\d{4}-\d{2}-\d{2}$/.test(k), () => setRefreshKey(n => n + 1));
-  React.useEffect(() => {
-    if (!window.sheetsAPI || !window.storage) return;
-    window.sheetsAPI.getCheckIn().then(rows => {
-      if (!Array.isArray(rows) || !rows.length) return;
-      rows.forEach(r => {
-        if (r.date && (r.sleep || r.energy)) {
-          window.storage.set(`checkIn_${r.date}`, {
-            sleep: r.sleep || 0,
-            energy: r.energy || 0,
-            ailments: r.ailments || ""
-          });
-        }
-      });
-      setRefreshKey(k => k + 1);
-    }).catch(() => {});
-  }, []);
   const data = React.useMemo(() => {
     if (!window.storage) return [];
     const days = [];
@@ -15215,13 +15088,9 @@ const ForzaView = ({
   const t = useT();
   const [pesiMap, setPesiMap] = React.useState(null);
   const [selected, setSelected] = React.useState(null);
-  React.useEffect(() => {
-    if (!window.sheetsAPI) {
-      setPesiMap({});
-      return;
-    }
-    window.sheetsAPI.getPesi().then(d => setPesiMap(d && typeof d === "object" ? d : {})).catch(() => setPesiMap({}));
-  }, []);
+  const loadPesi = () => setPesiMap(window.LocalData ? window.LocalData.getPesi() : {});
+  React.useEffect(loadPesi, []);
+  useSyncedData(k => /^(schedaProg_|gym_)\d{4}-\d{2}-\d{2}$/.test(k), loadPesi);
   const [chartReady, setChartReady] = React.useState(!!window.Recharts);
   React.useEffect(() => {
     if (chartReady) return;
@@ -15413,22 +15282,6 @@ const MisureView = ({
   useSyncedData(["bodyMeasures"], () => {
     if (window.storage) setLog(window.storage.get("bodyMeasures", []) || []);
   });
-  React.useEffect(() => {
-    if (!window.sheetsAPI || !window.sheetsAPI.getMisure || !window.storage) return;
-    window.sheetsAPI.getMisure().then(rows => {
-      if (!Array.isArray(rows) || !rows.length) return;
-      const map = {};
-      window.storage.get("bodyMeasures", []).forEach(e => {
-        if (e && e.date) map[e.date] = e;
-      });
-      rows.forEach(e => {
-        if (e && e.date) map[e.date] = Object.assign({}, map[e.date], e);
-      });
-      const merged = Object.values(map).sort((a, b) => a.date.localeCompare(b.date)).slice(-120);
-      window.storage.set("bodyMeasures", merged);
-      setLog(merged);
-    }).catch(() => {});
-  }, []);
   const latest = log.length ? log[log.length - 1] : {};
   const firstVal = id => {
     for (const e of log) {
@@ -15467,7 +15320,6 @@ const MisureView = ({
     setEditing(false);
     setSavedMsg("✓ " + t("Misure salvate"));
     setTimeout(() => setSavedMsg(""), 2500);
-    if (window.sheetsAPI && window.sheetsAPI.saveMisure) window.sheetsAPI.saveMisure(entry).catch(() => {});
   };
   return React.createElement("div", null, React.createElement("div", {
     style: {
@@ -15637,25 +15489,6 @@ const Storico = ({
     if (!window.storage) return [];
     return window.storage.get("weightLog", []).slice(-60);
   });
-  React.useEffect(() => {
-    if (!window.sheetsAPI || !window.storage) return;
-    window.sheetsAPI.getPesoCorporeo().then(rows => {
-      if (!Array.isArray(rows) || !rows.length) return;
-      const local = window.storage.get("weightLog", []);
-      const merged = window.WorkoutProgress ? window.WorkoutProgress.mergeWeightLog(local, rows, "cloud") : (() => {
-        const map = {};
-        local.forEach(e => {
-          if (e.date) map[e.date] = e;
-        });
-        rows.forEach(e => {
-          if (e.date) map[e.date] = e;
-        });
-        return Object.values(map).sort((a, b) => a.date.localeCompare(b.date));
-      })();
-      window.storage.set("weightLog", merged);
-      setWeightLog(merged.slice(-60));
-    }).catch(() => {});
-  }, []);
   const [actRev, setActRev] = React.useState(0);
   useSyncedData(["weightLog", "activities"], keys => {
     if (!window.storage) return;
@@ -17353,14 +17186,6 @@ const Impostazioni = ({
     storageKey: "groqApiKey",
     placeholder: "gsk_…",
     testFn: () => window.groqAPI.testConnection()
-  }), React.createElement(ApiKeyRow, {
-    icon: "doc",
-    iconBg: "#0A84FF",
-    title: "Google Apps Script URL",
-    sub: t("Sheets: pesi, sessioni, movimenti"),
-    storageKey: "sheetsUrl",
-    placeholder: "https://script.google.com/macros/s/…/exec",
-    testFn: () => window.sheetsAPI.testConnection()
   })), React.createElement(ISection, {
     title: t("Piani"),
     subtitle: t("Importa scheda.txt e dieta.txt")
