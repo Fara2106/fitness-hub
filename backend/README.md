@@ -9,8 +9,13 @@ e tombstone per le eliminazioni. Zero dipendenze runtime.
 - `GET /v1/health` → `{ ok: true, version: "1" }` (senza token)
 - `POST /v1/sync` con `Authorization: Bearer <token>`
   - richiesta: `{ deviceId, cursor, changes: Change[] }` (al massimo 500 change, `data` al massimo 64 KB)
-  - risposta: `{ cursor, more, changes: Record[], applied, stale }` (pull paginato da 500 per `seq`)
-  - `Change`: `{ collection, id, data: object|null, updatedAt (ms), deleted? }`
+  - risposta: `{ cursor, more, changes: Record[], applied, stale, conflicts: Record[], epoch, reset }`
+    (pull paginato da 500 per `seq`)
+    - `conflicts`: la versione corrente del server di ogni change risultato `stale` (senza doppioni; `[]` se nessuno)
+    - `epoch`: identità del database (riga `epoch` di `meta`; `null` se lo schema non l'ha ancora)
+    - `reset`: `true` quando il `cursor` inviato supera il `seq` del server (database azzerato o ripristinato):
+      in quel caso il pull riparte da 0
+  - `Change`: `{ collection, id, data: object|null, updatedAt (ms, intero > 0), deleted? }`
   - `Record`: `{ collection, id, data, updatedAt, deleted, deviceId, seq }`
 
 Collezioni ammesse: workoutPlan, dietPlan, dayState, setLog, workoutSession, mealCheck, supplementCheck,
@@ -18,6 +23,17 @@ bodyWeight, bodyMeasure, shoppingCheck, shoppingExtra, exerciseNote, personalRec
 CORS: `https://fara2106.github.io` e `localhost`/`127.0.0.1`; le richieste senza `Origin` (app native) sono ammesse.
 Contratto completo e id deterministici: `.superpowers/sdd/2026-11-03-fase1-backend-sync/global-constraints.md` e piano fase 1
 (`docs/superpowers/plans/2026-11-03-fase1-backend-sync.md`).
+
+## Contratto per i client (fase 2 PWA, fase 3 app)
+
+- `updatedAt` di ogni modifica = `max(Date.now(), updatedAt locale del record + 1)`: sempre crescente anche con
+  l'orologio del dispositivo indietro.
+- Dopo ogni sync adottare i record dell'echo (`changes`) e quelli di `conflicts` (la modifica locale ha perso: vince
+  la versione del server).
+- Nuovo cursore = `cursor` della risposta; con `more: true` richiamare subito.
+- `reset: true` oppure `epoch` diverso da quello salvato → cursore 0 e ripull completo (salvare il nuovo `epoch`).
+- Lotti di al massimo 500 change e 1,5 MB di JSON per richiesta (il Worker rifiuta oltre 2 MB).
+- Eliminazione = tombstone: `deleted: true, data: null` (mai cancellazioni fisiche).
 
 ## Test
 
@@ -32,7 +48,7 @@ cd backend && npm test
 ```bash
 cd backend
 npx wrangler d1 create fitness-hub-db            # copia database_id in wrangler.toml
-npx wrangler d1 execute fitness-hub-db --remote --file=schema.sql
+npx wrangler d1 execute fitness-hub-db --remote --file=schema.sql   # idempotente: rilanciarlo aggiunge l'epoch a un DB esistente
 npx wrangler secret put SYNC_TOKEN               # incolla il contenuto di ~/.config/fitness-hub/sync-token
 npx wrangler deploy
 ```
@@ -43,7 +59,7 @@ Vive in `~/.config/fitness-hub/sync-token` (permessi 600) e come secret `SYNC_TO
 Per ruotarlo:
 
 ```bash
-umask 077 && openssl rand -hex 32 > ~/.config/fitness-hub/sync-token
+mkdir -p ~/.config/fitness-hub && (umask 077; openssl rand -hex 32 > ~/.config/fitness-hub/sync-token)
 cd backend && npx wrangler secret put SYNC_TOKEN   # incolla il nuovo valore
 ```
 
@@ -66,7 +82,22 @@ node migrate/migrate.mjs --api https://... --token-file ~/.config/fitness-hub/sy
 ```
 
 `--push --verify` si possono combinare. Il token non viene mai stampato. `--sheet <url>` cambia l'URL del Worker legacy.
-La verifica confronta con i soli record vivi della migrazione: pensata per un DB appena migrato.
+Il push va a lotti di al massimo 500 change e 1,5 MB. La verifica scarica tutto dal cursore 0 e controlla, per ogni record
+atteso, che esista con lo stesso `data` (ne stampa al massimo 20 diversi) oltre ai conteggi per collezione: pensata per
+un DB appena migrato. Il dry-run avvisa se il foglio ha esattamente il numero massimo di righe che il Worker legacy
+restituisce (check-in 30, peso 90, serie 12 per esercizio): lo storico più vecchio potrebbe mancare.
+
+### Cutover della fase 2: azzerare e rimigrare
+
+La migrazione di oggi è reale, ma al passaggio della PWA al nuovo backend (fase 2) D1 si azzera e si rimigra dai dati
+aggiornati. Rilanciare la CLI su un D1 già popolato NON è un recupero dei dati nuovi: gli stessi record con lo stesso
+`updatedAt` risultano `stale`. Prima di rimigrare:
+
+```bash
+npx wrangler d1 execute fitness-hub-db --remote --command "DELETE FROM records; UPDATE meta SET value = 0 WHERE key = 'seq'; UPDATE meta SET value = abs(random() % 9007199254740991) WHERE key = 'epoch'"
+```
+
+Il nuovo `epoch` fa ripartire da zero i client che avevano già sincronizzato.
 
 ## Backup del database
 
@@ -75,4 +106,10 @@ D1 Time Travel (ripristino a un istante recente):
 ```bash
 npx wrangler d1 time-travel info fitness-hub-db
 npx wrangler d1 time-travel restore fitness-hub-db --timestamp=<ISO8601>
+```
+
+Dopo un restore cambiare SEMPRE l'epoch, così i client riscaricano tutto invece di tenere un cursore che non vale più:
+
+```bash
+npx wrangler d1 execute fitness-hub-db --remote --command "UPDATE meta SET value = abs(random() % 9007199254740991) WHERE key = 'epoch'"
 ```
