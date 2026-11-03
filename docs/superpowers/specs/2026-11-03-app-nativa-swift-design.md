@@ -49,10 +49,10 @@ adatto a dati strutturati.
 
 ## 3. Non-obiettivi (v1)
 
-- Pubblicazione sull'App Store (uso personale; eventualmente TestFlight dopo).
+- Pubblicazione sull'App Store nelle fasi 1–4 (prima uso personale; la pubblicazione è la **fase 5**, sezione 14).
 - Importare piani da PDF/foto (possibile in seguito con l'IA).
 - Apple Watch, widget della schermata Home, Siri/Comandi (dopo la v1).
-- Multi-utente / account: c'è un solo utente, Lorenzo.
+- Multi-utente / account nelle fasi 1–4: c'è un solo utente, Lorenzo (gli account arrivano con la **fase 5**, sezione 14; la fase 3 si limita a preparare il terreno, vedi 13).
 - Editor di piani nella **versione web** (vedi decisioni, sezione 11).
 
 ## 4. Anti-obiettivi (sarebbe un fallimento anche se "funziona")
@@ -300,6 +300,14 @@ record a sé → le modifiche su device diversi si sommano naturalmente.
 3. **App Swift iPhone** completa sul nuovo backend (parità + editor + storico
    piani + esperienza nativa).
 4. **iPad** (layout adattivo; stesso target).
+5. **Pubblicazione** (sezione 14): account per chiunque, dati privati per account, abbonamento con versione
+   gratuita limitata, App Store. Solo **dopo** che Lorenzo ha usato e collaudato l'app (decisione di Lorenzo,
+   2026-11-03).
+
+**Preparazione nella fase 3 (scelta mia, 2026-11-03):** l'app e il backend separano "chi sei" dal resto — oggi
+token unico di Lorenzo, domani l'account — e i dati sul server hanno già un proprietario (es. colonna
+`owner`/utente nel D1, oggi un solo valore). Nessuna funzione visibile in fase 3 (niente login, niente
+abbonamento); serve a non rifare il motore di sync in fase 5.
 
 La generazione della lista spesa riusa la logica attuale di `screens/spesa.jsx`
 (quantità per 1 o 2 spese a settimana), portata sul modello strutturato.
@@ -307,3 +315,29 @@ La generazione della lista spesa riusa la logica attuale di `screens/spesa.jsx`
 Ogni fase si chiude con QA su simulatore (e sul device di Lorenzo per le
 funzioni che il simulatore non copre: notifiche a schermo bloccato, Salute,
 Live Activity).
+
+## 14. Fase 5 — pubblicazione (requisiti noti al 2026-11-03)
+
+Decisioni di Lorenzo:
+- **Per chiunque** segua una dieta (di un nutrizionista) e una scheda (di un personal trainer): la inserisce a
+  mano; l'app ricorda cosa mangiare e integrare, fa spuntare pasti e integratori e fa da scheda in palestra.
+- **Account personali**: ogni dato (piani, spunte, pesi, check-in, chat del Coach…) è **privato per account**.
+- **Solo utenti** nella prima uscita: i professionisti (nutrizionisti/trainer) NON hanno accesso. I dati vanno
+  però organizzati in modo che più avanti un utente possa "invitare" il proprio professionista senza rifare
+  tutto (scelta mia).
+- **Abbonamento con cifra piccola** (App Store; commissione Apple). **Versione gratuita limitata**:
+  dieta con una sola variante del giorno e un'opzione per colazione, pranzo e cena; lista della spesa corta;
+  palestra con una sola scheda di un solo giorno di allenamento (Player, recupero e storico pesi inclusi).
+  Con l'abbonamento: varianti, opzioni, pasti e giorni illimitati + storico dei piani.
+- **Notifiche per tutti, anche gratis**: ora dei pasti, integratori, fine recupero (notifiche locali dal
+  device, senza server).
+- Il primo account è quello di Lorenzo, con i suoi dati esistenti, senza perdite.
+
+Aperto, da decidere "a tempo debito" (prima di pianificare la fase 5):
+- accesso web anche per gli altri utenti (Lorenzo: "magari");
+- metodo di registrazione (proposta mia: Accedi con Apple + email);
+- Coach con IA nel gratuito o nell'abbonamento;
+- prezzo;
+- parte legale: informativa privacy per dati di salute (GDPR), cancellazione dell'account dall'app (richiesta
+  App Store), abbonamento valido anche sul web se il web esiste.
+
