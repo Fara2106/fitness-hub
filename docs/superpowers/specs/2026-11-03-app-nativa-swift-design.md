@@ -122,9 +122,14 @@ adatto a dati strutturati.
 - **Spesa**: lista generata dalla dieta attiva (quantità per 1 o 2 spese a
   settimana, come oggi), articoli extra manuali, spunte; si aggiorna da sola
   quando cambia la dieta.
-- **Coach AI**: chat con contesto (piano attivo, dieta, check-in, peso, note,
-  aderenza, misure), risposte in streaming, markdown minimo; esclusioni
-  alimentari sempre rispettate. Modello e chiave lato server (sezione 8).
+- **Coach AI sul dispositivo** (decisione di Lorenzo): modello **Apple
+  Intelligence** tramite il framework Foundation Models di iOS, niente Groq né
+  server. Funziona offline, i dati non escono dal telefono. Contesto compatto
+  scelto per la domanda (oggi, sintesi del piano attivo, ultimi check-in, peso,
+  aderenza; il modello locale ha una finestra di contesto piccola), risposte in
+  streaming, markdown minimo, esclusioni alimentari sempre rispettate. Se Apple
+  Intelligence non è disponibile/attiva sul device, il Coach lo dice e spiega
+  come attivarla. Solo nelle app native (vedi sezione 8).
 - **Storico**: peso (media mobile, obiettivo e proiezione), forza (e1RM per
   esercizio), volume, misure corporee, registro sessioni, check-in.
 - **Impostazioni**: tema (sistema/chiaro/scuro), lingua IT/EN, alimenti esclusi,
@@ -182,11 +187,8 @@ record a sé → le modifiche su device diversi si sommano naturalmente.
 - **Accesso**: utente unico. Token personale lungo, generato una volta,
   conservato nel Keychain (app) / storage locale (web); il Worker lo verifica.
   Nessun segreto nel repo. CORS: origine della PWA + richieste dalle app native.
-- **Coach**: il Worker fa da ponte verso Groq con la chiave nel secret
-  `GROQ_API_KEY` (già previsto oggi), con lista modelli e ripiego
-  (`openai/gpt-oss-120b` → `qwen/qwen3.8-27b` → `openai/gpt-oss-20b`, verificati
-  il 2026-11-03; i modelli Groq vengono ritirati: la lista va tenuta aggiornabile
-  lato server) e tetto minimo di token per i modelli che "ragionano".
+- **Coach**: nessun ponte server — l'IA gira sul dispositivo (sezione 5.2). Il
+  backend sincronizza solo i messaggi della chat (`coachMessage`).
 - **Backup**: ripristino a una data del database (funzione di D1) + esporta /
   ripristina su file dalle Impostazioni (come oggi).
 - **Google Sheets / Apps Script**: dismessi dopo la migrazione. Il foglio resta
@@ -195,8 +197,11 @@ record a sé → le modifiche su device diversi si sommano naturalmente.
 ## 8. Versione web (PWA)
 
 - Resta su GitHub Pages, passa al nuovo backend (stessa sync offline-first).
-- Funzioni quotidiane come oggi (Home, Scheda + Player, Dieta, Spesa, Coach,
+- Funzioni quotidiane come oggi (Home, Scheda + Player, Dieta, Spesa,
   Storico), lette dal **modello strutturato** invece che dai `.txt`.
+- **Coach sul web: solo lettura delle chat sincronizzate** (niente IA sul web:
+  Safari non espone un modello locale e Groq non si usa più). Scelta mia,
+  rivedibile.
 - **Editor dei piani: solo nelle app native in v1** (la web mostra i piani e lo
   storico in sola lettura). Rivedibile.
 - Il parser `.txt` resta solo per la migrazione iniziale.
@@ -221,7 +226,9 @@ record a sé → le modifiche su device diversi si sommano naturalmente.
   disponibili (procedura QA in memoria `ios-simulator-qa-setup`).
 - Installazione v1: **Apple ID gratuito** da Xcode (l'app scade ogni 7 giorni e
   va reinstallata dal Mac). Alcune capacità potrebbero richiedere l'Apple
-  Developer Program a pagamento (99 €/anno) — da verificare in fase di piano:
+  Developer Program a pagamento (99 €/anno) — da verificare in fase di piano
+  (il framework Foundation Models non richiede capacità a pagamento, ma serve un
+  device compatibile con Apple Intelligence e la funzione attiva):
   Apple Salute (HealthKit), Live Activity/widget (App Group), notifiche push
   remote (non servono: le notifiche del timer sono locali).
 - Codice Swift in una cartella/progetto separato dalla PWA (la PWA è servita da
@@ -244,6 +251,7 @@ record a sé → le modifiche su device diversi si sommano naturalmente.
 - **Sync fra web, app iPhone e app iPad**; il foglio Google serviva solo a
   salvare i dati → sostituibile.
 - **Prima versione completa**, già **precaricata** con i piani attuali.
+- **IA del Coach sul dispositivo** (Apple Intelligence), **senza Groq**.
 
 **Scelte mie (da confermare o correggere)**
 - Backend Cloudflare Worker + D1 (stesso account), offline-first,
@@ -266,8 +274,8 @@ record a sé → le modifiche su device diversi si sommano naturalmente.
   quando arriva il programma a pagamento. Il resto dell'app non dipende da esse.
 - **Cloudflare**: gli agenti **possono creare e pubblicare** il backend (D1 +
   Worker) dall'account di Lorenzo tramite `wrangler`, dopo un **login una
-  tantum fatto da Lorenzo** sul Mac. Segreti (token app, `GROQ_API_KEY`) solo
-  come secret del Worker, mai nel repo.
+  tantum fatto da Lorenzo** sul Mac. Segreti (token app) solo come secret del
+  Worker, mai nel repo.
 
 ## 12b. Lasciato a chi costruisce
 
