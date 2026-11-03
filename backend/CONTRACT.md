@@ -14,7 +14,7 @@ Protocollo di sync (push/pull, cursore, `conflicts`, `epoch`/`reset`, regola di 
 
 `workoutPlan` (id es. `workout-2026-11`):
 ```
-{ name, status: "active"|"archived", validFrom, validTo|null,
+{ name, status: "active"|"archived"|"draft", validFrom, validTo|null,
   days: [{ id, name, focus: string[],
            exercises: [{ id, name, sets: number, reps: string, restSec: number, notes,
                          muscles: string[], alternatives: string[] }] }] }
@@ -26,9 +26,18 @@ Protocollo di sync (push/pull, cursore, `conflicts`, `epoch`/`reset`, regola di 
   variants: [{ id, key, name, training: { time: "HH:MM" }|null,
                meals: [{ id, name, time: "HH:MM",
                          options: [{ id, text }],                 // "scegli 1"
-                         lines: [{ id, label|null, choices: string[] }] }],  // componenti sempre presenti
-               supplements: [{ id, key, name, moment, time: "HH:MM" }] }] }
+                         lines: [{ id, label|null, choices: string[] }],  // componenti sempre presenti
+                         note?: string|null }],                   // opzionale
+               supplements: [{ id, key, name, moment, time: "HH:MM" }] }],
+  shopping?: [{ id, title, color, items: [{ id, name, qty1, qty2, note|null }] }] }   // opzionale
 ```
+Alimenti = **testo libero**: `options[].text` e `lines[].choices[]` sono stringhe (`"80g riso basmati"`); l'editor dell'app aiuta con quantità + alimento ma salva testo.
+
+`status`: `active` = piano in uso (uno solo per tipo, `validFrom` più recente), `archived` = storico, `draft` = bozza dell'editor ("nuovo piano dal precedente"). La PWA (`activePlan`) ignora già tutto ciò che non è `active`, quindi una bozza non cambia nulla finché non viene attivata. Attivare = bozza `active` con `validFrom` = oggi + piano precedente `archived` con `validTo` = oggi, nello stesso lotto.
+
+`meal.note`: testo libero del pasto (le righe "Note:" della dieta originale). Opzionale: la PWA lo ignora, il converter `.txt` non lo scrive.
+
+`shopping` (lista della spesa del piano): opzionale. `qty1` = quantità per 1 spesa a settimana, `qty2` = per ciascuna di 2 spese. Gli item migrati dalla lista scritta nel codice della PWA (`CATEGORIES` in `screens/spesa.jsx`) tengono la chiave di oggi, `${cat.id}-${indice}` (`proteine-4`…), così le spunte `shoppingCheck` esistenti restano valide; "nuovo dal precedente" copia la lista con gli **stessi id degli item**. La PWA legge `shopping` dal piano e ricade sulla lista nel codice solo se manca.
 `key` della variante: `riposo|mattina|ore17|ore21|ore22` per quelle migrate. `key` dell'integratore: chiave di spunta stabile (`vitac`, `ps`, `custom-<nome>`…). Gli integratori esistono solo se la dieta li prevede. Gli id interni dei piani migrati sono percorsi (`<planId>/d0/e2`, `<planId>/v1/m3/o0`, `<planId>/v0/s4`); quelli creati dall'editor possono essere UUID.
 
 ## Log giornalieri
@@ -54,7 +63,20 @@ Protocollo di sync (push/pull, cursore, `conflicts`, `epoch`/`reset`, regola di 
 | `coachMessage` | `${date}:${index}` | `{ date, index, role, text }` |
 | `settings` | chiave | `{ value }` — chiavi: `excludedFoods` (string[]), `spesaFreq`, `weightGoal`, `bodyWeight` (peso profilo), `lang`, `theme` |
 
-## Decisioni aperte (fase 3)
+## Forme osservate nelle fixture della PWA
 
-- Alimenti di opzioni/righe come testo libero (`"80g riso basmati"`) oppure strutturati `{ nome, quantità }` (spec §6): da decidere con l'editor in-app, tenendo il piano sotto il limite di 64 KB per record.
-- Le righe "Note:" della dieta originale non sono migrate (il pasto non ha un campo note).
+Le fixture di parità (`node dev/gen-swift-fixtures.mjs <outDir>`: record prodotti da `PlanConv` e `RecordMap`, cioè da quello che la PWA scrive davvero) fanno fede dove questo documento è generico. Precisazioni:
+
+- `dayState` `cardio`: `value.id` è un **numero** (timestamp in ms di creazione dell'attività, intero sicuro); l'`id` del record è la sua forma in stringa (`${date}:cardio:1793275200000`). `value` = `{ id, type, min, km, note }` senza l'etichetta `when` della PWA. `rest` ha sempre `value: true` (campo tolto = tombstone, mai `false`); `hydration` è un numero; `checkIn` = `{ sleep, energy, ailments }` con sleep/energy interi 0-5 e `ailments` stringa.
+- `shoppingExtra`: `data` = l'articolo come lo scrive la PWA, `{ id: number, name }` (id numerico = timestamp in ms, l'`id` del record ne è la stringa); l'app Swift scrive id stringa (UUID). Entrambe le forme sono valide, la chiave di spunta resta `extra-<id>`.
+- `personalRecord`: `data` = `{ exerciseName, peso: number, date: string|null }`; l'`id` è il nome in minuscolo, ma `exerciseName` conserva le maiuscole di come l'esercizio è scritto nel piano.
+- `bodyMeasure`: `{ date, <misura>: number … }`, chiavi libere in cm (`vita`, `petto`, `braccio`…).
+- `setLog`: `reps` è `null` (la PWA non registra le ripetizioni fatte); `weight` è una stringa libera (`"82,5"`, `"rosso"` per l'elastico, `""`).
+- `settings`: `{ value }` con `value` di qualunque tipo JSON (`excludedFoods` = array di stringhe, `spesaFreq`/`weightGoal`/`bodyWeight` = numeri, `lang`/`theme` = stringhe).
+- `mealCheck` / `supplementCheck` / `shoppingCheck`: spunta tolta = `done: false` / `checked: false` (mai tombstone).
+- `workoutSession`: scritto solo a sessione chiusa (`done: true`), `startedAt` ms o `null`.
+
+## Decisioni
+
+- Alimenti come testo libero: **decisione chiusa** (vedi `dietPlan`). Il piano resta sotto il limite di 64 KB per record (l'editor rifiuta un piano che codificato lo supera).
+- Le righe "Note:" della dieta originale non sono migrate dal converter `.txt`, ma il pasto ha ora il campo opzionale `note`.
