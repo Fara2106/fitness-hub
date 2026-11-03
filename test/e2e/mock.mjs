@@ -52,6 +52,9 @@ export async function installMock(ctx, state, { postDelay = 0, getDelay = 0 } = 
       (b.esercizio ? ":" + b.esercizio + "#" + b.setN + "=" + b.peso : ""));
     if (postDelay) await new Promise(r => setTimeout(r, postDelay));
     if (b.action === "saveSettings") state.settings[b.key] = b.value;
+    if (b.action === "savePesoCorporeo") {           // upsert per data, come il .gs
+      state.pesi = state.pesi.filter(r => r.date !== b.date).concat([{ date: b.date, weight: Number(b.weight) }]);
+    }
     return route.fulfill({ status: 200, headers: H, body: JSON.stringify({ success: true }) });
   });
   return state;

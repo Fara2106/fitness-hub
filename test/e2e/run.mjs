@@ -170,6 +170,26 @@ await scenario("Spesa — spunte su due device nello stesso momento", async () =
   await A.ctx.close(); await B.ctx.close();
 });
 
+// ── 3b. Peso corporeo: dalla Home al foglio e all'altro device ─────────────
+await scenario("Peso — registrazione e sync tra device", async () => {
+  const st = newState(BASE_SETTINGS);
+  const A = await openApp(IPHONE, st);
+  await A.page.getByText("Peso", { exact: true }).first().click(); await A.page.waitForTimeout(400);
+  await A.page.getByPlaceholder("Aggiorna…").fill("88.4");
+  await A.page.getByRole("button", { name: "Salva" }).click(); await A.page.waitForTimeout(1500);
+  const today = await A.page.evaluate(() => window.todayKey());
+  const posts = st.log.filter(l => l.startsWith("POST savePesoCorporeo"));
+  ok("peso inviato al foglio (savePesoCorporeo)", posts.length >= 1, st.log.filter(l => l.startsWith("POST")).join(", "));
+  ok("riga peso di oggi nel foglio", st.pesi.some(r => r.date === today && r.weight === 88.4), JSON.stringify(st.pesi));
+  ok("bodyWeight aggiornato nelle Settings", st.settings.bodyWeight === "88.4", st.settings.bodyWeight);
+  const B = await openApp(IPAD, st);
+  await B.page.waitForTimeout(800);
+  const wl = (await store(B.page, "weightLog")) || [];
+  ok("l'altro device riceve lo storico peso", wl.some(e => e.date === today && e.weight === 88.4), JSON.stringify(wl));
+  ok("l'altro device mostra il peso aggiornato", (await store(B.page, "bodyWeight")) === 88.4);
+  await A.ctx.close(); await B.ctx.close();
+});
+
 // ── 4. Error boundary ───────────────────────────────────────────────────────
 await scenario("Error boundary — una schermata rotta non porta giù l'app", async () => {
   const st = newState(BASE_SETTINGS);
