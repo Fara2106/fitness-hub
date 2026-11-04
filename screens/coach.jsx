@@ -246,7 +246,7 @@ const Coach = ({ device, onNav, activities = [], checkIn, bodyWeight }) => {
   const scrollRef               = React.useRef(null);
 
   React.useEffect(() => {
-    if (window.storage && messages.length > 1) window.storage.set(chatKey, messages.slice(-40));
+    if (window.storage && messages.length > 1) window.storage.set(chatKey, messages);
   }, [messages]);
 
   // Chat di oggi arrivata dal sync (altro device): si ricarica, ma non mentre

@@ -2321,15 +2321,27 @@ window.buildDefaultNotifConfig = function () {
   function coachGroup(date, get) {
     const chat = get(`coachChat_${date}`, null),
       records = [];
-    (Array.isArray(chat) ? chat : []).forEach((m, index) => {
-      if (!isObj(m)) return;
+    const list = (Array.isArray(chat) ? chat : []).filter(isObj);
+    const used = new Set();
+    let max = -1;
+    for (const m of list) {
+      if (Number.isSafeInteger(m.index) && m.index >= 0 && !used.has(m.index)) {
+        used.add(m.index);
+        if (m.index > max) max = m.index;
+      }
+    }
+    const seen = new Set();
+    for (const m of list) {
+      let index = m.index;
+      if (!(Number.isSafeInteger(index) && index >= 0) || seen.has(index)) index = ++max;
+      seen.add(index);
       records.push(rec("coachMessage", `${date}:${index}`, {
         date,
         index,
         role: m.role,
         text: m.text != null ? m.text : m.content != null ? m.content : ""
       }));
-    });
+    }
     return {
       records
     };
@@ -2448,7 +2460,8 @@ window.buildDefaultNotifConfig = function () {
             {
               const msgs = onDate("coachMessage", date).slice().sort((a, b) => a.data.index - b.data.index).map(r => ({
                 role: r.data.role,
-                text: r.data.text
+                text: r.data.text,
+                index: r.data.index
               }));
               put(key, msgs.length ? msgs : undefined);
               break;
@@ -14503,7 +14516,7 @@ const Coach = ({
   const [busy, setBusy] = React.useState(false);
   const scrollRef = React.useRef(null);
   React.useEffect(() => {
-    if (window.storage && messages.length > 1) window.storage.set(chatKey, messages.slice(-40));
+    if (window.storage && messages.length > 1) window.storage.set(chatKey, messages);
   }, [messages]);
   useSyncedData([chatKey], () => {
     if (busy || !window.storage) return;

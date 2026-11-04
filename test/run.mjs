@@ -638,7 +638,8 @@ console.log("\nSuite RecordMap — gruppi, round-trip chiavi ⇄ record, spunte 
     const ROUND = [`checkIn_${D}`, `hydration_${D}`, `notes_${D}`, `restDay_${D}`, `dietaVariant_${D}`, `dietaCheck_${D}`, `integ_${D}`,
       `schedaProg_${D}`, `gym_${D}`, `gymStart_${D}`, `coachChat_${D}`, "weightLog", "bodyMeasures", "activities", "exNotes", "prMap",
       "spesaChecked", "spesaExtra", "spesaFreq", "weightGoal", "bodyWeight", "lang", "theme"];
-    const bad = ROUND.filter(k => !same(back[k], store[k]));
+    const backCmp = { ...back, [`coachChat_${D}`]: (back[`coachChat_${D}`] || []).map(({ role, text }) => ({ role, text })) }; // `index` è il segnaposto stabile del Coach
+    const bad = ROUND.filter(k => !same(backCmp[k], store[k]));
     ok("round-trip: buildGroup → keysForRecord → rebuildKeys ricostruisce tutte le chiavi" + (bad.length ? " (diverse: " + bad.join(", ") + ")" : ""), bad.length === 0);
     ok("round-trip: nessun record doppio fra gruppi", new Set(built.map(r => r.collection + "/" + r.id)).size === built.length);
 
@@ -1279,6 +1280,38 @@ await (async () => {
       const srv = await serverRecords(env);
       ok("cardio da Salute: sul server resta vivo e senza doppioni", !find(srv, "dayState", hkId).deleted &&
         srv.filter(r => r.collection === "dayState" && r.id.startsWith(`${TODAY}:cardio:`) && !r.deleted).length === 2);
+    }
+
+    // ── Coach: indici stabili (>40 messaggi, indici non contigui da un altro device) ──
+    {
+      const env = await backend();
+      const A = device(env), B = device(env, { t: T0 + 5 });
+      await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN);
+      await A.sync(); await B.sync();
+      const key = `coachChat_${TODAY}`;
+      const chat = []; for (let i = 0; i < 45; i++) chat.push({ role: i % 2 ? "assistant" : "user", text: `m${i}` });
+      A.S.set(key, chat); await tick(); await A.sync();
+      B.clock.t += 1000; await B.sync();
+      const got = B.S.get(key, []);
+      ok("coach: oltre 40 messaggi, tutti sincronizzati con indice stabile", got.length === 45 && got[44].index === 44 && got[0].index === 0);
+      // B aggiunge un messaggio: indice 45, nessun record riscritto e nessun tombstone
+      B.S.set(key, [...got, { role: "user", text: "nuovo" }]); await tick();
+      ok("coach: un messaggio nuovo mette in coda solo il suo record", B.outbox().join() === `coachMessage/${TODAY}:45`);
+      B.clock.t += 1000; await B.sync();
+      // indici non contigui (app nativa): 0,1,5 sopravvivono a una modifica della PWA
+      const env2 = await backend();
+      const C = device(env2), D2 = device(env2, { t: T0 + 5 });
+      await C.SV.setToken(TOKEN); await D2.SV.setToken(TOKEN);
+      await C.sync(); await D2.sync();
+      C.SV.putRecords([0, 1, 5].map(i => ({ collection: "coachMessage", id: `${TODAY}:${i}`, data: { date: TODAY, index: i, role: "user", text: `n${i}` } })));
+      C.clock.t += 1000; await C.sync(); D2.clock.t += 2000; await D2.sync();
+      const g2 = D2.S.get(key, []);
+      D2.S.set(key, [...g2, { role: "assistant", text: "risposta" }]); await tick();
+      ok("coach: indici non contigui preservati, nuovo = max+1", D2.outbox().join() === `coachMessage/${TODAY}:6`);
+      D2.clock.t += 1000; await D2.sync();
+      const srv2 = await serverRecords(env2);
+      ok("coach: nessun tombstone né rinumerazione sul server", [0, 1, 5, 6].every(i => !find(srv2, "coachMessage", `${TODAY}:${i}`).deleted && find(srv2, "coachMessage", `${TODAY}:${i}`).data) &&
+        find(srv2, "coachMessage", `${TODAY}:5`).data.text === "n5");
     }
 
     // ── finestre locali: weightLog oltre 90 voci, sweep silenzioso, cardio, noTouch ──
