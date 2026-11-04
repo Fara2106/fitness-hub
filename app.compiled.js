@@ -2217,6 +2217,14 @@ window.buildDefaultNotifConfig = function () {
     const saved = isObj(savedRaw) ? savedRaw : {};
     const validFrom = wi.plan.data.validFrom || null;
     const ids = new Set([].concat(Object.keys(completion), Object.keys(pesos), Object.keys(subs)));
+    const offPlan = new Set(),
+      mine = new Set();
+    const listAll = ctx && typeof ctx.records === "function" ? ctx.records("setLog") : null;
+    for (const r of Array.isArray(listAll) ? listAll : []) {
+      if (!r || r.deleted || !isObj(r.data) || r.data.date !== date) continue;
+      mine.add(r.id);
+      if (!wi.byId.has(r.data.exerciseId) && Number.isInteger(r.data.setIndex)) offPlan.add(`${nameKey(r.data.exerciseName)}:${r.data.setIndex}`);
+    }
     for (const exKey of ids) {
       const comp = Array.isArray(completion[exKey]) ? completion[exKey] : [];
       const pes = Array.isArray(pesos[exKey]) ? pesos[exKey] : [];
@@ -2238,7 +2246,9 @@ window.buildDefaultNotifConfig = function () {
       if (!n && sub !== null && ex) n = ex.sets || 0;
       for (let setIndex = 0; setIndex < n; setIndex++) {
         const w = pes[setIndex];
-        records.push(rec("setLog", `${date}:${exerciseId}:${setIndex}`, {
+        const rid = `${date}:${exerciseId}:${setIndex}`;
+        if (planId !== null && offPlan.has(`${nameKey(exerciseName)}:${setIndex}`) && !mine.has(rid)) continue;
+        records.push(rec("setLog", rid, {
           date,
           exerciseId,
           exerciseName,
@@ -2729,7 +2739,8 @@ window.buildDefaultNotifConfig = function () {
   const ctx = () => ({
     workout: S.get("plan_workout", null),
     diet: S.get("plan_diet", null),
-    today: today()
+    today: today(),
+    records: c => listEffective(c)
   });
   function canon(x) {
     return JSON.stringify(x, (k, v) => isObj(v) ? Object.keys(v).sort().reduce((o, kk) => {

@@ -1225,6 +1225,35 @@ await (async () => {
       await A.sync();
     }
 
+    // ── Ruling 37 (fase 3): piano attivato dall'app durante il giorno → storico di oggi senza doppioni ──
+    // B simula l'app: logga 2 serie di un esercizio sul piano P1, poi attiva P2 (stessi esercizi, id nuovi).
+    // A (PWA) ha il progresso di oggi (ricostruito da P1), riceve P2 e alla prima apertura della Scheda
+    // sanifica e sincronizza: ogni serie di oggi deve comparire UNA volta sola per nome esercizio.
+    for (const variant of ["stessa posizione", "posizione diversa"]) {
+      const env = await backend();
+      const A = device(env), B = device(env, { t: T0 + 5 });
+      await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN);
+      await A.sync(); await B.sync();
+      const W = A.sb.window;
+      const p1 = A.S.get("plan_workout");
+      const ex0 = p1.data.days[0].exercises[0];
+      B.SV.putRecords([0, 1].map(i => ({ collection: "setLog", id: `${TODAY}:${ex0.id}:${i}`, data: { date: TODAY, exerciseId: ex0.id, exerciseName: ex0.name, planId: p1.id, setIndex: i, weight: "20", reps: 8, done: true, substitutedWith: null } })));
+      B.clock.t += 1000; await B.sync(); A.clock.t += 2000; await A.sync();
+      ok(`ruling 37 (${variant}): A ricostruisce il progresso di oggi da P1`, ((W.readSchedaProg(A.S, TODAY).completion || {})[W.exId("Giorno 1", 0)] || [])[0] === true);
+      // P2: stessi esercizi con id nuovi; nel caso "posizione diversa" i primi due esercizi si scambiano.
+      const np = J(PC.workoutPlanFromText(readFileSync(join(ROOT, "scheda.txt"), "utf8"), { id: "workout-p2", name: "P2", validFrom: TODAY }));
+      if (variant === "posizione diversa") { const e = np.data.days[0].exercises; [e[0], e[1]] = [e[1], e[0]]; }
+      B.SV.putRecords([{ collection: "workoutPlan", id: np.id, data: np.data }, { collection: "workoutPlan", id: p1.id, data: { ...p1.data, status: "archived", validTo: TODAY } }]);
+      B.clock.t += 2000; await B.sync(); A.clock.t += 5000; await A.sync();
+      const curDays = W.getSchedule().days;
+      const res = W.sanitizeSchedaProg(W.readSchedaProg(A.S, TODAY), curDays, W.schedaPlanSig(curDays));
+      A.S.set(W.schedaProgKey(TODAY), res.prog); // come scheda.jsx al mount
+      await tick(); A.clock.t += 1000; await A.sync(); B.clock.t += 2000; await B.sync();
+      const srv = await serverRecords(env);
+      const doneToday = srv.filter(r => r.collection === "setLog" && !r.deleted && r.data.date === TODAY && r.data.done === true && r.data.exerciseName === ex0.name);
+      ok(`ruling 37 (${variant}): lo storico di oggi conta ogni serie una volta (2, trovate ${doneToday.length})`, doneToday.length === 2);
+    }
+
     // ── Ruling 31 (fase 3): ripetizioni registrate dall'app nativa → la PWA non le azzera ──
     // L'app (qui B via putRecords) salva setLog con reps; A riceve, poi spunta un'altra serie dello
     // stesso esercizio: il gruppo sets si ricalcola (reps null lato PWA) ma il record resta con reps.
