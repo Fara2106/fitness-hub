@@ -1,7 +1,7 @@
 // Server locale: il Worker vero (src/worker.mjs) con D1 simulato su node:sqlite, su http://127.0.0.1.
 // Per i test d'integrazione e gli UI test dell'app Swift (mai il backend di produzione).
 //   node backend/dev/local-server.mjs --port 8787 [--token <t>] [--account <email>:<password>] [--db <file>]
-//                                     [--seed <records.json>] [--owner <id>] [--invite]
+//                                     [--seed <records.json>] [--owner <id>] [--invite [--invite-ttl <min>]]
 // --port 0 = porta libera. --db = persistenza su file (default: in memoria). --seed = array JSON di Change
 // applicati all'avvio come device "seed". --token = token legacy (LEGACY_TOKEN_ENABLED acceso) verso --owner.
 // --account = crea all'avvio un account DI TEST con id = --owner (password in chiaro sulla riga di comando:
@@ -10,6 +10,8 @@
 // (va bene solo qui: in produzione il pepper è il secret PASSWORD_PEPPER).
 // --invite = SOLO per i test (UI test dell'app Swift): crea all'avvio un codice di attivazione per --owner e, dopo
 // `ready`, stampa la riga `invite <CODICE>` (il codice in chiaro: mai fuori dal server locale).
+// --invite-ttl = validità del codice in minuti (default 30, come in produzione): una suite UI lenta parte coi
+// LoginTests anche dopo 30 minuti. Solo qui: il Worker e la CLI `account.mjs invite` restano a 30 minuti.
 // Stampa su stdout `ready http://127.0.0.1:<porta>` e mai il token né la password.
 import http from "node:http";
 import { readFileSync } from "node:fs";
@@ -28,6 +30,7 @@ const { values } = parseArgs({
     account: { type: "string" },
     "pepper-file": { type: "string" },
     invite: { type: "boolean" },
+    "invite-ttl": { type: "string" },
   },
 });
 if (!values.token && !values.account && !values.invite) {
@@ -98,6 +101,15 @@ if (values.seed) {
 
 // Codice di attivazione di test per --owner (vale 30 minuti, una volta sola), stampato dopo `ready`.
 const invite = values.invite ? (await createActivationCode(DB, { owner: values.owner, now: Date.now() })).code : null;
+if (invite && values["invite-ttl"] !== undefined) {
+  const minutes = Number(values["invite-ttl"]);
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    console.error("--invite-ttl non valido");
+    process.exit(2);
+  }
+  await DB.prepare("UPDATE activation_codes SET expires_at = ? WHERE owner = ? AND used_at IS NULL")
+    .bind(Date.now() + Math.round(minutes * 60_000), values.owner).run();
+}
 
 const server = http.createServer(async (req, res) => {
   try {
