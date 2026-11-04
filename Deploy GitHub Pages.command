@@ -4,7 +4,7 @@
 #  Doppio click da Finder per deployare
 # ─────────────────────────────────────────────────────
 
-APP_DIR="/Users/lorenzofaraoni/Documents/Web Apps/Fitness App"
+APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # ── Configurazione ─────────────────────────────────
 # Inserisci qui il tuo username GitHub e il nome del repo
