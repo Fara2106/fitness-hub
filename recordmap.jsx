@@ -511,6 +511,17 @@
     }
   }
 
+  // Istante per ordinare le attività: id numerico (Date.now() della PWA), altrimenti `startedAt`
+  // (cardio da Salute, id "hk-<uuid>"), altrimenti mezzogiorno della data del record.
+  function activityTime(v, date) {
+    const id = Number(v.id);
+    if (Number.isFinite(id) && id > 0) return id;
+    const st = Number(v.startedAt);
+    if (Number.isFinite(st) && st > 0) return st;
+    const d = isDate(date) ? new Date(`${date}T12:00:00`).getTime() : NaN;
+    return Number.isFinite(d) ? d : 0;
+  }
+
   // ── rebuildKeys ───────────────────────────────────────────────────────────
   function rebuildKeys(keys, getRecord, listRecords, ctx) {
     const lists = new Map();
@@ -560,10 +571,10 @@
         case "activities": {
           const acts = [];
           all("dayState").forEach((r) => {
-            if (r.data.field === "cardio" && isObj(r.data.value)) acts.push({ ...r.data.value, when: "Oggi" }); // `when` come app.jsx
+            if (r.data.field === "cardio" && isObj(r.data.value)) acts.push({ a: { ...r.data.value, when: "Oggi" }, t: activityTime(r.data.value, r.data.date) }); // `when` come app.jsx
           });
-          acts.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0)); // più recente prima (app.jsx)
-          put(key, acts.slice(0, CAP.activities));
+          acts.sort((x, y) => y.t - x.t); // più recente prima (app.jsx)
+          put(key, acts.map((x) => x.a).slice(0, CAP.activities));
           break;
         }
         case "weightLog":

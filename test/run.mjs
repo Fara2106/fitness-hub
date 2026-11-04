@@ -1282,6 +1282,25 @@ await (async () => {
         srv.filter(r => r.collection === "dayState" && r.id.startsWith(`${TODAY}:cardio:`) && !r.deleted).length === 2);
     }
 
+    // ── cardio da Salute: ordinamento per startedAt / data del record (id non numerico) ──
+    {
+      const env = await backend();
+      const A = device(env), B = device(env, { t: T0 + 5 });
+      await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN);
+      await A.sync(); await B.sync();
+      const hk = (u, extra) => ({ collection: "dayState", id: `${TODAY}:cardio:hk-${u}`, data: { date: TODAY, field: "cardio", value: { id: `hk-${u}`, type: "camminata", min: 20, km: 1, note: "", ...extra } } });
+      B.SV.putRecords([hk("a", { startedAt: T0 - 86400000 * 2 }), hk("b", {})]);
+      B.clock.t += 1000; await B.sync(); A.clock.t += 2000; await A.sync();
+      const acts = A.S.get("activities", []);
+      ok("cardio da Salute: ordinato per startedAt, senza startedAt per data del record (mai NaN/in fondo)", acts.length === 2 && acts[0].id === "hk-b" && acts[1].id === "hk-a");
+      const old = []; for (let i = 0; i < 49; i++) { const id = T0 - 86400000 * 3 - i * 1000; old.push({ collection: "dayState", id: `${dateOf(id)}:cardio:${id}`, data: { date: dateOf(id), field: "cardio", value: { type: "walk", min: 10, km: 1, note: "", id } } }); }
+      B.SV.putRecords(old); B.clock.t += 3000; await B.sync();
+      const C = device(env, { t: T0 + 9 });
+      await C.SV.setToken(TOKEN); C.clock.t += 5000; await C.sync();
+      const cacts = C.S.get("activities", []);
+      ok("cardio da Salute: restano nella finestra delle 50 (le più recenti) anche con molte attività vecchie", cacts.length === 50 && cacts.slice(0, 2).every(a => String(a.id).startsWith("hk-")));
+    }
+
     // ── Coach: indici stabili (>40 messaggi, indici non contigui da un altro device) ──
     {
       const env = await backend();

@@ -2384,6 +2384,14 @@ window.buildDefaultNotifConfig = function () {
         return [];
     }
   }
+  function activityTime(v, date) {
+    const id = Number(v.id);
+    if (Number.isFinite(id) && id > 0) return id;
+    const st = Number(v.startedAt);
+    if (Number.isFinite(st) && st > 0) return st;
+    const d = isDate(date) ? new Date(`${date}T12:00:00`).getTime() : NaN;
+    return Number.isFinite(d) ? d : 0;
+  }
   function rebuildKeys(keys, getRecord, listRecords, ctx) {
     const lists = new Map();
     const all = collection => {
@@ -2475,12 +2483,15 @@ window.buildDefaultNotifConfig = function () {
             const acts = [];
             all("dayState").forEach(r => {
               if (r.data.field === "cardio" && isObj(r.data.value)) acts.push({
-                ...r.data.value,
-                when: "Oggi"
+                a: {
+                  ...r.data.value,
+                  when: "Oggi"
+                },
+                t: activityTime(r.data.value, r.data.date)
               });
             });
-            acts.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
-            put(key, acts.slice(0, CAP.activities));
+            acts.sort((x, y) => y.t - x.t);
+            put(key, acts.map(x => x.a).slice(0, CAP.activities));
             break;
           }
         case "weightLog":
