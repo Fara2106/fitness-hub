@@ -1224,6 +1224,39 @@ await (async () => {
       await A.sync();
     }
 
+    // ── Ruling 31 (fase 3): ripetizioni registrate dall'app nativa → la PWA non le azzera ──
+    // L'app (qui B via putRecords) salva setLog con reps; A riceve, poi spunta un'altra serie dello
+    // stesso esercizio: il gruppo sets si ricalcola (reps null lato PWA) ma il record resta con reps.
+    {
+      const env = await backend();
+      const A = device(env), B = device(env, { t: T0 + 5 });
+      await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN);
+      await A.sync(); await B.sync();
+      const W = A.sb.window;
+      const days = W.getSchedule().days;
+      const ex0 = wp.data.days[0].exercises[0];
+      const id0 = `${TODAY}:${ex0.id}:0`;
+      B.SV.putRecords([{ collection: "setLog", id: id0, data: { date: TODAY, exerciseId: ex0.id, exerciseName: ex0.name,
+        planId: wp.id, setIndex: 0, weight: "60", reps: 8, done: true, substitutedWith: null } }]);
+      B.clock.t += 1000; await B.sync();
+      A.clock.t += 2000; await A.sync();
+      const exK = W.exId("Giorno 1", 0);
+      const p0 = W.readSchedaProg(A.S, TODAY);
+      ok("reps dall'app: A ricostruisce la serie spuntata", (p0.completion || {})[exK] && p0.completion[exK][0] === true);
+      const comp = { ...(p0.completion || {}) }; comp[exK] = [true, true];
+      const pes = { ...(p0.pesos || {}) }; pes[exK] = ["60", "60"];
+      W.writeSchedaProg(A.S, TODAY, { completion: comp, pesos: pes }, { names: { [exK]: W.schedaNameAt(days, exK).name }, sig: W.schedaPlanSig(days) });
+      await tick(); A.clock.t += 1000; await A.sync();
+      const srv = await serverRecords(env);
+      const r0 = find(srv, "setLog", id0), r1 = find(srv, "setLog", `${TODAY}:${ex0.id}:1`);
+      ok("reps dall'app: dopo una modifica della PWA nello stesso giorno le ripetizioni restano (8)", r0 && r0.data.reps === 8 && r0.data.done === true);
+      ok("reps dall'app: la serie nuova della PWA arriva con reps null", r1 && r1.data.done === true && r1.data.reps === null);
+      ok("carryOver: solo setLog con reps null, il resto invariato",
+        A.sb.window.RecordMap.carryOver("setLog", { reps: 5 }, { reps: null, done: true }).reps === 5 &&
+        A.sb.window.RecordMap.carryOver("setLog", { reps: 5 }, { reps: 7 }).reps === 7 &&
+        A.sb.window.RecordMap.carryOver("mealCheck", { reps: 5 }, { done: true }).reps === undefined);
+    }
+
     // ── finestre locali: weightLog oltre 90 voci, sweep silenzioso, cardio, noTouch ──
     {
       const env = await backend();

@@ -5,6 +5,7 @@
 //     buildGroup(groupId, get, ctx)   → { records: [{collection,id,data}], window?: {collection,minId},
 //                                         protect?: {collection, planExerciseIds} }
 //     isProtected(groupResult, collection, id) → boolean   id da non tombstonare mai (Ruling 12)
+//     carryOver(collection, prevData, nextData) → nextData  campi che la PWA non gestisce, tenuti dal record noto
 //     keysForRecord(record, ctx)      → string[]            chiavi locali da ricostruire
 //     rebuildKeys(keys, getRecord, listRecords, ctx) → { [key]: value | undefined }
 //     DIRECT: Set(["workoutPlan","dietPlan"])               collezioni gestite direttamente dal motore
@@ -408,6 +409,15 @@
     return !p.planExerciseIds.includes(s.slice(11, cut));
   }
 
+  // Campi che la PWA non registra ma l'app nativa sì: ricalcolando un gruppo non vanno azzerati.
+  // setLog.reps: la PWA scrive sempre null (non conta le ripetizioni fatte) → resta quello del record noto.
+  function carryOver(collection, prev, next) {
+    if (collection === "setLog" && isObj(prev) && isObj(next) && next.reps == null && Number.isFinite(prev.reps)) {
+      return Object.assign({}, next, { reps: prev.reps });
+    }
+    return next;
+  }
+
   // gymSaved_<data> = { "Giorno N#pos#serie": "nome|peso" }: nome dell'esercizio fatto, salvo
   // sostituzione (allora non dice quale esercizio del piano c'era) → null. Come records.mjs.
   function savedName(saved, exKey, substitution) {
@@ -654,6 +664,6 @@
     out[key] = daily;
   }
 
-  const RecordMap = { groupsForKey, buildGroup, keysForRecord, rebuildKeys, isProtected, DIRECT, MUSCLE_GROUP };
+  const RecordMap = { groupsForKey, buildGroup, keysForRecord, rebuildKeys, isProtected, carryOver, DIRECT, MUSCLE_GROUP };
   window.RecordMap = RecordMap;
 })();

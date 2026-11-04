@@ -2264,6 +2264,14 @@ window.buildDefaultNotifConfig = function () {
     if (cut <= 11) return false;
     return !p.planExerciseIds.includes(s.slice(11, cut));
   }
+  function carryOver(collection, prev, next) {
+    if (collection === "setLog" && isObj(prev) && isObj(next) && next.reps == null && Number.isFinite(prev.reps)) {
+      return Object.assign({}, next, {
+        reps: prev.reps
+      });
+    }
+    return next;
+  }
   function savedName(saved, exKey, substitution) {
     for (const [k, v] of Object.entries(saved)) {
       if (!k.startsWith(`${exKey}#`) || !/^\d+$/.test(k.slice(exKey.length + 1)) || typeof v !== "string") continue;
@@ -2610,6 +2618,7 @@ window.buildDefaultNotifConfig = function () {
     keysForRecord,
     rebuildKeys,
     isProtected,
+    carryOver,
     DIRECT,
     MUSCLE_GROUP
   };
@@ -2906,8 +2915,9 @@ window.buildDefaultNotifConfig = function () {
     let n = 0;
     for (const r of res.records) {
       const eff = effective(r.collection, r.id);
-      if (eff && !eff.deleted && canon(eff.data) === canon(r.data)) continue;
-      if (enqueue(r.collection, r.id, r.data, false)) n++;
+      const data = eff && !eff.deleted && RM().carryOver ? RM().carryOver(r.collection, eff.data, r.data) : r.data;
+      if (eff && !eff.deleted && canon(eff.data) === canon(data)) continue;
+      if (enqueue(r.collection, r.id, data, false)) n++;
     }
     const now = indexIds(res);
     const nowSet = new Set(res.records.map(r => keyOf(r.collection, r.id)));
