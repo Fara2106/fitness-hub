@@ -14,7 +14,7 @@ import { readFile, writeFile, mkdtemp } from "node:fs/promises";
 import { join, dirname, extname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { installMock, newBackend, seedPlans, records, getRecord, backendSeq, TOKEN, ACCOUNT, claimAccount } from "./mock.mjs";
+import { installMock, newBackend, seedPlans, records, getRecord, backendSeq, pushRecords, TOKEN, ACCOUNT, claimAccount } from "./mock.mjs";
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 
@@ -430,6 +430,59 @@ await scenario("Piano cambiato su A — le spunte di oggi su B restano sugli ese
   ok("…con il suo nome", (await bodyText(B.page)).includes("Piano di partenza"));
   ok("nessun errore JS", A.page._errors.length === 0 && B.page._errors.length === 0, [...A.page._errors, ...B.page._errors].join(" | "));
   await A.ctx.close(); await B.ctx.close();
+});
+
+// ── 3c-bis. Piani dall'editor dell'app nativa (Task 15): bozza invisibile, attivazione visibile ──
+await scenario("Piani dell'app nativa — bozza invisibile, piano attivato visibile dopo il sync", async () => {
+  const be = await newBackend(); await seedPlans(be);
+  const { ctx, page } = await openApp(IPHONE, be, { seed: SEED_FIRST });
+  const d = await today(page);
+  const w = (await getRecord(be, "workoutPlan", "workout-seed")).data;
+  const dt = (await getRecord(be, "dietPlan", "diet-seed")).data;
+  // Bozze come le scrive l'editor dell'app: copie con id nuovi, status "draft", nomi riconoscibili.
+  const wDraft = JSON.parse(JSON.stringify(w));
+  Object.assign(wDraft, { name: "Bozza dall'app", status: "draft", validTo: null });
+  wDraft.days.forEach((day, i) => { day.id = `bozza-w/d${i}`; day.exercises.forEach((e, k) => { e.id = `bozza-w/d${i}/e${k}`; }); });
+  wDraft.days[0].name = "GIORNO DELLA BOZZA";
+  const dDraft = JSON.parse(JSON.stringify(dt));
+  Object.assign(dDraft, { name: "Dieta bozza", status: "draft", validTo: null });
+  dDraft.variants.forEach((v, i) => { v.id = `bozza-d/v${i}`; v.meals.forEach((m, k) => { m.id = `bozza-d/v${i}/m${k}`; m.name = "Pasto della bozza"; }); });
+  await pushRecords(be, [{ collection: "workoutPlan", id: "bozza-w", data: wDraft }, { collection: "dietPlan", id: "bozza-d", data: dDraft }]);
+  await sync(page);
+  const plans = () => page.evaluate(() => { const p = window.SyncV2.activePlans(); return { w: p.workout && p.workout.id, d: p.diet && p.diet.id }; });
+  const before = await plans();
+  ok("bozze sul device ma piano attivo invariato", before.w === "workout-seed" && before.d === "diet-seed", JSON.stringify(before));
+  await nav(page, "Scheda"); await page.waitForTimeout(500);
+  ok("Scheda: la bozza non si vede", !(await bodyText(page)).includes("GIORNO DELLA BOZZA"));
+  await nav(page, "Dieta"); await page.waitForTimeout(500);
+  ok("Dieta: la bozza non si vede", !(await bodyText(page)).includes("Pasto della bozza"));
+  await nav(page, "Setup"); await page.waitForTimeout(400);
+  const setupBefore = await bodyText(page);
+  ok("Impostazioni → Piani: in uso i piani di prima, nessuna bozza fra gli archiviati",
+    setupBefore.includes("Piano di partenza") && !setupBefore.includes("Bozza dall'app") && !/Piani archiviati/.test(setupBefore));
+
+  // "Attiva" nell'app: bozza active da oggi + piano di prima archived con validTo = oggi, nello stesso lotto.
+  const t = Date.now() + 1000;
+  await pushRecords(be, [
+    { collection: "workoutPlan", id: "bozza-w", data: { ...wDraft, status: "active", validFrom: d, validTo: null }, updatedAt: t },
+    { collection: "workoutPlan", id: "workout-seed", data: { ...w, status: "archived", validTo: d }, updatedAt: t },
+    { collection: "dietPlan", id: "bozza-d", data: { ...dDraft, status: "active", validFrom: d, validTo: null }, updatedAt: t },
+    { collection: "dietPlan", id: "diet-seed", data: { ...dt, status: "archived", validTo: d }, updatedAt: t },
+  ]);
+  await sync(page);
+  const after = await plans();
+  ok("dopo il sync il piano attivo è quello attivato", after.w === "bozza-w" && after.d === "bozza-d", JSON.stringify(after));
+  await nav(page, "Scheda"); await page.waitForTimeout(600);
+  ok("Scheda mostra il piano nuovo", (await bodyText(page)).includes("GIORNO DELLA BOZZA"));
+  await nav(page, "Dieta"); await page.waitForTimeout(600);
+  ok("Dieta mostra il piano nuovo", (await bodyText(page)).includes("Pasto della bozza"));
+  await nav(page, "Setup"); await page.waitForTimeout(400);
+  const setupAfter = await bodyText(page);
+  ok("Impostazioni → Piani: in uso il piano attivato, quello di prima fra gli archiviati (scheda e dieta)",
+    setupAfter.includes("Bozza dall'app") && setupAfter.includes("Dieta bozza") && (await page.getByText(/Piani archiviati \(1\)/).count()) === 2,
+    (setupAfter.match(/Piani archiviati[^\n]*/g) || []).join(" | "));
+  ok("nessun errore JS", page._errors.length === 0, page._errors.join(" | "));
+  await ctx.close();
 });
 
 // ── 3d. Pull durante la modifica ───────────────────────────────────────────

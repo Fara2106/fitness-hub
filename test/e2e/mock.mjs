@@ -72,6 +72,20 @@ export async function seedPlans(backend) {
   if (res.status !== 200) throw new Error("seedPlans: " + res.status + " " + await res.text());
 }
 
+// Scrive record sul backend come farebbe un altro device (l'app nativa): POST /v1/sync col token legacy.
+// changes = [{ collection, id, data|null, updatedAt? }] (updatedAt di default: adesso; data null = tombstone).
+export async function pushRecords(backend, changes, deviceId = "app-nativa") {
+  const now = Date.now();
+  const res = await worker.fetch(new Request(API + "/v1/sync", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + TOKEN },
+    body: JSON.stringify({ deviceId, cursor: 0, changes: changes.map(c => ({ collection: c.collection, id: c.id, data: c.data,
+      updatedAt: c.updatedAt || now, deleted: c.data == null })) }),
+  }), backend.env);
+  if (res.status !== 200) throw new Error("pushRecords: " + res.status + " " + await res.text());
+  return res.json();
+}
+
 // Crea l'account di test col claim (Bearer = token legacy), come farà Lorenzo dalla PWA. → status HTTP.
 export async function claimAccount(backend, account = ACCOUNT) {
   const res = await worker.fetch(new Request(API + "/v1/auth/claim", {
