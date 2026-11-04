@@ -5,6 +5,8 @@
 //   records-sample.json   record di tutte le collezioni da backend/test/fixtures/pwa-backup-sample.json via RecordMap
 //   insights-cases.json   [{ fn, args, result }] per le funzioni di insights.jsx
 //   progress-cases.json   [{ fn, args, result }] per progress.jsx
+//   shopping-fallback.json  la lista della spesa di riserva (window.SPESA_CATEGORIES di spesa.jsx) nella forma
+//                         che la PWA mostra quando il piano non ha `shopping` (SpesaLogic.shoppingFromCategories)
 // Solo sviluppo: non fa parte del bundle dell'app e non viene letto a runtime.
 import { createRequire } from "node:module";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -20,8 +22,8 @@ mkdirSync(outDir, { recursive: true });
 const babel = createRequire(join(ROOT, "package.json"))("@babel/core");
 const sandbox = { window: {}, console };
 vm.createContext(sandbox);
-for (const f of ["parser.jsx", "planconv.jsx", "schedaState.jsx", "recordmap.jsx", "insights.jsx", "progress.jsx"]) {
-  const code = babel.transformFileSync(join(ROOT, f), { presets: ["@babel/preset-react"], cwd: ROOT, configFile: false, babelrc: false }).code;
+for (const f of ["parser.jsx", "planconv.jsx", "schedaState.jsx", "recordmap.jsx", "insights.jsx", "progress.jsx", "screens/spesa.jsx"]) {
+  const code = babel.transformFileSync(join(ROOT, f), { presets: [["@babel/preset-react", { runtime: "classic", development: false }]], cwd: ROOT, configFile: false, babelrc: false }).code;
   vm.runInContext(code, sandbox, { filename: f });
 }
 const W = sandbox.window;
@@ -224,3 +226,8 @@ P("bestFor", [prMap, "band squat"], "maiuscole diverse: assente (chiave esatta)"
 P("bestFor", [prMap, "Row"], "assente");
 P("bestFor", [null, "Row"], "mappa null");
 write("progress-cases.json", cases);
+
+// ── shopping-fallback.json ───────────────────────────────────────────────────
+// spesa.jsx definisce solo funzioni e costanti: caricato qui non esegue nulla di React. Gli id degli articoli sono
+// `${categoria}-${indice}`, le chiavi di spunta di sempre.
+write("shopping-fallback.json", plain(W.SpesaLogic.shoppingFromCategories(W.SPESA_CATEGORIES)));
