@@ -1257,6 +1257,30 @@ await (async () => {
         A.sb.window.RecordMap.carryOver("mealCheck", { reps: 5 }, { done: true }).reps === undefined);
     }
 
+    // ── Task 17 (fase 3): cardio importato da Salute dall'app nativa (`value.id` = "hk-<uuid>") ──
+    // La PWA lo mostra in `activities`, ma il suo gruppo cardio prende solo id numerici: aggiungere un'attività
+    // non lo duplica (nessun `${date}:cardio:<ms>` nuovo per lui) e non lo tombstona.
+    {
+      const env = await backend();
+      const A = device(env), B = device(env, { t: T0 + 5 });
+      await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN);
+      await A.sync(); await B.sync();
+      const hkId = `${TODAY}:cardio:hk-6f1c7b3a-0000-4000-8000-00000000abcd`;
+      const value = { id: "hk-6f1c7b3a-0000-4000-8000-00000000abcd", type: "camminata", min: 35, km: 3.1, note: "", startedAt: T0 - 3600000 };
+      B.SV.putRecords([{ collection: "dayState", id: hkId, data: { date: TODAY, field: "cardio", value } }]);
+      B.clock.t += 1000; await B.sync();
+      A.clock.t += 2000; await A.sync();
+      const acts = A.S.get("activities", []);
+      ok("cardio da Salute: la PWA lo mostra fra le attività", acts.some(a => a.id === value.id && a.type === "camminata" && a.min === 35));
+      A.S.set("activities", [{ type: "walk", min: 20, km: 1.5, note: "", id: T0 + 10, when: "Oggi" }, ...acts]);
+      await tick();
+      ok("cardio da Salute: una nuova attività della PWA mette in coda solo la sua", A.outbox().join() === `dayState/${TODAY}:cardio:${T0 + 10}`);
+      A.clock.t += 1000; await A.sync();
+      const srv = await serverRecords(env);
+      ok("cardio da Salute: sul server resta vivo e senza doppioni", !find(srv, "dayState", hkId).deleted &&
+        srv.filter(r => r.collection === "dayState" && r.id.startsWith(`${TODAY}:cardio:`) && !r.deleted).length === 2);
+    }
+
     // ── finestre locali: weightLog oltre 90 voci, sweep silenzioso, cardio, noTouch ──
     {
       const env = await backend();
