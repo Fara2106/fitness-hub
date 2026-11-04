@@ -2223,7 +2223,7 @@ window.buildDefaultNotifConfig = function () {
     for (const r of Array.isArray(listAll) ? listAll : []) {
       if (!r || r.deleted || !isObj(r.data) || r.data.date !== date) continue;
       mine.add(r.id);
-      if (!wi.byId.has(r.data.exerciseId) && Number.isInteger(r.data.setIndex)) offPlan.add(`${nameKey(r.data.exerciseName)}:${r.data.setIndex}`);
+      if (r.data.done === true && !wi.byId.has(r.data.exerciseId) && Number.isInteger(r.data.setIndex)) offPlan.add(`${nameKey(r.data.exerciseName)}:${r.data.setIndex}`);
     }
     for (const exKey of ids) {
       const comp = Array.isArray(completion[exKey]) ? completion[exKey] : [];

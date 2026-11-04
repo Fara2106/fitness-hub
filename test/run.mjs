@@ -1229,7 +1229,7 @@ await (async () => {
     // B simula l'app: logga 2 serie di un esercizio sul piano P1, poi attiva P2 (stessi esercizi, id nuovi).
     // A (PWA) ha il progresso di oggi (ricostruito da P1), riceve P2 e alla prima apertura della Scheda
     // sanifica e sincronizza: ogni serie di oggi deve comparire UNA volta sola per nome esercizio.
-    for (const variant of ["stessa posizione", "posizione diversa"]) {
+    for (const variant of ["stessa posizione", "posizione diversa", "serie non fatta nell'app"]) {
       const env = await backend();
       const A = device(env), B = device(env, { t: T0 + 5 });
       await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN);
@@ -1237,7 +1237,7 @@ await (async () => {
       const W = A.sb.window;
       const p1 = A.S.get("plan_workout");
       const ex0 = p1.data.days[0].exercises[0];
-      B.SV.putRecords([0, 1].map(i => ({ collection: "setLog", id: `${TODAY}:${ex0.id}:${i}`, data: { date: TODAY, exerciseId: ex0.id, exerciseName: ex0.name, planId: p1.id, setIndex: i, weight: "20", reps: 8, done: true, substitutedWith: null } })));
+      B.SV.putRecords([0, 1].map(i => ({ collection: "setLog", id: `${TODAY}:${ex0.id}:${i}`, data: { date: TODAY, exerciseId: ex0.id, exerciseName: ex0.name, planId: p1.id, setIndex: i, weight: "20", reps: 8, done: !(variant === "serie non fatta nell'app" && i === 1), substitutedWith: null } })));
       B.clock.t += 1000; await B.sync(); A.clock.t += 2000; await A.sync();
       ok(`ruling 37 (${variant}): A ricostruisce il progresso di oggi da P1`, ((W.readSchedaProg(A.S, TODAY).completion || {})[W.exId("Giorno 1", 0)] || [])[0] === true);
       // P2: stessi esercizi con id nuovi; nel caso "posizione diversa" i primi due esercizi si scambiano.
@@ -1248,6 +1248,11 @@ await (async () => {
       const curDays = W.getSchedule().days;
       const res = W.sanitizeSchedaProg(W.readSchedaProg(A.S, TODAY), curDays, W.schedaPlanSig(curDays));
       A.S.set(W.schedaProgKey(TODAY), res.prog); // come scheda.jsx al mount
+      if (variant === "serie non fatta nell'app") { // la PWA spunta la serie 1 sotto l'id nuovo: deve arrivare (l'off-plan è done:false)
+        const k0 = W.exId("Giorno 1", 0), pr = W.readSchedaProg(A.S, TODAY), comp = { ...(pr.completion || {}) };
+        comp[k0] = [...(comp[k0] || [])]; comp[k0][1] = true;
+        W.writeSchedaProg(A.S, TODAY, { ...pr, completion: comp }, { names: { [k0]: W.schedaNameAt(curDays, k0).name }, sig: W.schedaPlanSig(curDays) });
+      }
       await tick(); A.clock.t += 1000; await A.sync(); B.clock.t += 2000; await B.sync();
       const srv = await serverRecords(env);
       const doneToday = srv.filter(r => r.collection === "setLog" && !r.deleted && r.data.date === TODAY && r.data.done === true && r.data.exerciseName === ex0.name);
