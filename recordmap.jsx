@@ -349,7 +349,7 @@
     return { records };
   }
 
-  // setLog da schedaProg_<data>: una serie per indice registrato (spuntata o no, o col peso).
+  // setLog da schedaProg_<data>: una serie per indice toccato (spuntata, col peso, sostituita, o già nota).
   // Esercizio: names[exKey] → gymSaved_ della data → posizione nel piano attivo (records.mjs);
   // senza nome e piano attivo valido da dopo quella data → scartato.
   // protect (Ruling 12): i setLog di esercizi che NON sono nel piano attivo (piano cambiato in
@@ -400,6 +400,9 @@
       for (let setIndex = 0; setIndex < n; setIndex++) {
         const w = pes[setIndex];
         const rid = `${date}:${exerciseId}:${setIndex}`;
+        // Ruling 62: serie mai toccata (non spuntata, senza peso, senza sostituzione, record ignoto)
+        // → niente record: su un device non aggiornato ne cancellerebbe una fatta altrove (LWW).
+        if (!comp[setIndex] && !hasValue(w) && sub === null && !mine.has(rid)) continue;
         if (planId !== null && offPlan.has(`${nameKey(exerciseName)}:${setIndex}`) && !mine.has(rid)) continue;
         records.push(rec("setLog", rid, {
           date, exerciseId, exerciseName, planId, setIndex,

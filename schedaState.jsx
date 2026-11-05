@@ -51,6 +51,52 @@ function writeSchedaProg(storage, dateKey, patch, meta) {
   storage.set(schedaProgKey(dateKey), next);
 }
 
+// Ruling 62: `pesos` persistiti = solo ciò che l'utente ha toccato; "" = serie mai toccata.
+// Un peso proposto (ultima sessione, default scheda) resta a video e in memoria, ma finisce nel
+// blocco, e quindi in un setLog, solo con un gesto: peso digitato o serie spuntata.
+function schedaPesoAt(saved, n, setIdx, value) {
+  const arr = new Array(Math.max(n, setIdx + 1)).fill("");
+  (saved || []).forEach((v, i) => { if (i < arr.length && v != null) arr[i] = v; });
+  arr[setIdx] = value == null ? "" : String(value);
+  return arr;
+}
+
+// Pesi a video di un esercizio: toccati oggi → ultime sessioni → default scheda.
+function schedaShownPesos(saved, ex, lastWeights) {
+  const row = lastWeights && lastWeights[String(ex.name || "").toLowerCase()];
+  return (ex.sets || []).map((s, i) => {
+    const v = saved && saved[i];
+    if (v != null && v !== "") return String(v);
+    if (row && row[i] != null) return String(row[i]);
+    return String(s.peso || "");
+  });
+}
+
+// La stessa vista per tutti gli esercizi del piano: { id: [pesi a video] }.
+function schedaShownAll(pesos, days, lastWeights) {
+  const out = {};
+  (days || []).forEach(d => (d.exercises || []).forEach((ex, i) => {
+    const id = exId(d.key, i);
+    out[id] = schedaShownPesos((pesos || {})[id], ex, lastWeights);
+  }));
+  return out;
+}
+
+// Pesi da registrare con una patch di completion: per ogni serie appena spuntata, quello a video.
+function schedaTickPesos(cur, completionPatch, shown) {
+  const out = {};
+  Object.keys(completionPatch || {}).forEach(id => {
+    const arr = completionPatch[id] || [];
+    const was = (cur.completion || {})[id] || [];
+    let p = (cur.pesos || {})[id];
+    arr.forEach((done, i) => {
+      const v = shown && shown[id] ? shown[id][i] : null;
+      if (done && !was[i] && v != null && v !== "") { p = schedaPesoAt(p, arr.length, i, v); out[id] = p; }
+    });
+  });
+  return out;
+}
+
 // Firma del piano: giorni + nomi esercizi + numero serie.
 function schedaPlanSig(days) {
   return (days || []).map(d => d.key + ":" + (d.exercises || [])
@@ -99,6 +145,10 @@ window.getDayState = getDayState;
 window.schedaProgKey = schedaProgKey;
 window.readSchedaProg = readSchedaProg;
 window.writeSchedaProg = writeSchedaProg;
+window.schedaPesoAt = schedaPesoAt;
+window.schedaShownPesos = schedaShownPesos;
+window.schedaShownAll = schedaShownAll;
+window.schedaTickPesos = schedaTickPesos;
 window.schedaPlanSig = schedaPlanSig;
 window.schedaNameAt = schedaNameAt;
 window.sanitizeSchedaProg = sanitizeSchedaProg;

@@ -516,6 +516,70 @@ await scenario("Pull durante la modifica — il peso digitato non cambia", async
   await A.ctx.close(); await B.ctx.close();
 });
 
+// ── 3d-bis. Una serie mai toccata non produce record (Ruling 62) ───────────
+// Storico di ieri su ogni esercizio: la Scheda propone 30 come ultimo peso.
+async function seedLastWeights(be, d, weight = "30") {
+  const y = new Date(d + "T12:00:00"); y.setDate(y.getDate() - 1);
+  const pad = (n) => String(n).padStart(2, "0");
+  const prev = `${y.getFullYear()}-${pad(y.getMonth() + 1)}-${pad(y.getDate())}`;
+  const plan = (await getRecord(be, "workoutPlan", "workout-seed")).data;
+  const changes = [];
+  plan.days.forEach(day => day.exercises.forEach(ex => {
+    for (let i = 0; i < (ex.sets || 0); i++) changes.push({ collection: "setLog", id: `${prev}:${ex.id}:${i}`,
+      data: { date: prev, exerciseId: ex.id, exerciseName: ex.name, planId: "workout-seed", setIndex: i, weight, reps: 8, done: true, substitutedWith: null } });
+  }));
+  await pushRecords(be, changes);
+  return { plan, prev };
+}
+
+await scenario("Serie mai toccate — B offline apre la Scheda e non cancella le serie di A", async () => {
+  const be = await newBackend(); await seedPlans(be);
+  const A = await openApp(IPHONE, be, { seed: SEED_FIRST });
+  const B = await openApp(IPAD, be);
+  const d = await today(A.page);
+  await seedLastWeights(be, d);
+  await sync(A.page); await sync(B.page);
+  const W = 'input[placeholder="kg o elastico"]';
+
+  await B.ctx.setOffline(true);
+  await nav(A.page, "Scheda"); await A.page.waitForTimeout(600);
+  ok("A: aprire la Scheda non scrive nulla", (await setLogs(be, d)).length === 0 && (await pending(A.page)) === 0, `coda ${await pending(A.page)}`);
+  ok("A: la Scheda propone l'ultimo peso", (await A.page.locator(W).first().inputValue()) === "30", await A.page.locator(W).first().inputValue());
+  await A.page.locator(W).nth(0).fill("55"); await A.page.locator(W).nth(1).fill("56");
+  await tickSets(A.page, 2);
+  await A.page.waitForTimeout(200);
+  await sync(A.page);
+  const doneA = (await setLogs(be, d)).filter(r => r.data.done);
+  ok("A: due serie fatte sul backend, una per spunta", doneA.length === 2 && (await setLogs(be, d)).length === 2, JSON.stringify((await setLogs(be, d)).map(r => [r.id, r.data.done, r.data.weight])));
+
+  // B non ha visto nulla: apre la Scheda offline, poi torna la rete.
+  await nav(B.page, "Scheda"); await B.page.waitForTimeout(800);
+  ok("B offline: aprire la Scheda non mette nulla in coda", (await pending(B.page)) === 0, `coda ${await pending(B.page)}`);
+  await B.ctx.setOffline(false);
+  await sync(B.page); await sync(A.page);
+  const after = await setLogs(be, d);
+  ok("le serie di A restano fatte, coi loro pesi", ["55", "56"].every(w => after.some(r => r.data.done && r.data.weight === w)), JSON.stringify(after.map(r => [r.data.setIndex, r.data.done, r.data.weight])));
+  ok("B le vede spuntate", (await store(B.page, `schedaProg_${d}`) || {}).completion && Object.values((await store(B.page, `schedaProg_${d}`)).completion)[0].filter(Boolean).length === 2);
+
+  // Di nuovo offline, B spunta la TERZA serie: non deve riscrivere le altre.
+  await B.ctx.setOffline(true);
+  await A.page.locator(W).nth(3).fill("57"); await A.page.waitForTimeout(300);
+  await sync(A.page);
+  await B.page.locator(".card.lift").first().locator("button.check").nth(2).click(); await B.page.waitForTimeout(300);
+  const sk = B.page.getByRole("button", { name: /^(Salta|Riprendi)$/ }); if (await sk.count()) await sk.first().click();
+  await B.page.waitForTimeout(300);
+  await B.ctx.setOffline(false);
+  await sync(B.page); await sync(A.page);
+  const last = await setLogs(be, d);
+  ok("la spunta su una serie non tocca le altre due", ["55", "56"].every(w => last.some(r => r.data.done && r.data.weight === w)), JSON.stringify(last.map(r => [r.data.setIndex, r.data.done, r.data.weight])));
+  const third = last.find(r => r.data.setIndex === 2);
+  ok("la serie spuntata prende il peso proposto", third && third.data.done === true && third.data.weight === "30", JSON.stringify(third && third.data));
+  ok("nessun record per le serie non toccate", last.length === 4, JSON.stringify(last.map(r => [r.data.exerciseName, r.data.setIndex, r.data.done, r.data.weight])));
+  ok("il peso senza spunta si sincronizza ancora", last.some(r => !r.data.done && r.data.weight === "57"));
+  ok("nessun errore JS", A.page._errors.length === 0 && B.page._errors.length === 0, [...A.page._errors, ...B.page._errors].join(" | "));
+  await A.ctx.close(); await B.ctx.close();
+});
+
 // ── 3e. Peso corporeo: dalla Home al backend e all'altro device ────────────
 await scenario("Peso — registrazione e sync tra device", async () => {
   const be = await newBackend();

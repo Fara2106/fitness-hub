@@ -2247,6 +2247,7 @@ window.buildDefaultNotifConfig = function () {
       for (let setIndex = 0; setIndex < n; setIndex++) {
         const w = pes[setIndex];
         const rid = `${date}:${exerciseId}:${setIndex}`;
+        if (!comp[setIndex] && !hasValue(w) && sub === null && !mine.has(rid)) continue;
         if (planId !== null && offPlan.has(`${nameKey(exerciseName)}:${setIndex}`) && !mine.has(rid)) continue;
         records.push(rec("setLog", rid, {
           date,
@@ -7367,6 +7368,47 @@ function writeSchedaProg(storage, dateKey, patch, meta) {
   };
   storage.set(schedaProgKey(dateKey), next);
 }
+function schedaPesoAt(saved, n, setIdx, value) {
+  const arr = new Array(Math.max(n, setIdx + 1)).fill("");
+  (saved || []).forEach((v, i) => {
+    if (i < arr.length && v != null) arr[i] = v;
+  });
+  arr[setIdx] = value == null ? "" : String(value);
+  return arr;
+}
+function schedaShownPesos(saved, ex, lastWeights) {
+  const row = lastWeights && lastWeights[String(ex.name || "").toLowerCase()];
+  return (ex.sets || []).map((s, i) => {
+    const v = saved && saved[i];
+    if (v != null && v !== "") return String(v);
+    if (row && row[i] != null) return String(row[i]);
+    return String(s.peso || "");
+  });
+}
+function schedaShownAll(pesos, days, lastWeights) {
+  const out = {};
+  (days || []).forEach(d => (d.exercises || []).forEach((ex, i) => {
+    const id = exId(d.key, i);
+    out[id] = schedaShownPesos((pesos || {})[id], ex, lastWeights);
+  }));
+  return out;
+}
+function schedaTickPesos(cur, completionPatch, shown) {
+  const out = {};
+  Object.keys(completionPatch || {}).forEach(id => {
+    const arr = completionPatch[id] || [];
+    const was = (cur.completion || {})[id] || [];
+    let p = (cur.pesos || {})[id];
+    arr.forEach((done, i) => {
+      const v = shown && shown[id] ? shown[id][i] : null;
+      if (done && !was[i] && v != null && v !== "") {
+        p = schedaPesoAt(p, arr.length, i, v);
+        out[id] = p;
+      }
+    });
+  });
+  return out;
+}
 function schedaPlanSig(days) {
   return (days || []).map(d => d.key + ":" + (d.exercises || []).map(e => String(e.name || "").toLowerCase() + "/" + (e.sets && e.sets.length || 0)).join(",")).join("|");
 }
@@ -7420,6 +7462,10 @@ window.getDayState = getDayState;
 window.schedaProgKey = schedaProgKey;
 window.readSchedaProg = readSchedaProg;
 window.writeSchedaProg = writeSchedaProg;
+window.schedaPesoAt = schedaPesoAt;
+window.schedaShownPesos = schedaShownPesos;
+window.schedaShownAll = schedaShownAll;
+window.schedaTickPesos = schedaTickPesos;
 window.schedaPlanSig = schedaPlanSig;
 window.schedaNameAt = schedaNameAt;
 window.sanitizeSchedaProg = sanitizeSchedaProg;
@@ -10142,46 +10188,27 @@ const ExerciseCard = ({
   onSubstitute,
   sheetsWeights,
   savedPesos,
-  onPesosChange,
+  onPesoChange,
   exNote
 }) => {
   const t = useT();
-  const [pesos, setPesos] = React.useState(() => {
-    if (savedPesos && savedPesos.length === ex.sets.length) return savedPesos.slice();
-    return ex.sets.map((s, i) => {
-      const key = ex.name.toLowerCase();
-      if (sheetsWeights && sheetsWeights[key] && sheetsWeights[key][i] != null) {
-        return String(sheetsWeights[key][i]);
-      }
-      return String(s.peso || "");
-    });
-  });
+  const [pesos, setPesos] = React.useState(() => window.schedaShownPesos(savedPesos, ex, sheetsWeights));
   const [showHistory, setShowHistory] = React.useState(false);
   const [showSubs, setShowSubs] = React.useState(false);
   React.useEffect(() => {
-    if (savedPesos && savedPesos.length === ex.sets.length) return;
-    const key = ex.name.toLowerCase();
-    if (sheetsWeights && sheetsWeights[key]) {
-      const updated = ex.sets.map((s, i) => {
-        const w = sheetsWeights[key][i];
-        return w != null ? String(w) : String(s.peso || "");
-      });
-      setPesos(updated);
-      if (onPesosChange) onPesosChange(updated);
-    }
+    setPesos(window.schedaShownPesos(savedPesos, ex, sheetsWeights));
   }, [sheetsWeights]);
   React.useEffect(() => {
-    if (savedPesos && savedPesos.length === ex.sets.length && savedPesos.join("\u0001") !== pesos.join("\u0001")) {
-      setPesos(savedPesos.slice());
-    }
+    if (!savedPesos) return;
+    setPesos(p => p.map((v, i) => savedPesos[i] != null && savedPesos[i] !== "" ? String(savedPesos[i]) : v));
   }, [savedPesos]);
   const handlePesoChange = (i, v) => {
     setPesos(p => {
       const n = [...p];
       n[i] = v;
-      if (onPesosChange) onPesosChange(n);
       return n;
     });
+    if (onPesoChange) onPesoChange(i, v);
   };
   const bestEver = React.useMemo(() => {
     if (!ex.history || !ex.history.length) return 0;
@@ -10679,6 +10706,7 @@ const WorkoutPlayer = ({
   autoRest,
   setAutoRest,
   onPatch,
+  onPeso,
   onClose,
   onFinish
 }) => {
@@ -10708,16 +10736,7 @@ const WorkoutPlayer = ({
     if (sheetsWeights && sheetsWeights[k] && sheetsWeights[k][curSet] != null) return String(sheetsWeights[k][curSet]);
     return String(ex && ex.sets[curSet] ? ex.sets[curSet].peso || "" : "");
   })();
-  const setPeso = v => {
-    const arr = (pesosRef.current[id] || ex.sets.map(s => String(s.peso || ""))).slice();
-    arr[curSet] = v;
-    pesosRef.current[id] = arr;
-    onPatch({
-      pesos: {
-        [id]: arr
-      }
-    });
-  };
+  const setPeso = v => onPeso(id, ex.sets.length, curSet, v);
   const advance = () => {
     if (cursor < exercises.length - 1) setCursor(cursor + 1);else onFinish();
   };
@@ -11086,7 +11105,9 @@ const Scheda = ({
   const [prog, setProg] = React.useState(() => {
     const raw = window.readSchedaProg(window.storage, dayK);
     const res = window.sanitizeSchedaProg(raw, days, planSig);
-    if (res.changed && window.storage) window.storage.set(window.schedaProgKey(dayK), res.prog);
+    if (res.changed && window.storage) window.storage.set(window.schedaProgKey(dayK), res.prog, {
+      silent: true
+    });
     return res.prog;
   });
   const completion = prog.completion;
@@ -11104,8 +11125,9 @@ const Scheda = ({
   const [saving, setSaving] = React.useState(false);
   const [saveMsg, setSaveMsg] = React.useState("");
   const prevDoneRef = React.useRef(null);
+  const lastWeightsRef = React.useRef(null);
   const pesosRef = React.useRef(null);
-  if (pesosRef.current === null) pesosRef.current = Object.assign({}, prog.pesos);
+  if (pesosRef.current === null) pesosRef.current = window.schedaShownAll(prog.pesos, days, null);
   const [saveRequested, setSaveRequested] = React.useState(false);
   const [mode, setMode] = React.useState("list");
   const [cursor, setCursor] = React.useState(0);
@@ -11117,7 +11139,11 @@ const Scheda = ({
       setMode("player");
     }
   }, []);
-  const patchProg = patch => {
+  const patchProg = rawPatch => {
+    const ticked = rawPatch.completion ? window.schedaTickPesos(window.readSchedaProg(window.storage, dayK), rawPatch.completion, pesosRef.current) : {};
+    const patch = Object.keys(ticked).length ? Object.assign({}, rawPatch, {
+      pesos: Object.assign({}, rawPatch.pesos, ticked)
+    }) : rawPatch;
     if (patch.completion && window.storage) {
       const k = `gymStart_${dayK}`;
       if (!window.storage.get(k, null) && Object.values(patch.completion).some(arr => (arr || []).some(Boolean))) {
@@ -11140,6 +11166,17 @@ const Scheda = ({
       names: Object.assign({}, p.names, names),
       sig: planSig
     }));
+  };
+  const setPesoAt = (id, n, setIdx, value) => {
+    const arr = (pesosRef.current[id] || []).slice();
+    arr[setIdx] = value;
+    pesosRef.current[id] = arr;
+    const saved = window.readSchedaProg(window.storage, dayK).pesos[id];
+    patchProg({
+      pesos: {
+        [id]: window.schedaPesoAt(saved, n, setIdx, value)
+      }
+    });
   };
   const saveExNote = (name, text) => {
     const key = (name || "").toLowerCase();
@@ -11167,8 +11204,10 @@ const Scheda = ({
     }
     if (has("plan_workout") || has(window.schedaProgKey(dayK))) {
       const res = window.sanitizeSchedaProg(window.readSchedaProg(st, dayK), curDays, window.schedaPlanSig(curDays));
-      if (res.changed) st.set(window.schedaProgKey(dayK), res.prog);
-      pesosRef.current = Object.assign({}, res.prog.pesos);
+      if (res.changed) st.set(window.schedaProgKey(dayK), res.prog, {
+        silent: true
+      });
+      pesosRef.current = window.schedaShownAll(res.prog.pesos, curDays, lastWeightsRef.current);
       setProg(res.prog);
     }
     if (has(`notes_${dayK}`) && !notesDirtyRef.current) setNotes(st.get(`notes_${dayK}`, "") || "");
@@ -11204,9 +11243,12 @@ const Scheda = ({
     const LD = window.LocalData;
     if (!LD) return;
     const before = dayK;
-    setSheetsWeights(LD.getUltimiPesi({
+    const last = LD.getUltimiPesi({
       before
-    }));
+    });
+    lastWeightsRef.current = last;
+    pesosRef.current = window.schedaShownAll(window.readSchedaProg(window.storage, dayK).pesos, days, last);
+    setSheetsWeights(last);
     setPesiHistory(LD.getPesi({
       before
     }));
@@ -11514,15 +11556,8 @@ const Scheda = ({
       }),
       sheetsWeights: sheetsWeights,
       exNote: exNotes[(substitutions[id] || ex.name || "").toLowerCase()],
-      savedPesos: pesosRef.current[id],
-      onPesosChange: pesos => {
-        pesosRef.current[id] = pesos;
-        patchProg({
-          pesos: {
-            [id]: pesos
-          }
-        });
-      }
+      savedPesos: prog.pesos[id],
+      onPesoChange: (j, v) => setPesoAt(id, ex.sets.length, j, v)
     });
   })), React.createElement("div", {
     className: "card lift",
@@ -11625,6 +11660,7 @@ const Scheda = ({
     autoRest: autoRest,
     setAutoRest: setAutoRest,
     onPatch: patchProg,
+    onPeso: setPesoAt,
     onClose: () => setMode("list"),
     onFinish: () => {
       setMode("list");

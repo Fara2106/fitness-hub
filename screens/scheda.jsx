@@ -276,55 +276,31 @@ const ExerciseCard = ({
   ex, completed, onToggleSet, onRest,
   occupied, onOccupied, isDesktop,
   substituted, onSubstitute,
-  sheetsWeights, savedPesos, onPesosChange, exNote,
+  sheetsWeights, savedPesos, onPesoChange, exNote,
 }) => {
   const t = useT();
-  const [pesos, setPesos] = React.useState(() => {
-    // 1) pesi già digitati oggi (ripristino sessione) → 2) ultime sessioni (record locali) → 3) default scheda
-    if (savedPesos && savedPesos.length === ex.sets.length) return savedPesos.slice();
-    return ex.sets.map((s, i) => {
-      const key = ex.name.toLowerCase();
-      if (sheetsWeights && sheetsWeights[key] && sheetsWeights[key][i] != null) {
-        return String(sheetsWeights[key][i]);
-      }
-      return String(s.peso || "");
-    });
-  });
+  // savedPesos = solo i pesi toccati oggi ("" = mai toccata), gli altri sono proposte a video.
+  const [pesos, setPesos] = React.useState(() => window.schedaShownPesos(savedPesos, ex, sheetsWeights));
   const [showHistory, setShowHistory] = React.useState(false);
   const [showSubs, setShowSubs]       = React.useState(false);
 
-  // Update pesos when sheetsWeights (ultimi pesi) arrives
+  // Arrivano gli ultimi pesi: si aggiorna solo la vista, i pesi toccati oggi vincono. Niente
+  // scrittura: un setLog nato da qui, più recente, cancellerebbe per LWW le serie fatte su un
+  // altro device non ancora arrivate (Ruling 62).
   React.useEffect(() => {
-    // i pesi digitati/ripristinati di oggi vincono sugli ultimi pesi
-    if (savedPesos && savedPesos.length === ex.sets.length) return;
-    const key = ex.name.toLowerCase();
-    if (sheetsWeights && sheetsWeights[key]) {
-      const updated = ex.sets.map((s, i) => {
-        const w = sheetsWeights[key][i];
-        return w != null ? String(w) : String(s.peso || "");
-      });
-      setPesos(updated);
-      if (onPesosChange) onPesosChange(updated);
-    }
+    setPesos(window.schedaShownPesos(savedPesos, ex, sheetsWeights));
   }, [sheetsWeights]);
 
-  // Pesi cambiati dal Player (stesso stato condiviso keyed-by-id): riallinea la
-  // lista. Prima la card teneva i valori vecchi e alla prima modifica nella
-  // lista li ripushava, cancellando i pesi digitati nel Player.
+  // Pesi cambiati dal Player o da un altro device (stesso stato condiviso keyed-by-id):
+  // riallinea la lista. Un campo svuotato a mano resta vuoto mentre si digita.
   React.useEffect(() => {
-    if (savedPesos && savedPesos.length === ex.sets.length &&
-        savedPesos.join("\u0001") !== pesos.join("\u0001")) {
-      setPesos(savedPesos.slice());
-    }
+    if (!savedPesos) return;
+    setPesos(p => p.map((v, i) => (savedPesos[i] != null && savedPesos[i] !== "" ? String(savedPesos[i]) : v)));
   }, [savedPesos]);
 
-  // Notifica il parent quando i pesos cambiano (stato condiviso con il Player)
   const handlePesoChange = (i, v) => {
-    setPesos(p => {
-      const n = [...p]; n[i] = v;
-      if (onPesosChange) onPesosChange(n);
-      return n;
-    });
+    setPesos(p => { const n = [...p]; n[i] = v; return n; });
+    if (onPesoChange) onPesoChange(i, v);
   };
 
   const bestEver = React.useMemo(() => {
@@ -629,7 +605,7 @@ const WorkoutPlayer = ({
   dayKey, dayName, exercises, cursor, setCursor,
   completion, substitutions, pesosRef, sheetsWeights, prMap,
   pesiHistory, deload, exNotes, onSaveNote,
-  autoRest, setAutoRest, onPatch, onClose, onFinish,
+  autoRest, setAutoRest, onPatch, onPeso, onClose, onFinish,
 }) => {
   const t = useT();
   const [showSubs, setShowSubs] = React.useState(false);
@@ -670,12 +646,7 @@ const WorkoutPlayer = ({
         return String(ex && ex.sets[curSet] ? ex.sets[curSet].peso || "" : "");
       })();
 
-  const setPeso = (v) => {
-    const arr = (pesosRef.current[id] || ex.sets.map(s => String(s.peso || ""))).slice();
-    arr[curSet] = v;
-    pesosRef.current[id] = arr;
-    onPatch({ pesos: { [id]: arr } });
-  };
+  const setPeso = (v) => onPeso(id, ex.sets.length, curSet, v);
 
   const advance = () => {
     if (cursor < exercises.length - 1) setCursor(cursor + 1);
@@ -901,7 +872,8 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   const [prog, setProg] = React.useState(() => {
     const raw = window.readSchedaProg(window.storage, dayK);
     const res = window.sanitizeSchedaProg(raw, days, planSig);
-    if (res.changed && window.storage) window.storage.set(window.schedaProgKey(dayK), res.prog);
+    // Silenziosa: è una pulizia, non un gesto, e non deve generare record.
+    if (res.changed && window.storage) window.storage.set(window.schedaProgKey(dayK), res.prog, { silent: true });
     return res.prog;
   });
   const completion    = prog.completion;      // { "Day#pos": [bool,…] }
@@ -925,9 +897,11 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   const [saving, setSaving] = React.useState(false);
   const [saveMsg, setSaveMsg] = React.useState("");
   const prevDoneRef = React.useRef(null); // null = da inizializzare al primo render
-  // Ref pesi condiviso per il salvataggio, keyed-by-id.
+  // Pesi a video, proposte comprese, keyed-by-id: li usano Player, spunta e salvataggio di
+  // sessione. Il blocco persistito (prog.pesos) tiene solo le serie toccate (Ruling 62).
+  const lastWeightsRef = React.useRef(null);
   const pesosRef = React.useRef(null);
-  if (pesosRef.current === null) pesosRef.current = Object.assign({}, prog.pesos);
+  if (pesosRef.current === null) pesosRef.current = window.schedaShownAll(prog.pesos, days, null);
 
   const [saveRequested, setSaveRequested] = React.useState(false); // fine Player → salva
   const [mode, setMode] = React.useState("list");   // "list" | "player"
@@ -944,7 +918,14 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   }, []);
 
   // Persiste una patch nel blocco piatto e aggiorna lo stato locale.
-  const patchProg = (patch) => {
+  const patchProg = (rawPatch) => {
+    // Una serie spuntata registra il peso a video, anche se era solo proposto.
+    const ticked = rawPatch.completion
+      ? window.schedaTickPesos(window.readSchedaProg(window.storage, dayK), rawPatch.completion, pesosRef.current)
+      : {};
+    const patch = Object.keys(ticked).length
+      ? Object.assign({}, rawPatch, { pesos: Object.assign({}, rawPatch.pesos, ticked) })
+      : rawPatch;
     // Prima serie completata del giorno → timestamp di inizio sessione
     // (usato dal riepilogo di chiusura per la durata reale).
     if (patch.completion && window.storage) {
@@ -968,6 +949,15 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
       names:         Object.assign({}, p.names,          names),
       sig:           planSig,
     }));
+  };
+
+  // Peso digitato su UNA serie: a video resta l'array intero, nel blocco solo questa serie.
+  const setPesoAt = (id, n, setIdx, value) => {
+    const arr = (pesosRef.current[id] || []).slice();
+    arr[setIdx] = value;
+    pesosRef.current[id] = arr;
+    const saved = window.readSchedaProg(window.storage, dayK).pesos[id];
+    patchProg({ pesos: { [id]: window.schedaPesoAt(saved, n, setIdx, value) } });
   };
 
   // Nota setup: salva in locale (il sync la porta agli altri device, nota per nota).
@@ -1005,8 +995,8 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
       // Piano cambiato in giornata → stessa pulizia del mount (sanitizeSchedaProg):
       // le spunte non passano a un altro esercizio nella stessa posizione.
       const res = window.sanitizeSchedaProg(window.readSchedaProg(st, dayK), curDays, window.schedaPlanSig(curDays));
-      if (res.changed) st.set(window.schedaProgKey(dayK), res.prog);
-      pesosRef.current = Object.assign({}, res.prog.pesos);
+      if (res.changed) st.set(window.schedaProgKey(dayK), res.prog, { silent: true });
+      pesosRef.current = window.schedaShownAll(res.prog.pesos, curDays, lastWeightsRef.current);
       setProg(res.prog);
     }
     if (has(`notes_${dayK}`) && !notesDirtyRef.current) setNotes(st.get(`notes_${dayK}`, "") || "");
@@ -1048,7 +1038,10 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
     if (!LD) return;
     const before = dayK;
     // data: { "nome esercizio": [peso_set1, peso_set2, ...] }
-    setSheetsWeights(LD.getUltimiPesi({ before }));
+    const last = LD.getUltimiPesi({ before });
+    lastWeightsRef.current = last;
+    pesosRef.current = window.schedaShownAll(window.readSchedaProg(window.storage, dayK).pesos, days, last);
+    setSheetsWeights(last);
     // Storico completo (ultime 12 serie per esercizio, raggruppate per data
     // da Insights.exerciseSessions): card nel Player + confronto nel riepilogo.
     setPesiHistory(LD.getPesi({ before }));
@@ -1287,11 +1280,8 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
               onSubstitute={(name) => patchProg({ substitutions: { [id]: name } })}
               sheetsWeights={sheetsWeights}
               exNote={exNotes[((substitutions[id] || ex.name) || "").toLowerCase()]}
-              savedPesos={pesosRef.current[id]}
-              onPesosChange={(pesos) => {
-                pesosRef.current[id] = pesos;
-                patchProg({ pesos: { [id]: pesos } });
-              }}
+              savedPesos={prog.pesos[id]}
+              onPesoChange={(j, v) => setPesoAt(id, ex.sets.length, j, v)}
             />
           );
         })}
@@ -1370,6 +1360,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
           autoRest={autoRest}
           setAutoRest={setAutoRest}
           onPatch={patchProg}
+          onPeso={setPesoAt}
           onClose={() => setMode("list")}
           onFinish={() => {
             // Fine dell'ultimo esercizio → chiudi il player e salva la sessione

@@ -170,6 +170,19 @@ if (typeof W.readSchedaProg === "function") {
   ok("sanitize: voce senza nome + piano cambiato → scartata", !("Giorno 1#0" in W.sanitizeSchedaProg(legacy, nuovo, sigN).prog.completion));
   ok("sanitize: giorno sparito dal piano → scartato",
     !("Giorno 9#0" in W.sanitizeSchedaProg({ completion: { "Giorno 9#0": [true] }, substitutions: {}, pesos: {}, names: {}, sig: null }, nuovo, sigN).prog.completion));
+
+  // Ruling 62: nel blocco solo le serie toccate, le proposte restano a video.
+  const exP = { name: "Panca", sets: [{ peso: "20" }, { peso: "20" }, { peso: "" }] };
+  ok("schedaPesoAt: scrive solo la serie indicata", JSON.stringify(W.schedaPesoAt(undefined, 3, 1, "55")) === JSON.stringify(["", "55", ""]));
+  ok("schedaPesoAt: tiene le serie già toccate", JSON.stringify(W.schedaPesoAt(["50", "", ""], 3, 1, "55")) === JSON.stringify(["50", "55", ""]));
+  ok("schedaShownPesos: toccato → ultime sessioni → default", JSON.stringify(W.schedaShownPesos(["50", "", ""], exP, { panca: [30, 31] })) === JSON.stringify(["50", "31", ""]));
+  ok("schedaShownPesos: senza storia il default della scheda", JSON.stringify(W.schedaShownPesos(undefined, exP, null)) === JSON.stringify(["20", "20", ""]));
+  ok("schedaShownAll: tutti gli esercizi di tutti i giorni", JSON.stringify(W.schedaShownAll({}, [{ key: "G1", exercises: [exP] }], null)) === JSON.stringify({ "G1#0": ["20", "20", ""] }));
+  const curP = { completion: { "G1#0": [true, false, false] }, pesos: { "G1#0": ["50", "", ""] } };
+  ok("schedaTickPesos: la serie appena spuntata registra il peso a video",
+    JSON.stringify(W.schedaTickPesos(curP, { "G1#0": [true, true, false] }, { "G1#0": ["50", "30", "30"] })) === JSON.stringify({ "G1#0": ["50", "30", ""] }));
+  ok("schedaTickPesos: togliere una spunta non scrive pesi", Object.keys(W.schedaTickPesos(curP, { "G1#0": [false, false, false] }, { "G1#0": ["50", "30", "30"] })).length === 0);
+  ok("schedaTickPesos: niente a video, niente peso", Object.keys(W.schedaTickPesos(curP, { "G1#0": [true, true, false] }, { "G1#0": ["50", "", ""] })).length === 0);
 }
 
 // ---- Suite Motion: motion.jsx (guard gsap/reduced-motion) ----
@@ -659,7 +672,11 @@ console.log("\nSuite RecordMap — gruppi, round-trip chiavi ⇄ record, spunte 
     const ex0 = day0.exercises[0];
     ok("setLog: id `${date}:${exerciseId}:${setIndex}` e data come records.mjs", same(find(built, "setLog", `${D}:${ex0.id}:1`).data,
       { date: D, exerciseId: ex0.id, exerciseName: ex0.name, planId: "wp", setIndex: 1, weight: "22.5", reps: null, done: true, substitutedWith: null }));
-    ok("setLog: serie non spuntata registrata → done:false (non assente)", find(built, "setLog", `${D}:${ex0.id}:2`).data.done === false);
+    ok("setLog: serie mai toccata (non spuntata, senza peso, ignota) → nessun record (Ruling 62)", !find(built, "setLog", `${D}:${ex0.id}:2`));
+    {
+      const known = RM.buildGroup(`sets:${D}`, getter(store), { ...ctx, records: () => [{ id: `${D}:${ex0.id}:2`, data: { date: D, exerciseId: ex0.id, exerciseName: ex0.name, setIndex: 2, done: true } }] }).records;
+      ok("setLog: serie già nota al sync, spunta tolta → done:false (non assente)", find(known, "setLog", `${D}:${ex0.id}:2`).data.done === false);
+    }
     ok("setLog: solo peso digitato → setLog done:false col peso", find(built, "setLog", `${D}:${day0.exercises[3].id}:0`).data.weight === "5");
     ok("setLog: sostituzione su ogni serie dell'esercizio", find(built, "setLog", `${D}:${day0.exercises[1].id}:0`).data.substitutedWith === "Chest press con manubri");
     ok("workoutSession: id `${date}:${dayId}`, startedAt da gymStart_", same(find(built, "workoutSession", `${D}:${day0.id}`).data,
@@ -1290,6 +1307,44 @@ await (async () => {
         A.sb.window.RecordMap.carryOver("setLog", { reps: 5 }, { reps: null, done: true }).reps === 5 &&
         A.sb.window.RecordMap.carryOver("setLog", { reps: 5 }, { reps: 7 }).reps === 7 &&
         A.sb.window.RecordMap.carryOver("mealCheck", { reps: 5 }, { done: true }).reps === undefined);
+    }
+
+    // ── Ruling 62: la spunta su una serie non riscrive le altre del gruppo ──
+    // B non ha visto le serie di A e spunta la terza dello stesso esercizio; poi un peso digitato senza spunta.
+    {
+      const env = await backend();
+      const A = device(env), B = device(env, { t: T0 + 5 });
+      await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN);
+      await A.sync(); await B.sync();
+      const WA = A.sb.window, WB = B.sb.window;
+      const days = WA.getSchedule().days, exK = WA.exId("Giorno 1", 0), ex0 = wp.data.days[0].exercises[0];
+      const meta = { names: { [exK]: WA.schedaNameAt(days, exK).name }, sig: WA.schedaPlanSig(days) };
+      const id = (i) => `${TODAY}:${ex0.id}:${i}`;
+      WA.writeSchedaProg(A.S, TODAY, { completion: { [exK]: [true, true, false] }, pesos: { [exK]: ["55", "56", ""] } }, meta);
+      await tick(); A.clock.t += 1000; await A.sync();
+      ok("Ruling 62: A manda solo le due serie fatte", A.sent().filter(c => c.collection === "setLog").length === 2);
+
+      WB.writeSchedaProg(B.S, TODAY, { completion: { [exK]: [false, false, true] }, pesos: { [exK]: ["", "", "30"] } }, meta);
+      await tick(); B.clock.t += 2000; await B.sync();
+      A.clock.t += 3000; await A.sync();
+      const srv = await serverRecords(env);
+      ok("Ruling 62: la spunta di B non annulla le serie di A", [0, 1].every(i => { const r = find(srv, "setLog", id(i)); return r && r.data.done === true; }), JSON.stringify(srv.filter(r => r.collection === "setLog").map(r => r.data)));
+      ok("Ruling 62: i pesi di A restano", find(srv, "setLog", id(0)).data.weight === "55" && find(srv, "setLog", id(1)).data.weight === "56");
+      ok("Ruling 62: arriva anche la serie di B, col suo peso", find(srv, "setLog", id(2)).data.done === true && find(srv, "setLog", id(2)).data.weight === "30");
+      const pa = WA.readSchedaProg(A.S, TODAY), pb = WB.readSchedaProg(B.S, TODAY);
+      ok("Ruling 62: le tre serie sono fatte su entrambi i device", [pa, pb].every(p => p.completion[exK].every(Boolean)), JSON.stringify([pa.completion, pb.completion]));
+
+      // sanitize riempie le serie mancanti: nessun record nuovo, nemmeno al primo gesto dopo.
+      const n0 = B.net.requests.length;
+      const exK2 = WB.exId("Giorno 1", 1);
+      WB.writeSchedaProg(B.S, TODAY, { pesos: { [exK2]: ["70", "", ""] } }, { names: { [exK2]: WB.schedaNameAt(days, exK2).name }, sig: WB.schedaPlanSig(days) });
+      await tick(); B.clock.t += 1000; await B.sync();
+      const typed = B.sent(n0).filter(c => c.collection === "setLog");
+      ok("Ruling 62: peso digitato senza spunta si sincronizza, una serie sola", typed.length === 1 && typed[0].data.weight === "70" && typed[0].data.done === false, JSON.stringify(typed.map(c => c.data)));
+      const fill = WB.sanitizeSchedaProg({ completion: { [exK2]: [true] }, substitutions: {}, pesos: {}, names: { [exK2]: WB.schedaNameAt(days, exK2).name }, sig: null }, days, WB.schedaPlanSig(days));
+      ok("Ruling 62: sanitize riempie con false, senza segnare serie toccate", fill.prog.completion[exK2].length === days[0].exercises[1].sets.length && fill.prog.completion[exK2].filter(Boolean).length === 1);
+      const src = readFileSync(join(ROOT, "screens", "scheda.jsx"), "utf8");
+      ok("Ruling 62: le pulizie di sanitize in Scheda sono silenziose", (src.match(/schedaProgKey\(dayK\), res\.prog, \{ silent: true \}/g) || []).length === 2 && !/schedaProgKey\(dayK\), res\.prog\)/.test(src));
     }
 
     // ── Task 17 (fase 3): cardio importato da Salute dall'app nativa (`value.id` = "hk-<uuid>") ──
