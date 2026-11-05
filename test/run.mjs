@@ -1254,13 +1254,13 @@ await (async () => {
       await tick(); A.clock.t += 1000; const n1 = A.net.requests.length; await A.sync();
       ok("piano cambiato: modifiche successive → ancora nessun tombstone", !A.sent(n1).some(c => c.deleted) &&
         doneIds.every(id => !find(B.SV.listRecords("setLog"), "setLog", id).deleted));
-      // Il comportamento normale resta: serie di un esercizio DEL piano attivo tolta dai progressi → tombstone.
+      // Ruling 64: nemmeno una serie di un esercizio DEL piano attivo tolta dai progressi va in tombstone.
       const p3 = W.readSchedaProg(A.S, TODAY);
       const comp3 = { ...p3.completion }; delete comp3[ex2];
       A.S.set(W.schedaProgKey(TODAY), { ...p3, completion: comp3, pesos: {}, substitutions: {} });
       await tick();
-      ok("esercizio del piano attivo tolto dai progressi → tombstone come prima",
-        Object.entries(A.S.get("v2outbox") || {}).some(([k, c]) => k.startsWith("setLog/") && k.includes(np.data.days[0].exercises[1].id) && c.deleted));
+      ok("esercizio del piano attivo tolto dai progressi → nessun tombstone (Ruling 64)",
+        !Object.entries(A.S.get("v2outbox") || {}).some(([k, c]) => k.startsWith("setLog/") && c.deleted));
       await A.sync();
     }
 
@@ -1367,6 +1367,92 @@ await (async () => {
       ok("Ruling 62: sanitize riempie con false, senza segnare serie toccate", fill.prog.completion[exK2].length === days[0].exercises[1].sets.length && fill.prog.completion[exK2].filter(Boolean).length === 1);
       const src = readFileSync(join(ROOT, "screens", "scheda.jsx"), "utf8");
       ok("Ruling 62: le pulizie di sanitize in Scheda sono silenziose", (src.match(/schedaProgKey\(dayK\), res\.prog, \{ silent: true \}/g) || []).length === 2 && !/schedaProgKey\(dayK\), res\.prog\)/.test(src));
+    }
+
+    // ── Ruling 64: il gruppo sets: non tombstona mai un setLog ──
+    // A fa le serie, C (l'app) cambia la struttura del piano attivo con gli stessi id, B riceve il piano, apre la
+    // Scheda e fa un gesto. Gli id esercizio restano, le posizioni no: il blocco di B va rifatto dai record.
+    for (const variant of ["scambio", "inserito in alto", "una serie in meno"]) {
+      const env = await backend();
+      const A = device(env), B = device(env, { t: T0 + 5 }), C = device(env, { t: T0 + 7 });
+      await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN); await C.SV.setToken(TOKEN);
+      await A.sync(); await B.sync(); await C.sync();
+      const WA = A.sb.window, WB = B.sb.window;
+      const days = WA.getSchedule().days, k0 = WA.exId("Giorno 1", 0), k1 = WA.exId("Giorno 1", 1);
+      const plan0 = C.S.get("plan_workout"), [e0, e1, e2] = plan0.data.days[0].exercises;
+      const names = { [k0]: e0.name.toLowerCase(), [k1]: e1.name.toLowerCase() };
+      const all = (n, v) => new Array(n).fill(v);
+      WA.writeSchedaProg(A.S, TODAY, { completion: { [k0]: all(e0.sets, true), [k1]: all(e1.sets, true) }, pesos: { [k0]: all(e0.sets, "55"), [k1]: all(e1.sets, "66") } },
+        { names, sig: WA.schedaPlanSig(days) });
+      await tick(); A.clock.t += 1000; await A.sync();
+      B.clock.t += 2000; await B.sync();
+      const doneIds = [...all(e0.sets, 0).map((_, i) => `${TODAY}:${e0.id}:${i}`), ...all(e1.sets, 0).map((_, i) => `${TODAY}:${e1.id}:${i}`)];
+      const alive = async () => { const srv = await serverRecords(env); return doneIds.every(id => { const r = find(srv, "setLog", id); return r && !r.deleted && r.data.done === true; }); };
+      ok(`Ruling 64 (${variant}): prima le serie sono sul server`, await alive());
+
+      const p1 = J(plan0), ex = p1.data.days[0].exercises;
+      if (variant === "scambio") [ex[0], ex[1]] = [ex[1], ex[0]];
+      else if (variant === "inserito in alto") ex.unshift({ ...J(ex[2]), id: `${ex[0].id}-nuovo`, name: "Esercizio nuovo" });
+      else ex[0].sets = e0.sets - 1;
+      C.SV.putRecords([{ collection: "workoutPlan", id: p1.id, data: p1.data }]);
+      C.clock.t += 3000; await C.sync();
+      B.clock.t += 5000; await B.sync();
+      ok(`Ruling 64 (${variant}): B riceve il piano`, JSON.stringify(B.S.get("plan_workout").data) === JSON.stringify(p1.data));
+
+      // B apre la Scheda: stessa pulizia del mount, silenziosa.
+      const cur = WB.getSchedule().days, sig = WB.schedaPlanSig(cur);
+      const opened = WB.sanitizeSchedaProg(WB.readSchedaProg(B.S, TODAY), cur, sig);
+      if (opened.changed) B.S.set(WB.schedaProgKey(TODAY), opened.prog, { silent: true });
+      const pos = (id) => p1.data.days[0].exercises.findIndex(e => e.id === id);
+      const kOf = (id) => WB.exId("Giorno 1", pos(id));
+      const shown = (id) => (opened.prog.completion[kOf(id)] || []);
+      ok(`Ruling 64 (${variant}): la Scheda di B mostra le serie fatte al posto giusto`,
+        shown(e0.id).length === ex[pos(e0.id)].sets && shown(e0.id).every(Boolean) && shown(e1.id).length === e1.sets && shown(e1.id).every(Boolean) &&
+        (opened.prog.pesos[kOf(e0.id)] || [])[0] === "55" && (opened.prog.pesos[kOf(e1.id)] || [])[0] === "66", JSON.stringify(opened.prog));
+
+      // Gesto su un altro esercizio.
+      const kOther = WB.exId("Giorno 1", pos(e2.id));
+      const meta = (k) => ({ names: { [k]: WB.schedaNameAt(cur, k).name }, sig });
+      const n0 = B.net.requests.length;
+      WB.writeSchedaProg(B.S, TODAY, { pesos: { [kOther]: WB.schedaPesoAt(undefined, e2.sets, 0, "70") } }, meta(kOther));
+      await tick(); B.clock.t += 1000; await B.sync();
+      ok(`Ruling 64 (${variant}): il gesto su un altro esercizio manda una serie sola, nessun tombstone`,
+        B.sent(n0).filter(c => c.collection === "setLog").length === 1 && !B.sent(n0).some(c => c.deleted), JSON.stringify(B.sent(n0).map(c => [c.id, c.deleted])));
+      ok(`Ruling 64 (${variant}): dopo il gesto le serie sono vive e fatte sul server`, await alive());
+
+      // Gesto sullo stesso esercizio: un peso corretto sulla prima serie non annulla le altre.
+      const n1 = B.net.requests.length, kE = kOf(e0.id);
+      WB.writeSchedaProg(B.S, TODAY, { pesos: { [kE]: WB.schedaPesoAt(WB.readSchedaProg(B.S, TODAY).pesos[kE], ex[pos(e0.id)].sets, 0, "56") } }, meta(kE));
+      await tick(); B.clock.t += 1000; await B.sync();
+      const srv = await serverRecords(env);
+      ok(`Ruling 64 (${variant}): il gesto sullo stesso esercizio cambia solo quella serie`,
+        B.sent(n1).filter(c => c.collection === "setLog").map(c => c.id).join() === `${TODAY}:${e0.id}:0` && find(srv, "setLog", `${TODAY}:${e0.id}:0`).data.done === true && find(srv, "setLog", `${TODAY}:${e0.id}:0`).data.weight === "56" && await alive(),
+        JSON.stringify(B.sent(n1).map(c => [c.id, c.deleted, c.data && c.data.done])));
+      ok(`Ruling 64 (${variant}): nessun doppione sotto id name:`, !srv.some(r => r.collection === "setLog" && r.id.includes(":name:")));
+      const hist = B.SV.listRecords("setLog").filter(r => !r.deleted && r.data.done === true && doneIds.includes(r.id)).length;
+      ok(`Ruling 64 (${variant}): lo storico conta tutte le serie fatte`, hist === doneIds.length, `${hist} su ${doneIds.length}`);
+
+      // Spunta tolta: resta done:false, mai tombstone.
+      const n2 = B.net.requests.length;
+      const comp = (WB.readSchedaProg(B.S, TODAY).completion[kE] || []).slice(); comp[1] = false;
+      WB.writeSchedaProg(B.S, TODAY, { completion: { [kE]: comp } }, meta(kE));
+      await tick(); B.clock.t += 1000; await B.sync();
+      const off = find(await serverRecords(env), "setLog", `${TODAY}:${e0.id}:1`);
+      ok(`Ruling 64 (${variant}): spunta tolta = done:false, vivo, col suo peso`, off && !off.deleted && off.data.done === false && off.data.weight === "55" && !B.sent(n2).some(c => c.deleted), JSON.stringify(off));
+    }
+
+    // Blocco tolto del tutto: i setLog restano vivi lo stesso.
+    {
+      const env = await backend();
+      const A = device(env);
+      await A.SV.setToken(TOKEN); await A.sync();
+      const W = A.sb.window, days = W.getSchedule().days, k0 = W.exId("Giorno 1", 0);
+      W.writeSchedaProg(A.S, TODAY, { completion: { [k0]: [true, true] }, pesos: { [k0]: ["55", "55"] } }, { names: { [k0]: W.schedaNameAt(days, k0).name }, sig: W.schedaPlanSig(days) });
+      await tick(); A.clock.t += 1000; await A.sync();
+      const n0 = A.net.requests.length;
+      A.S.remove(W.schedaProgKey(TODAY));
+      await tick(); A.clock.t += 1000; await A.sync();
+      ok("Ruling 64: nemmeno togliere tutto il blocco tombstona i setLog", !A.sent(n0).some(c => c.collection === "setLog" && c.deleted) && A.SV.listRecords("setLog").filter(r => !r.deleted && r.data.date === TODAY).length === 2);
     }
 
     // ── Task 17 (fase 3): cardio importato da Salute dall'app nativa (`value.id` = "hk-<uuid>") ──

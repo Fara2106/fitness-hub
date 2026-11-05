@@ -3,7 +3,7 @@
 //   window.RecordMap = {
 //     groupsForKey(key, value?, ctx?) → string[]            gruppi da ricalcolare quando cambia `key`
 //     buildGroup(groupId, get, ctx)   → { records: [{collection,id,data}], window?: {collection,minId},
-//                                         protect?: {collection, planExerciseIds} }
+//                                         protect?: {collection} }
 //     isProtected(groupResult, collection, id) → boolean   id da non tombstonare mai (Ruling 12)
 //     carryOver(collection, prevData, nextData) → nextData  campi che la PWA non gestisce, tenuti dal record noto
 //     keysForRecord(record, ctx)      → string[]            chiavi locali da ricostruire
@@ -352,12 +352,12 @@
   // setLog da schedaProg_<data>: una serie per indice toccato (spuntata, col peso, sostituita, o già nota).
   // Esercizio: names[exKey] → gymSaved_ della data → posizione nel piano attivo (records.mjs);
   // senza nome e piano attivo valido da dopo quella data → scartato.
-  // protect (Ruling 12): i setLog di esercizi che NON sono nel piano attivo (piano cambiato in
-  // giornata, o id `name:`) non si tombstonano mai: sono storico, la Scheda non li mostra più.
+  // protect (Ruling 12, esteso dal 64): nessun setLog si tombstona mai da qui. Una spunta tolta è
+  // done:false; una voce sparita dal blocco è di solito una posizione cambiata, non un gesto.
   function setsGroup(date, get, ctx) {
     const wi = workoutIndex(ctx && ctx.workout);
     if (!wi) return noTouch("setLog");
-    const protect = { collection: "setLog", planExerciseIds: [...wi.byId.keys()] };
+    const protect = { collection: "setLog" };
     const prog = get(`schedaProg_${date}`, null);
     const records = [];
     if (!isObj(prog)) return { records, protect };
@@ -414,14 +414,10 @@
     return { records, protect };
   }
 
-  // Ruling 12: un id è protetto (mai tombstone dal motore) se il gruppo lo dichiara in `protect`.
-  // setLog: id `${date}:${exerciseId}:${setIndex}` → protetto se exerciseId non è del piano attivo.
+  // Ruling 12/64: i record della collezione dichiarata in `protect` non si tombstonano mai dal motore.
   function isProtected(res, collection, id) {
     const p = res && res.protect;
-    if (!p || p.collection !== collection) return false;
-    const s = String(id), cut = s.lastIndexOf(":");
-    if (cut <= 11) return false;
-    return !p.planExerciseIds.includes(s.slice(11, cut));
+    return !!p && p.collection === collection;
   }
 
   // Campi che la PWA non registra ma l'app nativa sì: ricalcolando un gruppo non vanno azzerati.
@@ -684,6 +680,25 @@
     out[key] = prog;
   }
 
+  // Ruling 64: piano attivo cambiato (stessi id esercizio, posizioni o serie diverse) → il blocco si
+  // rifà dai setLog del giorno. Senza, sanitize scarterebbe le voci spostate e il primo gesto su quegli
+  // esercizi riscriverebbe done:false le serie fatte. Nessun id in comune (piano nuovo): blocco invariato,
+  // decide sanitize per nome e posizione. Le voci non coperte dai record restano se ancora valide.
+  function rebaseProg(cur, date, listRecords, ctx) {
+    const recs = (listRecords("setLog") || []).filter(live);
+    const out = {};
+    rebuildProg("prog", date, (_, d) => recs.filter((r) => r.data.date === d), ctx, out);
+    const fresh = out.prog;
+    if (!fresh) return cur;
+    if (!isObj(cur)) return fresh;
+    const keep = (o) => Object.fromEntries(Object.entries(isObj(o) ? o : {}).filter(([id]) => !(id in fresh.names)));
+    const merged = { sig: cur.sig || null };
+    ["completion", "substitutions", "pesos", "names"].forEach((f) => { merged[f] = Object.assign(keep(cur[f]), fresh[f]); });
+    const wi = workoutIndex(ctx && ctx.workout), PC = window.PlanConv;
+    if (typeof window.sanitizeSchedaProg !== "function" || !PC) return merged;
+    return window.sanitizeSchedaProg(merged, PC.toLegacyScheda(wi.plan.data).days, fresh.sig).prog;
+  }
+
   // muscleSets_<data> come handleSaveSession di scheda.jsx: per i giorni delle sessioni chiuse,
   // serie spuntate per gruppo del primo muscolo dell'esercizio del piano, in ordine di esercizio.
   function rebuildMuscleSets(key, date, onDate, ctx, out) {
@@ -703,6 +718,6 @@
     out[key] = daily;
   }
 
-  const RecordMap = { groupsForKey, buildGroup, keysForRecord, rebuildKeys, isProtected, carryOver, DIRECT, MUSCLE_GROUP };
+  const RecordMap = { groupsForKey, buildGroup, keysForRecord, rebuildKeys, rebaseProg, isProtected, carryOver, DIRECT, MUSCLE_GROUP };
   window.RecordMap = RecordMap;
 })();

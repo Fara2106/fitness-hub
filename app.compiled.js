@@ -2200,8 +2200,7 @@ window.buildDefaultNotifConfig = function () {
     const wi = workoutIndex(ctx && ctx.workout);
     if (!wi) return noTouch("setLog");
     const protect = {
-      collection: "setLog",
-      planExerciseIds: [...wi.byId.keys()]
+      collection: "setLog"
     };
     const prog = get(`schedaProg_${date}`, null);
     const records = [];
@@ -2269,11 +2268,7 @@ window.buildDefaultNotifConfig = function () {
   }
   function isProtected(res, collection, id) {
     const p = res && res.protect;
-    if (!p || p.collection !== collection) return false;
-    const s = String(id),
-      cut = s.lastIndexOf(":");
-    if (cut <= 11) return false;
-    return !p.planExerciseIds.includes(s.slice(11, cut));
+    return !!p && p.collection === collection;
   }
   function carryOver(collection, prev, next) {
     if (collection === "setLog" && isObj(prev) && isObj(next) && next.reps == null && Number.isFinite(prev.reps)) {
@@ -2631,6 +2626,25 @@ window.buildDefaultNotifConfig = function () {
     if (typeof window.schedaPlanSig === "function" && PC) prog.sig = window.schedaPlanSig(PC.toLegacyScheda(wi.plan.data).days);
     out[key] = prog;
   }
+  function rebaseProg(cur, date, listRecords, ctx) {
+    const recs = (listRecords("setLog") || []).filter(live);
+    const out = {};
+    rebuildProg("prog", date, (_, d) => recs.filter(r => r.data.date === d), ctx, out);
+    const fresh = out.prog;
+    if (!fresh) return cur;
+    if (!isObj(cur)) return fresh;
+    const keep = o => Object.fromEntries(Object.entries(isObj(o) ? o : {}).filter(([id]) => !(id in fresh.names)));
+    const merged = {
+      sig: cur.sig || null
+    };
+    ["completion", "substitutions", "pesos", "names"].forEach(f => {
+      merged[f] = Object.assign(keep(cur[f]), fresh[f]);
+    });
+    const wi = workoutIndex(ctx && ctx.workout),
+      PC = window.PlanConv;
+    if (typeof window.sanitizeSchedaProg !== "function" || !PC) return merged;
+    return window.sanitizeSchedaProg(merged, PC.toLegacyScheda(wi.plan.data).days, fresh.sig).prog;
+  }
   function rebuildMuscleSets(key, date, onDate, ctx, out) {
     const sessions = onDate("workoutSession", date).filter(r => r.data.done);
     if (!sessions.length) return;
@@ -2652,6 +2666,7 @@ window.buildDefaultNotifConfig = function () {
     buildGroup,
     keysForRecord,
     rebuildKeys,
+    rebaseProg,
     isProtected,
     carryOver,
     DIRECT,
@@ -3060,6 +3075,24 @@ window.buildDefaultNotifConfig = function () {
     });
     return changed;
   }
+  function rebaseProgs(changedKeys, c) {
+    if (!changedKeys.includes("plan_workout")) return [];
+    const changed = [];
+    S.keys().filter(k => /^schedaProg_\d{4}-\d{2}-\d{2}$/.test(k)).forEach(k => {
+      const cur = S.get(k, null);
+      let next = cur;
+      try {
+        next = RM().rebaseProg(cur, k.slice("schedaProg_".length), listEffective, c);
+      } catch (e) {
+        logErr(`rebaseProg ${k}: ${e.message}`);
+      }
+      if (next && canon(next) !== canon(cur)) {
+        S.set(k, next, SILENT);
+        changed.push(k);
+      }
+    });
+    return changed;
+  }
   function refreshGroupIndex(keys, c) {
     const groups = new Set();
     keys.forEach(k => groupsOfKey(k, c).forEach(g => groups.add(g)));
@@ -3084,7 +3117,7 @@ window.buildDefaultNotifConfig = function () {
     });
     const changed = plans ? refreshPlans() : [];
     const c = ctx();
-    const rebuilt = applyKeys(keys, c, skip);
+    const rebuilt = [...rebaseProgs(changed, c), ...applyKeys(keys, c, skip)];
     refreshGroupIndex(rebuilt, c);
     changed.push(...rebuilt);
     if (changed.length) emit("lfh-data", {
@@ -3521,7 +3554,7 @@ window.buildDefaultNotifConfig = function () {
     persistOutbox();
     const changed = plans ? refreshPlans() : [];
     const c = ctx();
-    const rebuilt = applyKeys(keys, c, null);
+    const rebuilt = [...rebaseProgs(changed, c), ...applyKeys(keys, c, null)];
     if (firstDone) refreshGroupIndex(rebuilt, c);
     changed.push(...rebuilt);
     if (changed.length) emit("lfh-data", {

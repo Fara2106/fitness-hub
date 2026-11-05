@@ -345,6 +345,19 @@
     return changed;
   }
 
+  // Ruling 64: piano scheda cambiato → i blocchi locali seguono gli esercizi (id), non le posizioni.
+  function rebaseProgs(changedKeys, c) {
+    if (!changedKeys.includes("plan_workout")) return [];
+    const changed = [];
+    S.keys().filter((k) => /^schedaProg_\d{4}-\d{2}-\d{2}$/.test(k)).forEach((k) => {
+      const cur = S.get(k, null);
+      let next = cur;
+      try { next = RM().rebaseProg(cur, k.slice("schedaProg_".length), listEffective, c); } catch (e) { logErr(`rebaseProg ${k}: ${e.message}`); }
+      if (next && canon(next) !== canon(cur)) { S.set(k, next, SILENT); changed.push(k); }
+    });
+    return changed;
+  }
+
   // Dopo una ricostruzione v2grp segue lo stato locale (una cancellazione futura tombstona anche ciò che
   // è arrivato da un altro device). Niente coda: le modifiche locali in sospeso sono già in v2outbox.
   function refreshGroupIndex(keys, c) {
@@ -366,7 +379,7 @@
     });
     const changed = plans ? refreshPlans() : [];
     const c = ctx();
-    const rebuilt = applyKeys(keys, c, skip);
+    const rebuilt = [...rebaseProgs(changed, c), ...applyKeys(keys, c, skip)];
     refreshGroupIndex(rebuilt, c);
     changed.push(...rebuilt);
     if (changed.length) emit("lfh-data", { keys: changed });
@@ -647,7 +660,7 @@
     persistOutbox();
     const changed = plans ? refreshPlans() : [];
     const c = ctx();
-    const rebuilt = applyKeys(keys, c, null);
+    const rebuilt = [...rebaseProgs(changed, c), ...applyKeys(keys, c, null)];
     if (firstDone) refreshGroupIndex(rebuilt, c);
     changed.push(...rebuilt);
     if (changed.length) emit("lfh-data", { keys: changed });

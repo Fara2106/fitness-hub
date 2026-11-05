@@ -75,7 +75,7 @@ Le fixture di parità (`node dev/gen-swift-fixtures.mjs <outDir>`: record prodot
 - `bodyMeasure`: `{ date, <misura>: number … }`, chiavi libere in cm (`vita`, `petto`, `braccio`…).
 - `setLog`: `reps` è `null` (la PWA non registra le ripetizioni fatte); `weight` è una stringa libera (`"82,5"`, `"rosso"` per l'elastico, `""`).
 - `settings`: `{ value }` con `value` di qualunque tipo JSON (`excludedFoods` = array di stringhe, `spesaFreq`/`weightGoal`/`bodyWeight` = numeri, `lang`/`theme` = stringhe).
-- `mealCheck` / `supplementCheck` / `shoppingCheck`: spunta tolta = `done: false` / `checked: false` (mai tombstone).
+- `mealCheck` / `supplementCheck` / `shoppingCheck` / `setLog`: spunta tolta = `done: false` / `checked: false` (mai tombstone).
 - `workoutSession`: scritto solo a sessione chiusa (`done: true`), `startedAt` ms o `null`.
 
 ## Accesso (dal Task 9A, fase 3)
