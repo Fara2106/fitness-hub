@@ -173,14 +173,16 @@ if (typeof W.readSchedaProg === "function") {
 
   // Ruling 62: nel blocco solo le serie toccate, le proposte restano a video.
   const exP = { name: "Panca", sets: [{ peso: "20" }, { peso: "20" }, { peso: "" }] };
-  ok("schedaPesoAt: scrive solo la serie indicata", JSON.stringify(W.schedaPesoAt(undefined, 3, 1, "55")) === JSON.stringify(["", "55", ""]));
-  ok("schedaPesoAt: tiene le serie già toccate", JSON.stringify(W.schedaPesoAt(["50", "", ""], 3, 1, "55")) === JSON.stringify(["50", "55", ""]));
-  ok("schedaShownPesos: toccato → ultime sessioni → default", JSON.stringify(W.schedaShownPesos(["50", "", ""], exP, { panca: [30, 31] })) === JSON.stringify(["50", "31", ""]));
+  ok("schedaPesoAt: scrive solo la serie indicata", JSON.stringify(W.schedaPesoAt(undefined, 3, 1, "55")) === JSON.stringify([null, "55", null]));
+  ok("schedaPesoAt: tiene le serie già toccate", JSON.stringify(W.schedaPesoAt(["50", null, null], 3, 1, "55")) === JSON.stringify(["50", "55", null]));
+  ok("schedaPesoAt: un campo svuotato resta \"\", distinto da mai toccato", JSON.stringify(W.schedaPesoAt(["50", null, null], 3, 0, "")) === JSON.stringify(["", null, null]));
+  ok("schedaShownPesos: toccato → ultime sessioni → default", JSON.stringify(W.schedaShownPesos(["50", null, null], exP, { panca: [30, 31] })) === JSON.stringify(["50", "31", ""]));
+  ok("schedaShownPesos: un campo svuotato a mano resta vuoto, niente proposta", JSON.stringify(W.schedaShownPesos(["", null, null], exP, { panca: [30, 31] })) === JSON.stringify(["", "31", ""]));
   ok("schedaShownPesos: senza storia il default della scheda", JSON.stringify(W.schedaShownPesos(undefined, exP, null)) === JSON.stringify(["20", "20", ""]));
   ok("schedaShownAll: tutti gli esercizi di tutti i giorni", JSON.stringify(W.schedaShownAll({}, [{ key: "G1", exercises: [exP] }], null)) === JSON.stringify({ "G1#0": ["20", "20", ""] }));
-  const curP = { completion: { "G1#0": [true, false, false] }, pesos: { "G1#0": ["50", "", ""] } };
+  const curP = { completion: { "G1#0": [true, false, false] }, pesos: { "G1#0": ["50", null, null] } };
   ok("schedaTickPesos: la serie appena spuntata registra il peso a video",
-    JSON.stringify(W.schedaTickPesos(curP, { "G1#0": [true, true, false] }, { "G1#0": ["50", "30", "30"] })) === JSON.stringify({ "G1#0": ["50", "30", ""] }));
+    JSON.stringify(W.schedaTickPesos(curP, { "G1#0": [true, true, false] }, { "G1#0": ["50", "30", "30"] })) === JSON.stringify({ "G1#0": ["50", "30", null] }));
   ok("schedaTickPesos: togliere una spunta non scrive pesi", Object.keys(W.schedaTickPesos(curP, { "G1#0": [false, false, false] }, { "G1#0": ["50", "30", "30"] })).length === 0);
   ok("schedaTickPesos: niente a video, niente peso", Object.keys(W.schedaTickPesos(curP, { "G1#0": [true, true, false] }, { "G1#0": ["50", "", ""] })).length === 0);
 }
@@ -651,7 +653,7 @@ console.log("\nSuite RecordMap — gruppi, round-trip chiavi ⇄ record, spunte 
       [`schedaProg_${D}`]: {
         completion: { "Giorno 1#0": [true, true, false], "Giorno 1#1": [false, true, false] },
         substitutions: { "Giorno 1#1": "Chest press con manubri" },
-        pesos: { "Giorno 1#0": ["20", "22.5", ""], "Giorno 1#3": ["5", "5"] },
+        pesos: { "Giorno 1#0": ["20", "22.5", null], "Giorno 1#1": [null, "", null], "Giorno 1#3": ["5", "5"] },
         names: { "Giorno 1#0": day0.exercises[0].name.toLowerCase(), "Giorno 1#1": day0.exercises[1].name.toLowerCase(), "Giorno 1#3": day0.exercises[3].name.toLowerCase() },
         sig,
       },
@@ -1357,9 +1359,9 @@ await (async () => {
       ok("Ruling 62: le tre serie sono fatte su entrambi i device", [pa, pb].every(p => p.completion[exK].every(Boolean)), JSON.stringify([pa.completion, pb.completion]));
 
       // sanitize riempie le serie mancanti: nessun record nuovo, nemmeno al primo gesto dopo.
-      const n0 = B.net.requests.length;
       const exK2 = WB.exId("Giorno 1", 1);
-      WB.writeSchedaProg(B.S, TODAY, { pesos: { [exK2]: ["70", "", ""] } }, { names: { [exK2]: WB.schedaNameAt(days, exK2).name }, sig: WB.schedaPlanSig(days) });
+      const n0 = B.net.requests.length;
+      WB.writeSchedaProg(B.S, TODAY, { pesos: { [exK2]: ["70", null, null] } }, { names: { [exK2]: WB.schedaNameAt(days, exK2).name }, sig: WB.schedaPlanSig(days) });
       await tick(); B.clock.t += 1000; await B.sync();
       const typed = B.sent(n0).filter(c => c.collection === "setLog");
       ok("Ruling 62: peso digitato senza spunta si sincronizza, una serie sola", typed.length === 1 && typed[0].data.weight === "70" && typed[0].data.done === false, JSON.stringify(typed.map(c => c.data)));

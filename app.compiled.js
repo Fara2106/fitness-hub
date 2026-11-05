@@ -2610,15 +2610,15 @@ window.buildDefaultNotifConfig = function () {
     }] of byEx) {
       const n = Math.max(ex.sets || 0, ...logs.map(l => l.setIndex + 1));
       const comp = new Array(n).fill(false),
-        pes = new Array(n).fill("");
+        pes = new Array(n).fill(null);
       let sub = null;
       logs.forEach(l => {
         comp[l.setIndex] = !!l.done;
-        pes[l.setIndex] = hasValue(l.weight) ? String(l.weight) : "";
+        pes[l.setIndex] = hasValue(l.weight) ? String(l.weight) : l.done ? "" : null;
         if (sub === null && hasValue(l.substitutedWith)) sub = l.substitutedWith;
       });
       if (comp.some(Boolean)) prog.completion[exKey] = comp;
-      if (pes.some(w => w !== "")) prog.pesos[exKey] = pes;
+      if (pes.some(w => w !== null)) prog.pesos[exKey] = pes;
       if (sub !== null) prog.substitutions[exKey] = sub;
       prog.names[exKey] = nameKey(ex.name);
     }
@@ -7402,7 +7402,7 @@ function writeSchedaProg(storage, dateKey, patch, meta) {
   storage.set(schedaProgKey(dateKey), next);
 }
 function schedaPesoAt(saved, n, setIdx, value) {
-  const arr = new Array(Math.max(n, setIdx + 1)).fill("");
+  const arr = new Array(Math.max(n, setIdx + 1)).fill(null);
   (saved || []).forEach((v, i) => {
     if (i < arr.length && v != null) arr[i] = v;
   });
@@ -7413,7 +7413,7 @@ function schedaShownPesos(saved, ex, lastWeights) {
   const row = lastWeights && lastWeights[String(ex.name || "").toLowerCase()];
   return (ex.sets || []).map((s, i) => {
     const v = saved && saved[i];
-    if (v != null && v !== "") return String(v);
+    if (v != null) return String(v);
     if (row && row[i] != null) return String(row[i]);
     return String(s.peso || "");
   });
@@ -7480,7 +7480,7 @@ function sanitizeSchedaProg(prog, days, sig) {
       return arr.slice(0, cur.n).concat(new Array(Math.max(0, cur.n - arr.length)).fill(fill));
     };
     if (id in prog.completion) out.completion[id] = fit(prog.completion[id], false);
-    if (id in prog.pesos) out.pesos[id] = fit(prog.pesos[id], "");
+    if (id in prog.pesos) out.pesos[id] = fit(prog.pesos[id], null);
     if (id in prog.substitutions) out.substitutions[id] = prog.substitutions[id];
     out.names[id] = cur.name;
     if (!saved) changed = true;
@@ -10230,11 +10230,7 @@ const ExerciseCard = ({
   const [showSubs, setShowSubs] = React.useState(false);
   React.useEffect(() => {
     setPesos(window.schedaShownPesos(savedPesos, ex, sheetsWeights));
-  }, [sheetsWeights]);
-  React.useEffect(() => {
-    if (!savedPesos) return;
-    setPesos(p => p.map((v, i) => savedPesos[i] != null && savedPesos[i] !== "" ? String(savedPesos[i]) : v));
-  }, [savedPesos]);
+  }, [sheetsWeights, savedPesos, ex]);
   const handlePesoChange = (i, v) => {
     setPesos(p => {
       const n = [...p];

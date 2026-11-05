@@ -580,6 +580,53 @@ await scenario("Serie mai toccate — B offline apre la Scheda e non cancella le
   await A.ctx.close(); await B.ctx.close();
 });
 
+// P-M2: svuotato a mano resta vuoto, e a video c'è ciò che registra la spunta.
+await scenario("Peso svuotato a mano — resta vuoto, vista e spunta coincidono", async () => {
+  const be = await newBackend(); await seedPlans(be);
+  const { ctx, page } = await openApp(IPHONE, be, { seed: SEED_FIRST });
+  const d = await today(page);
+  await seedLastWeights(be, d);
+  await sync(page);
+  const W = 'input[placeholder="kg o elastico"]';
+  const val = (i) => page.locator(W).nth(i).inputValue();
+  const salta = () => page.getByRole("button", { name: /^(Salta|Riprendi)$/ });
+  await nav(page, "Scheda"); await page.waitForTimeout(600);
+  await page.locator(W).first().fill(""); await page.waitForTimeout(300);
+  ok("il campo svuotato resta vuoto", (await val(0)) === "" && (await val(1)) === "30", `${await val(0)}|${await val(1)}`);
+
+  const days = await page.getByRole("button", { name: /^G\d/ }).count();
+  await page.getByRole("button", { name: /^G2/ }).click(); await page.waitForTimeout(300);
+  await page.getByRole("button", { name: /^G1/ }).click(); await page.waitForTimeout(400);
+  ok("cambio giorno: resta vuoto", days > 1 && (await val(0)) === "", await val(0));
+  await page.reload(); await ready(page); await page.waitForTimeout(400);
+  await nav(page, "Scheda"); await page.waitForTimeout(600);
+  ok("ricaricamento: resta vuoto, l'altra serie tiene la proposta", (await val(0)) === "" && (await val(1)) === "30", `${await val(0)}|${await val(1)}`);
+  await sync(page);
+  ok("pull: resta vuoto", (await val(0)) === "", await val(0));
+
+  await page.locator(".card.lift").first().locator("button.check").first().click(); await page.waitForTimeout(250);
+  if (await salta().count()) await salta().first().click();
+  await page.waitForTimeout(400); await sync(page);
+  const r0 = (await setLogs(be, d)).find(r => r.data.setIndex === 0);
+  ok("la spunta registra ciò che è a video: niente peso", r0 && r0.data.done === true && r0.data.weight === "", JSON.stringify(r0 && r0.data));
+  await page.reload(); await ready(page); await page.waitForTimeout(400);
+  await nav(page, "Scheda"); await page.waitForTimeout(600);
+  ok("serie fatta col campo vuoto: riaperta resta vuota", (await val(0)) === "", await val(0));
+
+  // Player: svuoto la serie corrente (la seconda) ed esco.
+  await page.getByRole("button", { name: /Inizia allenamento/ }).click(); await page.waitForTimeout(400);
+  await page.locator("input.num").first().fill(""); await page.waitForTimeout(300);
+  await page.getByTitle("Esci dal player").click(); await page.waitForTimeout(400);
+  ok("svuotato nel Player: anche la lista è vuota", (await val(1)) === "", await val(1));
+  await page.locator(".card.lift").first().locator("button.check").nth(1).click(); await page.waitForTimeout(250);
+  if (await salta().count()) await salta().first().click();
+  await page.waitForTimeout(400); await sync(page);
+  const r1 = (await setLogs(be, d)).find(r => r.data.setIndex === 1);
+  ok("…e la spunta non registra la proposta", r1 && r1.data.done === true && r1.data.weight === "", JSON.stringify(r1 && r1.data));
+  ok("nessun errore JS", page._errors.length === 0, page._errors.join(" | "));
+  await ctx.close();
+});
+
 // Piano e serie nello stesso pull, Scheda aperta (Ruling 64 + P-M1): le spunte seguono gli esercizi e
 // i pesi a video restano quelli dell'esercizio che ora sta in quella posizione.
 await scenario("Piano riordinato con la Scheda aperta — serie e pesi seguono gli esercizi", async () => {

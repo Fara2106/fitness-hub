@@ -279,24 +279,18 @@ const ExerciseCard = ({
   sheetsWeights, savedPesos, onPesoChange, exNote,
 }) => {
   const t = useT();
-  // savedPesos = solo i pesi toccati oggi ("" = mai toccata), gli altri sono proposte a video.
+  // savedPesos = solo i pesi toccati oggi (null = mai toccata, "" = svuotato a mano), gli altri sono proposte a video.
   const [pesos, setPesos] = React.useState(() => window.schedaShownPesos(savedPesos, ex, sheetsWeights));
   const [showHistory, setShowHistory] = React.useState(false);
   const [showSubs, setShowSubs]       = React.useState(false);
 
-  // Arrivano gli ultimi pesi: si aggiorna solo la vista, i pesi toccati oggi vincono. Niente
-  // scrittura: un setLog nato da qui, più recente, cancellerebbe per LWW le serie fatte su un
-  // altro device non ancora arrivate (Ruling 62).
+  // Ultimi pesi in arrivo, pesi cambiati dal Player o da un altro device, piano cambiato: la vista
+  // si rifà come pesosRef (schedaShownPesos), così a video c'è sempre ciò che registra la spunta.
+  // Niente scrittura: un setLog nato da qui, più recente, cancellerebbe per LWW le serie fatte su
+  // un altro device non ancora arrivate (Ruling 62).
   React.useEffect(() => {
     setPesos(window.schedaShownPesos(savedPesos, ex, sheetsWeights));
-  }, [sheetsWeights]);
-
-  // Pesi cambiati dal Player o da un altro device (stesso stato condiviso keyed-by-id):
-  // riallinea la lista. Un campo svuotato a mano resta vuoto mentre si digita.
-  React.useEffect(() => {
-    if (!savedPesos) return;
-    setPesos(p => p.map((v, i) => (savedPesos[i] != null && savedPesos[i] !== "" ? String(savedPesos[i]) : v)));
-  }, [savedPesos]);
+  }, [sheetsWeights, savedPesos, ex]);
 
   const handlePesoChange = (i, v) => {
     setPesos(p => { const n = [...p]; n[i] = v; return n; });

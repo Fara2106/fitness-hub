@@ -663,15 +663,16 @@
     const prog = { completion: {}, substitutions: {}, pesos: {}, names: {}, sig: null };
     for (const [exKey, { ex, logs }] of byEx) {
       const n = Math.max(ex.sets || 0, ...logs.map((l) => l.setIndex + 1));
-      const comp = new Array(n).fill(false), pes = new Array(n).fill("");
+      const comp = new Array(n).fill(false), pes = new Array(n).fill(null);
       let sub = null;
       logs.forEach((l) => {
         comp[l.setIndex] = !!l.done;
-        pes[l.setIndex] = hasValue(l.weight) ? String(l.weight) : "";
+        // Senza peso: serie fatta = "" come nel record, altrimenti mai toccata (null, a video la proposta).
+        pes[l.setIndex] = hasValue(l.weight) ? String(l.weight) : l.done ? "" : null;
         if (sub === null && hasValue(l.substitutedWith)) sub = l.substitutedWith;
       });
       if (comp.some(Boolean)) prog.completion[exKey] = comp;
-      if (pes.some((w) => w !== "")) prog.pesos[exKey] = pes;
+      if (pes.some((w) => w !== null)) prog.pesos[exKey] = pes;
       if (sub !== null) prog.substitutions[exKey] = sub;
       prog.names[exKey] = nameKey(ex.name);
     }

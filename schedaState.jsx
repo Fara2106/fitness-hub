@@ -51,22 +51,23 @@ function writeSchedaProg(storage, dateKey, patch, meta) {
   storage.set(schedaProgKey(dateKey), next);
 }
 
-// Ruling 62: `pesos` persistiti = solo ciò che l'utente ha toccato; "" = serie mai toccata.
+// Ruling 62: `pesos` persistiti = solo ciò che l'utente ha toccato. null = serie mai toccata (a video
+// la proposta), "" = campo svuotato a mano (a video resta vuoto).
 // Un peso proposto (ultima sessione, default scheda) resta a video e in memoria, ma finisce nel
 // blocco, e quindi in un setLog, solo con un gesto: peso digitato o serie spuntata.
 function schedaPesoAt(saved, n, setIdx, value) {
-  const arr = new Array(Math.max(n, setIdx + 1)).fill("");
+  const arr = new Array(Math.max(n, setIdx + 1)).fill(null);
   (saved || []).forEach((v, i) => { if (i < arr.length && v != null) arr[i] = v; });
   arr[setIdx] = value == null ? "" : String(value);
   return arr;
 }
 
-// Pesi a video di un esercizio: toccati oggi → ultime sessioni → default scheda.
+// Pesi a video di un esercizio: toccati oggi, anche svuotati → ultime sessioni → default scheda.
 function schedaShownPesos(saved, ex, lastWeights) {
   const row = lastWeights && lastWeights[String(ex.name || "").toLowerCase()];
   return (ex.sets || []).map((s, i) => {
     const v = saved && saved[i];
-    if (v != null && v !== "") return String(v);
+    if (v != null) return String(v);
     if (row && row[i] != null) return String(row[i]);
     return String(s.peso || "");
   });
@@ -132,7 +133,7 @@ function sanitizeSchedaProg(prog, days, sig) {
       return arr.slice(0, cur.n).concat(new Array(Math.max(0, cur.n - arr.length)).fill(fill));
     };
     if (id in prog.completion)    out.completion[id]    = fit(prog.completion[id], false);
-    if (id in prog.pesos)         out.pesos[id]         = fit(prog.pesos[id], "");
+    if (id in prog.pesos)         out.pesos[id]         = fit(prog.pesos[id], null);
     if (id in prog.substitutions) out.substitutions[id] = prog.substitutions[id];
     out.names[id] = cur.name;
     if (!saved) changed = true;
