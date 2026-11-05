@@ -458,6 +458,28 @@ console.log("\nSuite Insights — e1RM, storico esercizio, riepilogo, report, de
   }
 }
 
+// Il peso è testo libero: gli stessi valori che nell'app nativa erano un crash (M2 della review finale).
+{
+  const HUGE = ["1e30", "inf", "Infinity", "nan", "-1", "9".repeat(25), "9".repeat(400), "1" + "0".repeat(30)];
+  const sb = { window: {}, console };
+  vm.createContext(sb);
+  let threw = null;
+  try {
+    for (const f of ["progress.jsx", "insights.jsx"]) vm.runInContext(transform(join(ROOT, f)), sb, { filename: f });
+    const P = sb.window.WorkoutProgress, I = sb.window.Insights;
+    for (const peso of HUGE) {
+      P.suggestNext(peso);
+      P.applySession({}, [{ esercizio: "Panca", peso, date: "2026-10-01" }]);
+      I.e1rm(peso, 8);
+      const pesiMap = { Panca: [{ date: "2026-10-01", peso, rip: 8 }] };
+      I.exerciseSessions(pesiMap, "Panca", 3);
+      I.sessionSummary({ exercises: [{ name: "Panca", sets: [{ peso, rip: 8 }] }], dayKey: "G", completion: { "G#0": [true] },
+        substitutions: {}, pesos: { "G#0": [peso] }, exIdFn: (d, i) => `${d}#${i}`, startTs: 1, endTs: 2, pesiMap });
+    }
+  } catch (e) { threw = e; }
+  ok("pesi enormi: progressione, PR e riepilogo non lanciano" + (threw ? " — " + threw.message : ""), threw === null);
+}
+
 // ---- Suite PlanConv (planconv.jsx: piani strutturati ⇄ forme del parser) + storage.onChange ----
 console.log("\nSuite PlanConv — piani strutturati ⇄ parseScheda/parseDieta, activePlan, planToText, storage.onChange");
 {

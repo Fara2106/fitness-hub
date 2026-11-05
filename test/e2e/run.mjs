@@ -580,6 +580,35 @@ await scenario("Serie mai toccate — B offline apre la Scheda e non cancella le
   await A.ctx.close(); await B.ctx.close();
 });
 
+// Il peso è testo libero sincronizzato: qualunque cosa arrivi dal server, niente crash (M2 della review finale).
+await scenario("Pesi enormi — Scheda, Player e Storico reggono", async () => {
+  const be = await newBackend(); await seedPlans(be);
+  const { ctx, page } = await openApp(IPHONE, be, { seed: SEED_FIRST });
+  const d = await today(page);
+  const { plan } = await seedLastWeights(be, d, "1e30");
+  const ex = plan.days[0].exercises, HUGE = ["inf", "Infinity", "nan", "9".repeat(25), "9".repeat(400), "1" + "0".repeat(30)];
+  await pushRecords(be, HUGE.flatMap((weight, i) => [0, 1].map(k => ({ collection: "setLog", id: `2026-10-${String(i + 10)}:${ex[k].id}:0`,
+    data: { date: `2026-10-${String(i + 10)}`, exerciseId: ex[k].id, exerciseName: ex[k].name, planId: "workout-seed", setIndex: 0, weight, reps: 8, done: true, substitutedWith: null } }))));
+  await sync(page);
+  await nav(page, "Scheda"); await page.waitForTimeout(600);
+  await page.getByRole("button", { name: /Inizia allenamento/ }).click(); await page.waitForTimeout(400);
+  ok("il Player si apre", (await page.getByRole("button", { name: /Serie fatta/ }).count()) === 1);
+  await page.getByRole("button", { name: /Serie fatta/ }).click(); await page.waitForTimeout(400);
+  const salta = page.getByRole("button", { name: /^(Salta|Riprendi)$/ }); if (await salta.count()) await salta.first().click();
+  await page.waitForTimeout(300);
+  await page.locator("button", { hasText: "Esci" }).first().click().catch(() => {});
+  await page.reload(); await ready(page);
+  if (!page._desk) { await nav(page, "Setup"); await page.waitForTimeout(400); }
+  await page.getByText("Storico", { exact: true }).last().click(); await page.waitForTimeout(800);
+  for (const tab of [/Forza/, /Registro/, /Volume/]) {
+    const b = page.getByRole("button", { name: tab });
+    if (await b.count()) { await b.first().click(); await page.waitForTimeout(800); }
+  }
+  ok("nessuna schermata di errore", !/Riprova/.test(await bodyText(page)), (await bodyText(page)).slice(0, 200));
+  ok("nessun errore JS", page._errors.length === 0, page._errors.join(" | "));
+  await ctx.close();
+});
+
 // ── 3e. Peso corporeo: dalla Home al backend e all'altro device ────────────
 await scenario("Peso — registrazione e sync tra device", async () => {
   const be = await newBackend();
