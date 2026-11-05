@@ -1660,6 +1660,30 @@ await (async () => {
       }
     }
 
+    // ── La ricostruzione al cambio piano tocca solo oggi: un giorno passato non cambia giorno di scheda ──
+    {
+      const Y = daysAgo(1);
+      const env = await backend();
+      const A = device(env), B = device(env, { t: T0 + 5 });
+      await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN); await A.sync(); await B.sync();
+      const W = A.sb.window, days = W.getSchedule().days, k0 = W.exId("Giorno 1", 0), ex0 = wp.data.days[0].exercises[0];
+      const block = { completion: { [k0]: new Array(ex0.sets).fill(true) }, pesos: { [k0]: new Array(ex0.sets).fill("55") }, substitutions: {}, names: { [k0]: W.schedaNameAt(days, k0).name }, sig: W.schedaPlanSig(days) };
+      A.S.set(W.schedaProgKey(Y), block); A.S.set(`gym_${Y}`, true);
+      await tick(); A.clock.t += 1000; await A.sync();
+      // L'esercizio fatto ieri passa a un altro giorno di scheda, stessi id.
+      const p = J(B.S.get("plan_workout")), [moved] = p.data.days[0].exercises.splice(0, 1);
+      p.data.days[1].exercises.unshift(moved);
+      B.SV.putRecords([{ collection: "workoutPlan", id: p.id, data: p.data }]);
+      B.clock.t += 2000; await B.sync(); A.clock.t += 5000; await A.sync();
+      ok("cambio piano: il blocco di ieri non si riscrive", JSON.stringify(A.S.get(W.schedaProgKey(Y))) === JSON.stringify(block));
+      A.clock.t += 1000; await A.SV.rebaseline();
+      const srv = await serverRecords(env);
+      const sess = srv.filter(r => r.collection === "workoutSession" && !r.deleted && r.data.date === Y);
+      const sets = srv.filter(r => r.collection === "setLog" && !r.deleted && r.data.date === Y);
+      ok("cambio piano + rebaseline: una sessione sola per ieri", sess.length === 1, JSON.stringify(sess.map(r => r.id)));
+      ok("cambio piano + rebaseline: nessuna serie raddoppiata per ieri", sets.length === ex0.sets && !sets.some(r => r.id.includes(":name:")), JSON.stringify(sets.map(r => r.id)));
+    }
+
     // ── Task 17 (fase 3): cardio importato da Salute dall'app nativa (`value.id` = "hk-<uuid>") ──
     // La PWA lo mostra in `activities`, ma il suo gruppo cardio prende solo id numerici: aggiungere un'attività
     // non lo duplica (nessun `${date}:cardio:<ms>` nuovo per lui) e non lo tombstona.

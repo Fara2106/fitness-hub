@@ -345,17 +345,16 @@
     return changed;
   }
 
-  // Ruling 64: piano scheda cambiato → i blocchi locali seguono gli esercizi (id), non le posizioni.
+  // Ruling 64: piano scheda cambiato → il blocco di oggi segue gli esercizi (id), non le posizioni.
+  // Solo oggi: gli altri giorni non hanno gesti, e il loro giorno di scheda non deve cambiare.
   function rebaseProgs(changedKeys, c) {
     if (!changedKeys.includes("plan_workout")) return [];
-    const changed = [];
-    S.keys().filter((k) => /^schedaProg_\d{4}-\d{2}-\d{2}$/.test(k)).forEach((k) => {
-      const cur = S.get(k, null);
-      let next = cur;
-      try { next = RM().rebaseProg(cur, k.slice("schedaProg_".length), listEffective, c); } catch (e) { logErr(`rebaseProg ${k}: ${e.message}`); }
-      if (next && canon(next) !== canon(cur)) { S.set(k, next, SILENT); changed.push(k); }
-    });
-    return changed;
+    const k = `schedaProg_${c.today}`, cur = S.get(k, null);
+    let next = cur;
+    try { next = RM().rebaseProg(cur, c.today, listEffective, c); } catch (e) { logErr(`rebaseProg ${k}: ${e.message}`); }
+    if (!next || canon(next) === canon(cur)) return [];
+    S.set(k, next, SILENT);
+    return [k];
   }
 
   // Dopo una ricostruzione v2grp segue lo stato locale (una cancellazione futura tombstona anche ciò che
