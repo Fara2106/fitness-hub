@@ -511,7 +511,7 @@ await scenario("Pull durante la modifica — il peso digitato non cambia", async
   await sync(B.page); await sync(A.page);
   const ws = await setLogs(be, d);
   ok("la modifica di B arriva sul backend (e sostituisce il 50)", ws.some(r => r.data.weight === "60") && !ws.some(r => r.data.weight === "50"), JSON.stringify(ws.map(r => r.data.weight)));
-  ok("A riceve il 60", (await A.page.locator(W).first().inputValue()) === "60", await A.page.locator(W).first().inputValue());
+  ok("A riceve il 60", await until(async () => (await A.page.locator(W).first().inputValue()) === "60", 3000), await A.page.locator(W).first().inputValue());
   ok("nessun errore JS", A.page._errors.length === 0 && B.page._errors.length === 0, [...A.page._errors, ...B.page._errors].join(" | "));
   await A.ctx.close(); await B.ctx.close();
 });
