@@ -11126,6 +11126,8 @@ const Scheda = ({
   const isDesktop = device === "desktop";
   const t = useT();
   const [days, setDays] = React.useState(() => _buildSchedule());
+  const daysRef = React.useRef(days);
+  daysRef.current = days;
   const current = days.find(d => d.key === scheda) || days[0] || {
     key: "",
     num: 0,
@@ -11229,6 +11231,7 @@ const Scheda = ({
     let curDays = days;
     if (has("plan_workout")) {
       curDays = _buildSchedule();
+      daysRef.current = curDays;
       setDays(curDays);
       const day = curDays.find(d => d.key === scheda) || curDays[0];
       const n = (day && day.exercises || []).length;
@@ -11280,7 +11283,7 @@ const Scheda = ({
       before
     });
     lastWeightsRef.current = last;
-    pesosRef.current = window.schedaShownAll(window.readSchedaProg(window.storage, dayK).pesos, days, last);
+    pesosRef.current = window.schedaShownAll(window.readSchedaProg(window.storage, dayK).pesos, daysRef.current, last);
     setSheetsWeights(last);
     setPesiHistory(LD.getPesi({
       before

@@ -859,6 +859,9 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   const t = useT();
 
   const [days, setDays] = React.useState(() => _buildSchedule());
+  // Giorni correnti anche fra due listener dello stesso evento, prima del render.
+  const daysRef = React.useRef(days);
+  daysRef.current = days;
   const current = days.find(d => d.key === scheda) || days[0] || { key: "", num: 0, name: "", focus: [], exercises: [] };
 
   // Blocco progressi di giornata (piatto, keyed-by-id, valido per TUTTI i giorni).
@@ -984,6 +987,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
     let curDays = days;
     if (has("plan_workout")) {
       curDays = _buildSchedule();
+      daysRef.current = curDays;
       setDays(curDays);
       // Player aperto: il cursore resta dentro gli esercizi del giorno nel nuovo piano.
       const day = curDays.find(d => d.key === scheda) || curDays[0];
@@ -1040,7 +1044,7 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
     // data: { "nome esercizio": [peso_set1, peso_set2, ...] }
     const last = LD.getUltimiPesi({ before });
     lastWeightsRef.current = last;
-    pesosRef.current = window.schedaShownAll(window.readSchedaProg(window.storage, dayK).pesos, days, last);
+    pesosRef.current = window.schedaShownAll(window.readSchedaProg(window.storage, dayK).pesos, daysRef.current, last);
     setSheetsWeights(last);
     // Storico completo (ultime 12 serie per esercizio, raggruppate per data
     // da Insights.exerciseSessions): card nel Player + confronto nel riepilogo.

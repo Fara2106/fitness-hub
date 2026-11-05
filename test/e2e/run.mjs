@@ -580,6 +580,49 @@ await scenario("Serie mai toccate — B offline apre la Scheda e non cancella le
   await A.ctx.close(); await B.ctx.close();
 });
 
+// Piano e serie nello stesso pull, Scheda aperta (Ruling 64 + P-M1): le spunte seguono gli esercizi e
+// i pesi a video restano quelli dell'esercizio che ora sta in quella posizione.
+await scenario("Piano riordinato con la Scheda aperta — serie e pesi seguono gli esercizi", async () => {
+  const be = await newBackend(); await seedPlans(be);
+  const A = await openApp(IPHONE, be, { seed: SEED_FIRST });
+  const B = await openApp(IPAD, be);
+  const d = await today(A.page);
+  const { plan, prev } = await seedLastWeights(be, d);
+  const dayKey = await B.page.evaluate(() => window.storage.get("schedaSelectedDay", null) || "Giorno 1");
+  const dayIdx = Number(dayKey.replace(/\D/g, "")) - 1 || 0;
+  const [e0, e1, e2] = plan.days[dayIdx].exercises;
+  await pushRecords(be, [e1].flatMap(ex => Array.from({ length: ex.sets }, (_, i) => ({ collection: "setLog", id: `${prev}:${ex.id}:${i}`,
+    data: { date: prev, exerciseId: ex.id, exerciseName: ex.name, planId: "workout-seed", setIndex: i, weight: "40", reps: 8, done: true, substitutedWith: null } }))));
+  await sync(A.page); await sync(B.page);
+  const log = (ex, i, weight, done) => ({ collection: "setLog", id: `${d}:${ex.id}:${i}`,
+    data: { date: d, exerciseId: ex.id, exerciseName: ex.name, planId: "workout-seed", setIndex: i, weight, reps: 8, done, substitutedWith: null } });
+  await pushRecords(be, [log(e0, 0, "55", true), log(e0, 1, "56", true)]);
+  await sync(B.page);
+  await nav(B.page, "Scheda"); await B.page.waitForTimeout(700);
+  const W = 'input[placeholder="kg o elastico"]';
+  ok("prima del riordino la prima card ha il peso di oggi", (await B.page.locator(W).first().inputValue()) === "55", await B.page.locator(W).first().inputValue());
+
+  // Stesso pull: piano con i primi due esercizi scambiati + una serie di oggi su un altro esercizio.
+  const swapped = JSON.parse(JSON.stringify(plan));
+  const ex = swapped.days[dayIdx].exercises; [ex[0], ex[1]] = [ex[1], ex[0]];
+  await pushRecords(be, [{ collection: "workoutPlan", id: "workout-seed", data: swapped }, log(e2, 0, "70", true)]);
+  await sync(B.page); await B.page.waitForTimeout(500);
+  ok("la prima card è il secondo esercizio, col suo ultimo peso", (await B.page.locator(W).first().inputValue()) === "40", await B.page.locator(W).first().inputValue());
+  const pOf = (await store(B.page, `schedaProg_${d}`)) || {};
+  ok("le spunte seguono l'esercizio spostato", (pOf.completion[`${dayKey}#1`] || []).filter(Boolean).length === 2, JSON.stringify(pOf.completion));
+
+  // La spunta dalla lista registra il peso a video, non quello di chi stava prima in quella posizione.
+  await B.page.locator(".card.lift").first().locator("button.check").first().click(); await B.page.waitForTimeout(300);
+  const sk = B.page.getByRole("button", { name: /^(Salta|Riprendi)$/ }); if (await sk.count()) await sk.first().click();
+  await B.page.waitForTimeout(300); await sync(B.page);
+  const sets = await setLogs(be, d);
+  const r = sets.find(x => x.id === `${d}:${e1.id}:0`);
+  ok("la spunta registra il peso a video (40)", r && r.data.done === true && r.data.weight === "40", JSON.stringify(r && r.data));
+  ok("le serie fatte restano vive, coi loro pesi", ["55", "56"].every((w, i) => { const x = sets.find(y => y.id === `${d}:${e0.id}:${i}`); return x && x.data.done && x.data.weight === w; }), JSON.stringify(sets.map(x => [x.id, x.data.done, x.data.weight])));
+  ok("nessun errore JS", B.page._errors.length === 0, B.page._errors.join(" | "));
+  await A.ctx.close(); await B.ctx.close();
+});
+
 // Il peso è testo libero sincronizzato: qualunque cosa arrivi dal server, niente crash (M2 della review finale).
 await scenario("Pesi enormi — Scheda, Player e Storico reggono", async () => {
   const be = await newBackend(); await seedPlans(be);
