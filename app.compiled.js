@@ -2242,7 +2242,7 @@ window.buildDefaultNotifConfig = function () {
         planId = null;
       } else continue;
       let n = Math.max(comp.length, pes.length);
-      if (!n && sub !== null && ex) n = ex.sets || 0;
+      if (!n && ex && (sub !== null || exKey in subs)) n = ex.sets || 0;
       for (let setIndex = 0; setIndex < n; setIndex++) {
         const w = pes[setIndex];
         const rid = `${date}:${exerciseId}:${setIndex}`;

@@ -1568,6 +1568,45 @@ await (async () => {
       }
     }
 
+    // ── "Ripristina originale" senza serie né pesi: nessun tombstone (Ruling 64), arriva col record noto ──
+    {
+      const env = await backend();
+      const A = device(env), B = device(env, { t: T0 + 5 });
+      await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN); await A.sync(); await B.sync();
+      const WA = A.sb.window, WB = B.sb.window, days = WA.getSchedule().days;
+      const k0 = WA.exId("Giorno 1", 0), k1 = WA.exId("Giorno 1", 1), [e0] = wp.data.days[0].exercises;
+      const meta = (k) => ({ names: { [k]: WA.schedaNameAt(days, k).name }, sig: WA.schedaPlanSig(days) });
+      const ofEx = async () => (await serverRecords(env)).filter(r => r.collection === "setLog" && r.id.startsWith(`${TODAY}:${e0.id}:`));
+      WA.writeSchedaProg(A.S, TODAY, { substitutions: { [k0]: "Alt X" } }, meta(k0));
+      await tick(); A.clock.t += 1000; await A.sync(); B.clock.t += 2000; await B.sync();
+      ok("ripristino: la sostituzione arriva a B", WB.readSchedaProg(B.S, TODAY).substitutions[k0] === "Alt X" && (await ofEx()).length === e0.sets);
+
+      WA.writeSchedaProg(A.S, TODAY, { substitutions: { [k0]: null } }, meta(k0));
+      await tick(); A.clock.t += 1000; await A.sync(); B.clock.t += 2000; await B.sync();
+      const after = await ofEx();
+      ok("ripristino: sul server nessuna serie tiene il sostituto, nessun tombstone", after.length === e0.sets && after.every(r => !r.deleted && r.data.substitutedWith === null && r.data.done === false), JSON.stringify(after.map(r => r.data)));
+      ok("ripristino: B non vede più la sostituzione", !WB.readSchedaProg(B.S, TODAY).substitutions[k0], JSON.stringify(WB.readSchedaProg(B.S, TODAY).substitutions));
+
+      WB.writeSchedaProg(B.S, TODAY, { completion: { [k1]: [true, false, false] } }, meta(k1));
+      await tick(); B.clock.t += 1000; await B.sync(); A.clock.t += 2000; await A.sync();
+      ok("ripristino: un pull non riporta la sostituzione ad A", !WA.readSchedaProg(A.S, TODAY).substitutions[k0], JSON.stringify(WA.readSchedaProg(A.S, TODAY).substitutions));
+      WA.writeSchedaProg(A.S, TODAY, { completion: { [k0]: new Array(e0.sets).fill(false).map((_, i) => i === 0) } }, meta(k0));
+      await tick(); A.clock.t += 1000; await A.sync();
+      const r0 = find(await serverRecords(env), "setLog", `${TODAY}:${e0.id}:0`);
+      ok("ripristino: la serie spuntata dopo ha il nome originale", r0.data.done === true && r0.data.substitutedWith === null && r0.data.exerciseName === e0.name, JSON.stringify(r0.data));
+    }
+    // Sostituzione tolta prima di qualunque record (primo device, nulla sul server): niente record dal nulla.
+    {
+      const env = await backend();
+      const A = device(env);
+      await A.SV.setToken(TOKEN); await A.sync();
+      const W = A.sb.window, days = W.getSchedule().days, k0 = W.exId("Giorno 2", 0);
+      const n0 = A.net.requests.length;
+      W.writeSchedaProg(A.S, TODAY, { substitutions: { [k0]: null } }, { names: { [k0]: W.schedaNameAt(days, k0).name }, sig: W.schedaPlanSig(days) });
+      await tick(); A.clock.t += 1000; await A.sync();
+      ok("ripristino senza record noti: non scrive nulla (Ruling 62)", !A.sent(n0).some(c => c.collection === "setLog"), JSON.stringify(A.sent(n0)));
+    }
+
     // ── Task 17 (fase 3): cardio importato da Salute dall'app nativa (`value.id` = "hk-<uuid>") ──
     // La PWA lo mostra in `activities`, ma il suo gruppo cardio prende solo id numerici: aggiungere un'attività
     // non lo duplica (nessun `${date}:cardio:<ms>` nuovo per lui) e non lo tombstona.

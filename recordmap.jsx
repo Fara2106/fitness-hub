@@ -396,7 +396,9 @@
       } else continue;
 
       let n = Math.max(comp.length, pes.length);
-      if (!n && sub !== null && ex) n = ex.sets || 0;
+      // Sostituzione tolta (chiave presente, valore null): le serie note devono perdere il sostituto,
+      // niente tombstone che lo faccia (Ruling 64). La clausola sotto scrive solo i record già noti.
+      if (!n && ex && (sub !== null || exKey in subs)) n = ex.sets || 0;
       for (let setIndex = 0; setIndex < n; setIndex++) {
         const w = pes[setIndex];
         const rid = `${date}:${exerciseId}:${setIndex}`;
