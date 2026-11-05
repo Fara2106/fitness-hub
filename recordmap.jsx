@@ -414,7 +414,7 @@
     return { records, protect };
   }
 
-  // Ruling 12/64: i record della collezione dichiarata in `protect` non si tombstonano mai dal motore.
+  // Ruling 12/64/65: i record della collezione dichiarata in `protect` non si tombstonano mai dal motore.
   function isProtected(res, collection, id) {
     const p = res && res.protect;
     return !!p && p.collection === collection;
@@ -444,10 +444,14 @@
   }
 
   // workoutSession: solo a sessione chiusa (gym_ = true), giorno con più serie spuntate.
+  // protect (Ruling 65): una sessione chiusa non si tombstona mai da qui. Nessun gesto la cancella:
+  // la PWA non toglie gym_, l'app non ha un'eliminazione, e il gruppo vuoto vuol dire solo che il
+  // blocco non ha più quelle serie. Chiusa su un piano non più attivo: non si scrive un doppione.
   function sessionGroup(date, get, ctx) {
     const wi = workoutIndex(ctx && ctx.workout);
     if (!wi) return noTouch("workoutSession");
-    if (get(`gym_${date}`, false) !== true) return { records: [] };
+    const protect = { collection: "workoutSession" };
+    if (get(`gym_${date}`, false) !== true) return { records: [], protect };
     const prog = get(`schedaProg_${date}`, null);
     const completion = isObj(prog) && isObj(prog.completion) ? prog.completion : {};
     const perDay = new Map();
@@ -462,14 +466,18 @@
       if (bestN === null || count > perDay.get(bestN) || (count === perDay.get(bestN) && n < bestN)) bestN = n;
     }
     const d = bestN === null ? null : wi.days[bestN - 1];
-    if (!d) return { records: [] };
+    if (!d) return { records: [], protect };
+    const id = `${date}:${d.id}`;
+    const listed = ctx && typeof ctx.records === "function" ? ctx.records("workoutSession") : null;
+    const today = (Array.isArray(listed) ? listed : []).filter((r) => live(r) && r.data.date === date);
+    if (!today.some((r) => r.id === id) && today.some((r) => r.data.done === true && !wi.dayById.has(r.data.dayId))) return { records: [], protect };
     const gymStart = get(`gymStart_${date}`, null);
     const start = Number(gymStart);
-    return { records: [rec("workoutSession", `${date}:${d.id}`, {
+    return { records: [rec("workoutSession", id, {
       date, dayId: d.id, dayName: d.name,
       startedAt: gymStart != null && Number.isSafeInteger(start) && start > 0 ? start : null,
       done: true,
-    })] };
+    })], protect };
   }
 
   // Indice stabile per messaggio: i messaggi ricostruiti dal server portano `index` (anche non

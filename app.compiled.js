@@ -2292,8 +2292,12 @@ window.buildDefaultNotifConfig = function () {
   function sessionGroup(date, get, ctx) {
     const wi = workoutIndex(ctx && ctx.workout);
     if (!wi) return noTouch("workoutSession");
+    const protect = {
+      collection: "workoutSession"
+    };
     if (get(`gym_${date}`, false) !== true) return {
-      records: []
+      records: [],
+      protect
     };
     const prog = get(`schedaProg_${date}`, null);
     const completion = isObj(prog) && isObj(prog.completion) ? prog.completion : {};
@@ -2310,18 +2314,27 @@ window.buildDefaultNotifConfig = function () {
     }
     const d = bestN === null ? null : wi.days[bestN - 1];
     if (!d) return {
-      records: []
+      records: [],
+      protect
+    };
+    const id = `${date}:${d.id}`;
+    const listed = ctx && typeof ctx.records === "function" ? ctx.records("workoutSession") : null;
+    const today = (Array.isArray(listed) ? listed : []).filter(r => live(r) && r.data.date === date);
+    if (!today.some(r => r.id === id) && today.some(r => r.data.done === true && !wi.dayById.has(r.data.dayId))) return {
+      records: [],
+      protect
     };
     const gymStart = get(`gymStart_${date}`, null);
     const start = Number(gymStart);
     return {
-      records: [rec("workoutSession", `${date}:${d.id}`, {
+      records: [rec("workoutSession", id, {
         date,
         dayId: d.id,
         dayName: d.name,
         startedAt: gymStart != null && Number.isSafeInteger(start) && start > 0 ? start : null,
         done: true
-      })]
+      })],
+      protect
     };
   }
   function coachGroup(date, get) {

@@ -1466,6 +1466,108 @@ await (async () => {
       ok("Ruling 64: nemmeno togliere tutto il blocco tombstona i setLog", !A.sent(n0).some(c => c.collection === "setLog" && c.deleted) && A.SV.listRecords("setLog").filter(r => !r.deleted && r.data.date === TODAY).length === 2);
     }
 
+    // ── Ruling 65: un workoutSession chiuso non va in tombstone, né si duplica al cambio piano ──
+    {
+      const sessionsOn = async (env) => (await serverRecords(env)).filter(r => r.collection === "workoutSession" && r.id.startsWith(`${TODAY}:`));
+      const start = async () => {
+        const env = await backend();
+        const A = device(env), B = device(env, { t: T0 + 5 });
+        await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN); await A.sync(); await B.sync();
+        const W = A.sb.window, days = W.getSchedule().days, k0 = W.exId("Giorno 1", 0);
+        const meta = (d, k) => ({ names: { [k]: W.schedaNameAt(d, k).name }, sig: W.schedaPlanSig(d) });
+        W.writeSchedaProg(A.S, TODAY, { completion: { [k0]: [true, true] }, pesos: { [k0]: ["55", "55"] } }, meta(days, k0));
+        A.S.set(`gym_${TODAY}`, true);
+        await tick(); A.clock.t += 1000; await A.sync();
+        return { env, A, B, W, days, k0, meta, sid: `${TODAY}:${wp.data.days[0].id}` };
+      };
+      const newPlan = async ({ B }, replace) => {
+        const old = B.S.get("plan_workout");
+        const txt = readFileSync(join(ROOT, "scheda.txt"), "utf8");
+        const np = J(PC.workoutPlanFromText(replace ? txt.replace("Push-up (bodyweight)", "Panca piana manubri") : txt, { id: "workout-r65", name: "R65", validFrom: TODAY }));
+        B.SV.putRecords([{ collection: "workoutPlan", id: np.id, data: np.data }, { collection: "workoutPlan", id: old.id, data: { ...old.data, status: "archived", validTo: TODAY } }]);
+        B.clock.t += 2000; await B.sync();
+      };
+      const open = (W, S) => { // come la Scheda al mount
+        const cur = W.getSchedule().days, res = W.sanitizeSchedaProg(W.readSchedaProg(S, TODAY), cur, W.schedaPlanSig(cur));
+        if (res.changed) S.set(W.schedaProgKey(TODAY), res.prog, { silent: true });
+        return cur;
+      };
+
+      // Lo scenario riprodotto: piano con id nuovi che cambia l'esercizio fatto, gesto su un altro giorno.
+      {
+        const t = await start(), { env, A, W } = t;
+        ok("Ruling 65: la sessione chiusa è sul server", (await sessionsOn(env)).some(r => r.id === t.sid && !r.deleted));
+        await newPlan(t, true);
+        A.clock.t += 5000; await A.sync();
+        const cur = open(W, A.S), k2 = W.exId("Giorno 2", 0);
+        const n0 = A.net.requests.length;
+        W.writeSchedaProg(A.S, TODAY, { pesos: { [k2]: ["70"] } }, t.meta(cur, k2));
+        await tick(); A.clock.t += 1000; await A.sync();
+        const live = (await sessionsOn(env)).filter(r => !r.deleted);
+        ok("Ruling 65: piano nuovo + gesto: la sessione chiusa resta viva", live.length === 1 && live[0].id === t.sid && live[0].data.done === true, JSON.stringify(await sessionsOn(env)));
+        ok("Ruling 65: nessun tombstone di sessione inviato", !A.sent(n0).some(c => c.collection === "workoutSession" && c.deleted));
+      }
+
+      // Stessi esercizi con id nuovi: le spunte restano nel blocco, la sessione non si raddoppia.
+      {
+        const t = await start(), { env, A, W, k0 } = t;
+        await newPlan(t, false);
+        A.clock.t += 5000; await A.sync();
+        const cur = open(W, A.S);
+        W.writeSchedaProg(A.S, TODAY, { completion: { [k0]: [true, true, true] } }, t.meta(cur, k0));
+        await tick(); A.clock.t += 1000; await A.sync();
+        const live = (await sessionsOn(env)).filter(r => !r.deleted);
+        ok("Ruling 65: id nuovi: una sessione sola, quella chiusa", live.length === 1 && live[0].id === t.sid, JSON.stringify(live.map(r => r.id)));
+      }
+
+      // Riordino con gli stessi id: stesso record, nessuna scrittura.
+      {
+        const t = await start(), { env, A, B, W } = t;
+        const p = J(B.S.get("plan_workout")), ex = p.data.days[0].exercises;
+        [ex[0], ex[1]] = [ex[1], ex[0]];
+        B.SV.putRecords([{ collection: "workoutPlan", id: p.id, data: p.data }]);
+        B.clock.t += 2000; await B.sync(); A.clock.t += 5000; await A.sync();
+        const cur = open(W, A.S), k2 = W.exId("Giorno 1", 2);
+        W.writeSchedaProg(A.S, TODAY, { pesos: { [k2]: ["70"] } }, t.meta(cur, k2));
+        await tick(); A.clock.t += 1000; await A.sync();
+        const live = (await sessionsOn(env)).filter(r => !r.deleted);
+        ok("Ruling 65: riordino: la sessione resta una e viva", live.length === 1 && live[0].id === t.sid, JSON.stringify(await sessionsOn(env)));
+      }
+
+      // Tutte le spunte tolte dopo la chiusura: le serie vanno a done:false, la sessione resta (nessun gesto la cancella).
+      {
+        const t = await start(), { env, A, W, days, k0 } = t;
+        W.writeSchedaProg(A.S, TODAY, { completion: { [k0]: [false, false] } }, t.meta(days, k0));
+        await tick(); A.clock.t += 1000; await A.sync();
+        const srv = await sessionsOn(env);
+        ok("Ruling 65: spunte tolte dopo la chiusura: la sessione resta viva", srv.length === 1 && !srv[0].deleted, JSON.stringify(srv));
+      }
+
+      // Giorno cambiato dopo la chiusura, stesso piano: quella chiusa resta, si aggiunge l'altra.
+      {
+        const t = await start(), { env, A, W, days } = t, k2 = W.exId("Giorno 2", 0);
+        W.writeSchedaProg(A.S, TODAY, { completion: { [k2]: [true, true, true] } }, t.meta(days, k2));
+        await tick(); A.clock.t += 1000; await A.sync();
+        const live = (await sessionsOn(env)).filter(r => !r.deleted).map(r => r.id).sort();
+        ok("Ruling 65: più serie su un altro giorno: la sessione chiusa resta", live.includes(t.sid) && live.includes(`${TODAY}:${wp.data.days[1].id}`), JSON.stringify(live));
+      }
+
+      // Nessuna sessione chiusa prima del cambio piano: la chiusura sul piano nuovo scrive la sua.
+      {
+        const env = await backend();
+        const A = device(env), B = device(env, { t: T0 + 5 });
+        await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN); await A.sync(); await B.sync();
+        await newPlan({ B }, false);
+        A.clock.t += 5000; await A.sync();
+        const W = A.sb.window, cur = W.getSchedule().days, k0 = W.exId("Giorno 1", 0);
+        W.writeSchedaProg(A.S, TODAY, { completion: { [k0]: [true] } }, { names: { [k0]: W.schedaNameAt(cur, k0).name }, sig: W.schedaPlanSig(cur) });
+        A.S.set(`gym_${TODAY}`, true);
+        await tick(); A.clock.t += 1000; await A.sync();
+        const live = (await sessionsOn(env)).filter(r => !r.deleted);
+        ok("Ruling 65: senza sessione fuori piano la chiusura scrive la sua", live.length === 1 && live[0].data.dayId.startsWith("workout-r65"), JSON.stringify(live));
+      }
+    }
+
     // ── Task 17 (fase 3): cardio importato da Salute dall'app nativa (`value.id` = "hk-<uuid>") ──
     // La PWA lo mostra in `activities`, ma il suo gruppo cardio prende solo id numerici: aggiungere un'attività
     // non lo duplica (nessun `${date}:cardio:<ms>` nuovo per lui) e non lo tombstona.
