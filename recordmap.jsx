@@ -372,12 +372,16 @@
 
     // Ruling 37: setLog di oggi fuori dal piano attivo (piano cambiato in giornata dall'app) per nome+serie.
     // Se la serie esiste già così e la PWA non l'ha ancora scritta col nuovo id, non si duplica.
-    const offPlan = new Set(), mine = new Set();
+    // Sotto `name:` vale per ogni serie fatta del giorno: un blocco vecchio al primo sync non la raddoppia.
+    const offPlan = new Set(), doneAny = new Set(), mine = new Set();
     const listAll = ctx && typeof ctx.records === "function" ? ctx.records("setLog") : null;
     for (const r of Array.isArray(listAll) ? listAll : []) {
       if (!r || r.deleted || !isObj(r.data) || r.data.date !== date) continue;
       mine.add(r.id);
-      if (r.data.done === true && !wi.byId.has(r.data.exerciseId) && Number.isInteger(r.data.setIndex)) offPlan.add(`${nameKey(r.data.exerciseName)}:${r.data.setIndex}`);
+      if (r.data.done !== true || !Number.isInteger(r.data.setIndex)) continue;
+      const k = `${nameKey(r.data.exerciseName)}:${r.data.setIndex}`;
+      doneAny.add(k);
+      if (!wi.byId.has(r.data.exerciseId)) offPlan.add(k);
     }
 
     for (const exKey of ids) {
@@ -405,7 +409,7 @@
         // Ruling 62: serie mai toccata (non spuntata, senza peso, senza sostituzione, record ignoto)
         // → niente record: su un device non aggiornato ne cancellerebbe una fatta altrove (LWW).
         if (!comp[setIndex] && !hasValue(w) && sub === null && !mine.has(rid)) continue;
-        if (planId !== null && offPlan.has(`${nameKey(exerciseName)}:${setIndex}`) && !mine.has(rid)) continue;
+        if ((planId !== null ? offPlan : doneAny).has(`${nameKey(exerciseName)}:${setIndex}`) && !mine.has(rid)) continue;
         records.push(rec("setLog", rid, {
           date, exerciseId, exerciseName, planId, setIndex,
           weight: hasValue(w) ? String(w) : "", reps: null,

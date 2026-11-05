@@ -2217,12 +2217,16 @@ window.buildDefaultNotifConfig = function () {
     const validFrom = wi.plan.data.validFrom || null;
     const ids = new Set([].concat(Object.keys(completion), Object.keys(pesos), Object.keys(subs)));
     const offPlan = new Set(),
+      doneAny = new Set(),
       mine = new Set();
     const listAll = ctx && typeof ctx.records === "function" ? ctx.records("setLog") : null;
     for (const r of Array.isArray(listAll) ? listAll : []) {
       if (!r || r.deleted || !isObj(r.data) || r.data.date !== date) continue;
       mine.add(r.id);
-      if (r.data.done === true && !wi.byId.has(r.data.exerciseId) && Number.isInteger(r.data.setIndex)) offPlan.add(`${nameKey(r.data.exerciseName)}:${r.data.setIndex}`);
+      if (r.data.done !== true || !Number.isInteger(r.data.setIndex)) continue;
+      const k = `${nameKey(r.data.exerciseName)}:${r.data.setIndex}`;
+      doneAny.add(k);
+      if (!wi.byId.has(r.data.exerciseId)) offPlan.add(k);
     }
     for (const exKey of ids) {
       const comp = Array.isArray(completion[exKey]) ? completion[exKey] : [];
@@ -2247,7 +2251,7 @@ window.buildDefaultNotifConfig = function () {
         const w = pes[setIndex];
         const rid = `${date}:${exerciseId}:${setIndex}`;
         if (!comp[setIndex] && !hasValue(w) && sub === null && !mine.has(rid)) continue;
-        if (planId !== null && offPlan.has(`${nameKey(exerciseName)}:${setIndex}`) && !mine.has(rid)) continue;
+        if ((planId !== null ? offPlan : doneAny).has(`${nameKey(exerciseName)}:${setIndex}`) && !mine.has(rid)) continue;
         records.push(rec("setLog", rid, {
           date,
           exerciseId,

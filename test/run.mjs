@@ -1607,6 +1607,59 @@ await (async () => {
       ok("ripristino senza record noti: non scrive nulla (Ruling 62)", !A.sent(n0).some(c => c.collection === "setLog"), JSON.stringify(A.sent(n0)));
     }
 
+    // ── Primo sync dopo un cambio piano: le serie dei blocchi vecchi non si raddoppiano sotto name: ──
+    {
+      const Y = daysAgo(1);
+      const prep = async () => {
+        const env = await backend();
+        const A = device(env), B = device(env, { t: T0 + 5 });
+        await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN); await A.sync(); await B.sync();
+        const W = A.sb.window, days = W.getSchedule().days, k0 = W.exId("Giorno 1", 0);
+        const ex0 = wp.data.days[0].exercises[0];
+        const block = { completion: { [k0]: new Array(ex0.sets).fill(true) }, pesos: { [k0]: new Array(ex0.sets).fill("55") }, substitutions: {}, names: { [k0]: W.schedaNameAt(days, k0).name }, sig: W.schedaPlanSig(days) };
+        return { env, A, B, W, k0, ex0, block };
+      };
+      const planWithNewIds = async (B, A) => {
+        const old = B.S.get("plan_workout");
+        const np = J(PC.workoutPlanFromText(readFileSync(join(ROOT, "scheda.txt"), "utf8"), { id: "workout-i2", name: "I2", validFrom: TODAY }));
+        const e = np.data.days[0].exercises; [e[0], e[1]] = [e[1], e[0]];
+        B.SV.putRecords([{ collection: "workoutPlan", id: np.id, data: np.data }, { collection: "workoutPlan", id: old.id, data: { ...old.data, status: "archived", validTo: TODAY } }]);
+        B.clock.t += 2000; await B.sync(); A.clock.t += 5000; await A.sync();
+      };
+      const onY = async (env) => (await serverRecords(env)).filter(r => r.collection === "setLog" && !r.deleted && r.data.date === Y);
+
+      // Rebaseline, piano con id nuovi.
+      {
+        const { env, A, B, W, ex0, block } = await prep();
+        A.S.set(W.schedaProgKey(Y), block);
+        await tick(); A.clock.t += 1000; await A.sync();
+        await planWithNewIds(B, A);
+        A.clock.t += 1000; await A.SV.rebaseline();
+        const sets = await onY(env);
+        ok("primo sync: rebaseline dopo un piano con id nuovi non raddoppia le serie", sets.length === ex0.sets && !sets.some(r => r.id.includes(":name:")), JSON.stringify(sets.map(r => r.id)));
+      }
+      // Cambio di epoch, stesso caso.
+      {
+        const { env, A, B, W, ex0, block } = await prep();
+        A.S.set(W.schedaProgKey(Y), block);
+        await tick(); A.clock.t += 1000; await A.sync();
+        await planWithNewIds(B, A);
+        await env.DB.prepare("UPDATE meta SET value = value + 1 WHERE key = 'epoch'").run();
+        A.clock.t += 1000; await A.sync();
+        const sets = await onY(env);
+        ok("primo sync: cambio di epoch dopo un piano con id nuovi non raddoppia le serie", sets.length === ex0.sets && !sets.some(r => r.id.includes(":name:")), JSON.stringify(sets.map(r => r.id)));
+      }
+      // Esercizio fuori piano senza nessun record: la serie fatta deve arrivare, sotto name:.
+      {
+        const { env, A, B, W, ex0, block } = await prep();
+        await planWithNewIds(B, A);
+        A.S.set(W.schedaProgKey(Y), block, { silent: true });
+        A.clock.t += 1000; await A.SV.rebaseline();
+        const sets = await onY(env);
+        ok("primo sync: fuori piano e senza record, le serie arrivano sotto name:", sets.length === ex0.sets && sets.every(r => r.id.includes(":name:") && r.data.done === true && r.data.weight === "55"), JSON.stringify(sets.map(r => r.id)));
+      }
+    }
+
     // ── Task 17 (fase 3): cardio importato da Salute dall'app nativa (`value.id` = "hk-<uuid>") ──
     // La PWA lo mostra in `activities`, ma il suo gruppo cardio prende solo id numerici: aggiungere un'attività
     // non lo duplica (nessun `${date}:cardio:<ms>` nuovo per lui) e non lo tombstona.
