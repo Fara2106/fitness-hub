@@ -580,6 +580,48 @@ await scenario("Serie mai toccate — B offline apre la Scheda e non cancella le
   await A.ctx.close(); await B.ctx.close();
 });
 
+// Il peso proposto (ultima sessione) passa in tutti i modi di spuntare una serie.
+await scenario("Peso proposto — Player, dopo un ricaricamento, riepilogo", async () => {
+  const be = await newBackend(); await seedPlans(be);
+  const { ctx, page } = await openApp(IPHONE, be, { seed: SEED_FIRST });
+  const d = await today(page);
+  await seedLastWeights(be, d);
+  await sync(page);
+  const salta = () => page.getByRole("button", { name: /^(Salta|Riprendi)$/ });
+  await nav(page, "Scheda"); await page.waitForTimeout(600);
+  await page.locator(".card.lift").first().locator("button.check").first().click(); await page.waitForTimeout(250);
+  if (await salta().count()) await salta().first().click();
+  await page.waitForTimeout(400);
+
+  await page.reload(); await ready(page); await page.waitForTimeout(400);
+  await nav(page, "Scheda"); await page.waitForTimeout(600);
+  await page.locator(".card.lift").first().locator("button.check").nth(1).click(); await page.waitForTimeout(250);
+  if (await salta().count()) await salta().first().click();
+  await page.waitForTimeout(400); await sync(page);
+  let sets = (await setLogs(be, d)).sort((a, b) => a.data.setIndex - b.data.setIndex);
+  ok("spunta dalla lista, anche dopo il ricaricamento: il peso proposto arriva", sets.length === 2 && sets.every(r => r.data.done && r.data.weight === "30"), JSON.stringify(sets.map(r => [r.data.setIndex, r.data.done, r.data.weight])));
+
+  // Player senza toccare il peso, fino al riepilogo.
+  const total = Number(await page.evaluate(() => (document.body.innerText.match(/\/(\d+) serie completate/) || [])[1]));
+  await page.getByRole("button", { name: /Inizia allenamento/ }).click(); await page.waitForTimeout(400);
+  ok("Player: a video il peso proposto", (await page.locator("input.num").first().inputValue()) === "30", await page.locator("input.num").first().inputValue());
+  for (let guard = 0; guard < 80; guard++) {
+    if (await page.getByText("Sessione completata").count()) break;
+    if (await salta().count()) { await salta().first().click(); await page.waitForTimeout(120); continue; }
+    const btn = page.getByRole("button", { name: /Serie fatta|Dopo/ });
+    if (await btn.count()) { await btn.first().click(); await page.waitForTimeout(350); }
+    else await page.waitForTimeout(250);
+  }
+  await page.waitForTimeout(800); await sync(page);
+  sets = await setLogs(be, d);
+  ok("Player: ogni serie fatta ha il peso proposto", sets.length === total && sets.every(r => r.data.done && r.data.weight === "30"), JSON.stringify(sets.map(r => [r.data.exerciseName, r.data.setIndex, r.data.done, r.data.weight])));
+  const text = await bodyText(page);
+  ok("riepilogo: tutte le serie e il peso proposto", new RegExp(`· ${total} serie`).test(text) && /30 kg/.test(text), text.slice(0, 300));
+  ok("riepilogo: tonnellaggio contato", !/Tonnellaggio\s*—/i.test(text), text.slice(0, 300));
+  ok("nessun errore JS", page._errors.length === 0, page._errors.join(" | "));
+  await ctx.close();
+});
+
 // P-M2: svuotato a mano resta vuoto, e a video c'è ciò che registra la spunta.
 await scenario("Peso svuotato a mano — resta vuoto, vista e spunta coincidono", async () => {
   const be = await newBackend(); await seedPlans(be);

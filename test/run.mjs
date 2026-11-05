@@ -1360,11 +1360,20 @@ await (async () => {
 
       // sanitize riempie le serie mancanti: nessun record nuovo, nemmeno al primo gesto dopo.
       const exK2 = WB.exId("Giorno 1", 1);
+      // Blocco accorciato (serie aggiunte al piano) → sanitize lo riempie, in silenzio come la Scheda; poi il gesto vero.
+      const nSets = days[0].exercises[1].sets.length, short = WB.readSchedaProg(B.S, TODAY);
+      short.pesos[exK2] = ["70"]; short.names[exK2] = WB.schedaNameAt(days, exK2).name;
+      const san = WB.sanitizeSchedaProg(short, days, WB.schedaPlanSig(days));
+      ok("Ruling 62: sanitize ha riempito le serie del blocco corto", san.changed && san.prog.pesos[exK2].length === nSets);
+      const n00 = B.net.requests.length;
+      B.S.set(WB.schedaProgKey(TODAY), san.prog, { silent: true });
+      await tick(); B.clock.t += 1000; await B.sync();
+      ok("Ruling 62: la pulizia di sanitize non manda nulla", B.sent(n00).filter(c => c.collection === "setLog").length === 0);
       const n0 = B.net.requests.length;
-      WB.writeSchedaProg(B.S, TODAY, { pesos: { [exK2]: ["70", null, null] } }, { names: { [exK2]: WB.schedaNameAt(days, exK2).name }, sig: WB.schedaPlanSig(days) });
+      WB.writeSchedaProg(B.S, TODAY, { pesos: { [exK2]: WB.schedaPesoAt(["70"], nSets, 1, "71") } }, { names: { [exK2]: WB.schedaNameAt(days, exK2).name }, sig: WB.schedaPlanSig(days) });
       await tick(); B.clock.t += 1000; await B.sync();
       const typed = B.sent(n0).filter(c => c.collection === "setLog");
-      ok("Ruling 62: peso digitato senza spunta si sincronizza, una serie sola", typed.length === 1 && typed[0].data.weight === "70" && typed[0].data.done === false, JSON.stringify(typed.map(c => c.data)));
+      ok("Ruling 62: il primo gesto dopo una sanitize manda solo le serie toccate", typed.length === 2 && typed.every(c => c.data.done === false) && typed.map(c => c.data.weight).sort().join() === "70,71", JSON.stringify(typed.map(c => c.data)));
       const fill = WB.sanitizeSchedaProg({ completion: { [exK2]: [true] }, substitutions: {}, pesos: {}, names: { [exK2]: WB.schedaNameAt(days, exK2).name }, sig: null }, days, WB.schedaPlanSig(days));
       ok("Ruling 62: sanitize riempie con false, senza segnare serie toccate", fill.prog.completion[exK2].length === days[0].exercises[1].sets.length && fill.prog.completion[exK2].filter(Boolean).length === 1);
       const src = readFileSync(join(ROOT, "screens", "scheda.jsx"), "utf8");
