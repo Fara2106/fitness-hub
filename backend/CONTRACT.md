@@ -32,7 +32,7 @@ Protocollo di sync (push/pull, cursore, `conflicts`, `epoch`/`reset`, regola di 
   shopping?: [{ id, title, color, icon?, items: [{ id, name, qty1, qty2, note|null }] }] }   // opzionale
 ```
 
-`dietPlan.variants[].dayKind` (opzionale, dal 2026-11-06): `"any"` = variante valida in qualsiasi giorno (nell'app «Qualsiasi giorno»), sempre con `training: null`. Assente = come prima: `training` presente è giorno di allenamento, `null` è riposo. Se c'è anche `training`, vince `training`. La PWA ignora il campo e non lo perde, perché non riscrive i piani. Non legge però le varianti con `key` fuori da `riposo|mattina|ore17|ore21|ore22` (`_getDieta` in `screens/dieta.jsx`): in un piano misto mostra la più vicina con l'avviso, in un piano senza nessuna chiave standard mostra `_FALLBACK`, cioè pasti scritti nel codice e senza avviso.
+`dietPlan.variants[].dayKind` (opzionale, dal 2026-11-06): `"any"` = variante valida in qualsiasi giorno (nell'app «Qualsiasi giorno»), sempre con `training: null`. Assente = come prima: `training` presente è giorno di allenamento, `null` è riposo. Se c'è anche `training`, vince `training`. La PWA legge il campo con la stessa regola dell'app (`PlanConv.pickDietVariant`) e non riscrive i piani. Con almeno una `key` fuori da `riposo|mattina|ore17|ore21|ore22` mostra un selettore con tutte le varianti del piano e non usa mai `_FALLBACK`.
 
 Alimenti = **testo libero**: `options[].text` e `lines[].choices[]` sono stringhe (`"80g riso basmati"`); l'editor dell'app aiuta con quantità + alimento ma salva testo.
 
