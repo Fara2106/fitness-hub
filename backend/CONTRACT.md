@@ -31,6 +31,9 @@ Protocollo di sync (push/pull, cursore, `conflicts`, `epoch`/`reset`, regola di 
                supplements: [{ id, key, name, moment, time: "HH:MM" }] }],
   shopping?: [{ id, title, color, icon?, items: [{ id, name, qty1, qty2, note|null }] }] }   // opzionale
 ```
+
+`dietPlan.variants[].dayKind` (opzionale, dal 2026-11-06): `"any"` = variante valida in qualsiasi giorno (nell'app «Qualsiasi giorno»), sempre con `training: null`. Assente = come prima: `training` presente è giorno di allenamento, `null` è riposo. Se c'è anche `training`, vince `training`. La PWA ignora il campo e non lo perde, perché non riscrive i piani. Non legge però le varianti con `key` fuori da `riposo|mattina|ore17|ore21|ore22` (`_getDieta` in `screens/dieta.jsx`): in un piano misto mostra la più vicina con l'avviso, in un piano senza nessuna chiave standard mostra `_FALLBACK`, cioè pasti scritti nel codice e senza avviso.
+
 Alimenti = **testo libero**: `options[].text` e `lines[].choices[]` sono stringhe (`"80g riso basmati"`); l'editor dell'app aiuta con quantità + alimento ma salva testo.
 
 `status`: `active` = piano in uso (uno solo per tipo, `validFrom` più recente), `archived` = storico, `draft` = bozza dell'editor ("nuovo piano dal precedente"). La PWA (`activePlan`) ignora già tutto ciò che non è `active`, quindi una bozza non cambia nulla finché non viene attivata. Attivare = bozza `active` con `validFrom` = oggi + piano precedente `archived` con `validTo` = oggi, nello stesso lotto.
