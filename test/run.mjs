@@ -1472,13 +1472,17 @@ await (async () => {
       const A = device(env), B = device(env, { t: T0 + 5 });
       await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN); await A.sync(); await B.sync();
       const id = `${TODAY}:caffeine`;
-      B.SV.putRecords([{ collection: "dayState", id, data: { date: TODAY, field: "caffeine", value: 160 } }]);
+      const entry = `${TODAY}:waterEntry:voce-1`;
+      B.SV.putRecords([{ collection: "dayState", id, data: { date: TODAY, field: "caffeine", value: 160 } },
+        { collection: "dayState", id: entry, data: { date: TODAY, field: "waterEntry", value: { id: "voce-1", amount: 330, at: 1 } } }]);
       await tick(); B.clock.t += 1000; await B.sync();
       A.clock.t += 2000; await A.sync();
       A.S.set(`hydration_${TODAY}`, 3);
       await tick(); A.clock.t += 2000; await A.sync();
       const rec = (await serverRecords(env)).find(r => r.collection === "dayState" && r.id === id);
       ok("Caffeina: un gesto sul giorno nella PWA non tocca il record", !!rec && !rec.deleted && rec.data.value === 160, J(rec));
+      const ent = (await serverRecords(env)).find(r => r.collection === "dayState" && r.id === entry);
+      ok("Storico acqua: un gesto sul giorno nella PWA non tocca le voci", !!ent && !ent.deleted && ent.data.value.amount === 330, J(ent));
     }
 
     // ── Più allenamenti nella stessa data: ogni giorno di scheda chiuso è una sessione col suo inizio ──
