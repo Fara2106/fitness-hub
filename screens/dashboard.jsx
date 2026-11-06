@@ -379,7 +379,7 @@ const Dashboard = ({ device, onNav, activities, addActivity, checkIn, setCheckIn
   const weekGymDays = React.useMemo(() => {
     if (!window.storage) return 0;
     let count = 0;
-    for (let i = 0; i < 7; i++) { const d = new Date(); d.setDate(d.getDate() - i); if (window.storage.get(`gym_${_dayKey(d)}`, false)) count++; }
+    for (let i = 0; i < 7; i++) { const d = new Date(); d.setDate(d.getDate() - i); if (window.storage.get(`gym_${_dayKey(d)}`, false)) count += Math.max(1, Object.keys(window.storage.get(`gymDays_${_dayKey(d)}`, null) || {}).length); }
     return count;
   }, [today, dataRev]);
   const weekMuscles = React.useMemo(() => {

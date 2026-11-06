@@ -94,7 +94,7 @@
   const addDays = (date, n) => { const [y, m, d] = date.split("-").map(Number); return localDate(new Date(y, m - 1, d + n, 12).getTime()); };
   const today = () => (todayFn ? todayFn() : localDate(clock()));
   const RM = () => window.RecordMap;
-  const ctx = () => ({ workout: S.get("plan_workout", null), diet: S.get("plan_diet", null), today: today(), records: (c) => listEffective(c) });
+  const ctx = () => ({ workout: S.get("plan_workout", null), diet: S.get("plan_diet", null), today: today(), local: (k, d) => S.get(k, d), records: (c) => listEffective(c) });
 
   // JSON con chiavi ordinate: confronto di dati indipendente dall'ordine delle proprietà.
   function canon(x) {

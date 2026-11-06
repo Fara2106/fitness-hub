@@ -132,6 +132,7 @@ const I18N_DICT = {
   "Sessione completa — Salva": { en: "Session complete — Save" },
   "Chiudi sessione": { en: "Close session" },
   "Sessione salvata": { en: "Session saved" },
+  "Hai fatto {done} serie su {total}. Chiudere la sessione?": { en: "You did {done} of {total} sets. Finish the session?" },
   "Errore salvataggio": { en: "Save error" },
   "Rate of Perceived Exertion: quanto hai lavorato duramente su scala 1-10. 7 = moderato · 8 = faticoso · 9 = quasi al limite · 10 = massimale":
     { en: "Rate of Perceived Exertion: how hard the set felt on a 1-10 scale. 7 = moderate · 8 = hard · 9 = near limit · 10 = max effort" },

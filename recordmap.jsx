@@ -37,7 +37,7 @@
 // window.PlanConv (planconv.jsx) e window.schedaPlanSig (schedaState.jsx).
 (function () {
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-  const DAY_KEY_RE = /^(checkIn_|hydration_|notes_|restDay_|dietaVariant_|dietaCheck_|integ_|schedaProg_|gymSaved_|gym_|gymStart_|muscleSets_|coachChat_)(\d{4}-\d{2}-\d{2})$/;
+  const DAY_KEY_RE = /^(checkIn_|hydration_|notes_|restDay_|dietaVariant_|dietaCheck_|integ_|schedaProg_|gymSaved_|gym_|gymDays_|gymStart_|muscleSets_|coachChat_)(\d{4}-\d{2}-\d{2})$/;
   const GROUP_RE = /^(day|variant|cardio|meals|supps|sets|session|coach):(\d{4}-\d{2}-\d{2})$/;
   const NONE = "\uffff";
   const HORIZON_DAYS = 90;     // sweep _cleanupOldDailyKeys (app.jsx): chiavi per-giorno < oggi−90 rimosse
@@ -161,7 +161,7 @@
         case "integ_": return [`supps:${d}`, `variant:${d}`];
         case "schedaProg_": return [`sets:${d}`, `session:${d}`];
         case "gymSaved_": return [`sets:${d}`];
-        case "gym_": case "gymStart_": return [`session:${d}`];
+        case "gym_": case "gymDays_": case "gymStart_": return [`session:${d}`];
         case "coachChat_": return [`coach:${d}`];
         default: return []; // muscleSets_: derivata dai setLog, non è una sorgente
       }
@@ -449,7 +449,9 @@
     return null;
   }
 
-  // workoutSession: solo a sessione chiusa (gym_ = true), giorno con più serie spuntate.
+  // workoutSession: solo a sessione chiusa (gym_ = true). gymDays_<data> = { "Giorno N": inizio } dice quali
+  // giorni di scheda sono stati chiusi quella data, uno per allenamento. Senza la chiave (blocchi di prima)
+  // vale il giorno con più serie spuntate.
   // protect (Ruling 65): una sessione chiusa non si tombstona mai da qui. Nessun gesto la cancella:
   // la PWA non toglie gym_, l'app non ha un'eliminazione, e il gruppo vuoto vuol dire solo che il
   // blocco non ha più quelle serie. Chiusa su un piano non più attivo: non si scrive un doppione.
@@ -458,6 +460,29 @@
     if (!wi) return noTouch("workoutSession");
     const protect = { collection: "workoutSession" };
     if (get(`gym_${date}`, false) !== true) return { records: [], protect };
+    const listed = ctx && typeof ctx.records === "function" ? ctx.records("workoutSession") : null;
+    const today = (Array.isArray(listed) ? listed : []).filter((r) => live(r) && r.data.date === date);
+    const gymStart = get(`gymStart_${date}`, null);
+    const validStart = (v) => (v != null && Number.isSafeInteger(Number(v)) && Number(v) > 0 ? Number(v) : null);
+    const sessionRec = (d, startedAt) => {
+      const id = `${date}:${d.id}`;
+      // Chiusa su un piano non più attivo: niente doppione sotto gli id nuovi.
+      if (!today.some((r) => r.id === id) && today.some((r) => r.data.done === true && !wi.dayById.has(r.data.dayId))) return null;
+      return rec("workoutSession", id, { date, dayId: d.id, dayName: d.name, startedAt, done: true });
+    };
+    const closedDays = get(`gymDays_${date}`, null);
+    if (isObj(closedDays)) {
+      const records = [];
+      for (const [key, start] of Object.entries(closedDays)) {
+        const m = /^Giorno (\d+)$/.exec(key);
+        const d = m ? wi.days[Number(m[1]) - 1] : null;
+        if (!d) continue;
+        const known = today.find((r) => r.id === `${date}:${d.id}`);
+        const r = sessionRec(d, validStart(start) ?? (known ? validStart(known.data.startedAt) : null));
+        if (r) records.push(r);
+      }
+      return { records, protect };
+    }
     const prog = get(`schedaProg_${date}`, null);
     const completion = isObj(prog) && isObj(prog.completion) ? prog.completion : {};
     const perDay = new Map();
@@ -473,17 +498,8 @@
     }
     const d = bestN === null ? null : wi.days[bestN - 1];
     if (!d) return { records: [], protect };
-    const id = `${date}:${d.id}`;
-    const listed = ctx && typeof ctx.records === "function" ? ctx.records("workoutSession") : null;
-    const today = (Array.isArray(listed) ? listed : []).filter((r) => live(r) && r.data.date === date);
-    if (!today.some((r) => r.id === id) && today.some((r) => r.data.done === true && !wi.dayById.has(r.data.dayId))) return { records: [], protect };
-    const gymStart = get(`gymStart_${date}`, null);
-    const start = Number(gymStart);
-    return { records: [rec("workoutSession", id, {
-      date, dayId: d.id, dayName: d.name,
-      startedAt: gymStart != null && Number.isSafeInteger(start) && start > 0 ? start : null,
-      done: true,
-    })], protect };
+    const r = sessionRec(d, validStart(gymStart));
+    return { records: r ? [r] : [], protect };
   }
 
   // Indice stabile per messaggio: i messaggi ricostruiti dal server portano `index` (anche non
@@ -523,7 +539,7 @@
       case "mealCheck": return d ? [`dietaCheck_${d}`] : [];
       case "supplementCheck": return d ? [`integ_${d}`] : [];
       case "setLog": return d ? [`schedaProg_${d}`, `muscleSets_${d}`] : [];
-      case "workoutSession": return d ? [`gym_${d}`, `gymStart_${d}`, `muscleSets_${d}`] : [];
+      case "workoutSession": return d ? [`gym_${d}`, `gymDays_${d}`, `gymStart_${d}`, `muscleSets_${d}`] : [];
       case "coachMessage": return d ? [`coachChat_${d}`] : [];
       case "bodyWeight": return ["weightLog"];
       case "bodyMeasure": return ["bodyMeasures"];
@@ -576,10 +592,24 @@
           case "gym_": // la PWA non toglie mai gym_: senza sessione chiusa la chiave resta com'è
             if (onDate("workoutSession", date).some((r) => r.data.done)) put(key, true);
             break;
-          case "gymStart_": {
-            const s = onDate("workoutSession", date).find((r) => Number.isSafeInteger(r.data.startedAt) && r.data.startedAt > 0);
-            if (s) put(key, s.data.startedAt); // nessun inizio registrato → la chiave locale resta
+          case "gymDays_": { // i giorni chiusi qui e non ancora inviati restano
+            const wi = workoutIndex(ctx && ctx.workout);
+            const closed = onDate("workoutSession", date).filter((r) => r.data.done);
+            if (!wi || !closed.length) break;
+            const local = ctx && typeof ctx.local === "function" ? ctx.local(key, null) : null;
+            const merged = isObj(local) ? { ...local } : {};
+            for (const r of closed) {
+              const n = wi.days.findIndex((d) => d.id === r.data.dayId);
+              if (n >= 0 && merged[`Giorno ${n + 1}`] == null) merged[`Giorno ${n + 1}`] = r.data.startedAt ?? null;
+            }
+            put(key, merged);
             break;
+          }
+          case "gymStart_": { // l'ultimo inizio: un allenamento in corso qui, più recente, resta il suo
+            const starts = onDate("workoutSession", date).map((r) => r.data.startedAt).filter((v) => Number.isSafeInteger(v) && v > 0);
+            const local = ctx && typeof ctx.local === "function" ? Number(ctx.local(key, 0)) : 0;
+            if (starts.length && Math.max(...starts) > local) put(key, Math.max(...starts));
+            break; // nessun inizio registrato → la chiave locale resta
           }
           case "muscleSets_": rebuildMuscleSets(key, date, onDate, ctx, out); break;
           case "coachChat_": {

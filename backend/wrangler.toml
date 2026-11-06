@@ -17,8 +17,8 @@ PRIMARY_OWNER = "7e8c37a9-62dd-4f25-8be3-1c209840db09"
 LEGACY_TOKEN_ENABLED = "true"
 # Registrazione chiusa: l'unico account è quello di Lorenzo (creato con admin/account.mjs).
 REGISTRATION_OPEN = "false"
-# Accedi con Apple: costruito ma spento finché non c'è il programma sviluppatori a pagamento.
-APPLE_SIGNIN_ENABLED = "false"
+# Accedi con Apple: acceso dal 2026-11-06 (entra solo chi ha collegato l'Apple ID al suo account: la registrazione resta chiusa).
+APPLE_SIGNIN_ENABLED = "true"
 APPLE_BUNDLE_ID = "it.faraoni.fitnesshub"
 # Secret (non qui): SYNC_TOKEN (solo durante il passaggio) e PASSWORD_PEPPER (pepper delle password, creato con
 # `node admin/account.mjs init-pepper` e caricato con `npx wrangler secret put PASSWORD_PEPPER < ~/.config/fitness-hub/pepper`).

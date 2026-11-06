@@ -1754,7 +1754,7 @@ window.buildDefaultNotifConfig = function () {
 ;(function () {
 (function () {
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-  const DAY_KEY_RE = /^(checkIn_|hydration_|notes_|restDay_|dietaVariant_|dietaCheck_|integ_|schedaProg_|gymSaved_|gym_|gymStart_|muscleSets_|coachChat_)(\d{4}-\d{2}-\d{2})$/;
+  const DAY_KEY_RE = /^(checkIn_|hydration_|notes_|restDay_|dietaVariant_|dietaCheck_|integ_|schedaProg_|gymSaved_|gym_|gymDays_|gymStart_|muscleSets_|coachChat_)(\d{4}-\d{2}-\d{2})$/;
   const GROUP_RE = /^(day|variant|cardio|meals|supps|sets|session|coach):(\d{4}-\d{2}-\d{2})$/;
   const NONE = "\uffff";
   const HORIZON_DAYS = 90;
@@ -1936,6 +1936,7 @@ window.buildDefaultNotifConfig = function () {
         case "gymSaved_":
           return [`sets:${d}`];
         case "gym_":
+        case "gymDays_":
         case "gymStart_":
           return [`session:${d}`];
         case "coachChat_":
@@ -2303,6 +2304,37 @@ window.buildDefaultNotifConfig = function () {
       records: [],
       protect
     };
+    const listed = ctx && typeof ctx.records === "function" ? ctx.records("workoutSession") : null;
+    const today = (Array.isArray(listed) ? listed : []).filter(r => live(r) && r.data.date === date);
+    const gymStart = get(`gymStart_${date}`, null);
+    const validStart = v => v != null && Number.isSafeInteger(Number(v)) && Number(v) > 0 ? Number(v) : null;
+    const sessionRec = (d, startedAt) => {
+      const id = `${date}:${d.id}`;
+      if (!today.some(r => r.id === id) && today.some(r => r.data.done === true && !wi.dayById.has(r.data.dayId))) return null;
+      return rec("workoutSession", id, {
+        date,
+        dayId: d.id,
+        dayName: d.name,
+        startedAt,
+        done: true
+      });
+    };
+    const closedDays = get(`gymDays_${date}`, null);
+    if (isObj(closedDays)) {
+      const records = [];
+      for (const [key, start] of Object.entries(closedDays)) {
+        const m = /^Giorno (\d+)$/.exec(key);
+        const d = m ? wi.days[Number(m[1]) - 1] : null;
+        if (!d) continue;
+        const known = today.find(r => r.id === `${date}:${d.id}`);
+        const r = sessionRec(d, validStart(start) ?? (known ? validStart(known.data.startedAt) : null));
+        if (r) records.push(r);
+      }
+      return {
+        records,
+        protect
+      };
+    }
     const prog = get(`schedaProg_${date}`, null);
     const completion = isObj(prog) && isObj(prog.completion) ? prog.completion : {};
     const perDay = new Map();
@@ -2321,23 +2353,9 @@ window.buildDefaultNotifConfig = function () {
       records: [],
       protect
     };
-    const id = `${date}:${d.id}`;
-    const listed = ctx && typeof ctx.records === "function" ? ctx.records("workoutSession") : null;
-    const today = (Array.isArray(listed) ? listed : []).filter(r => live(r) && r.data.date === date);
-    if (!today.some(r => r.id === id) && today.some(r => r.data.done === true && !wi.dayById.has(r.data.dayId))) return {
-      records: [],
-      protect
-    };
-    const gymStart = get(`gymStart_${date}`, null);
-    const start = Number(gymStart);
+    const r = sessionRec(d, validStart(gymStart));
     return {
-      records: [rec("workoutSession", id, {
-        date,
-        dayId: d.id,
-        dayName: d.name,
-        startedAt: gymStart != null && Number.isSafeInteger(start) && start > 0 ? start : null,
-        done: true
-      })],
+      records: r ? [r] : [],
       protect
     };
   }
@@ -2386,7 +2404,7 @@ window.buildDefaultNotifConfig = function () {
       case "setLog":
         return d ? [`schedaProg_${d}`, `muscleSets_${d}`] : [];
       case "workoutSession":
-        return d ? [`gym_${d}`, `gymStart_${d}`, `muscleSets_${d}`] : [];
+        return d ? [`gym_${d}`, `gymDays_${d}`, `gymStart_${d}`, `muscleSets_${d}`] : [];
       case "coachMessage":
         return d ? [`coachChat_${d}`] : [];
       case "bodyWeight":
@@ -2478,10 +2496,27 @@ window.buildDefaultNotifConfig = function () {
           case "gym_":
             if (onDate("workoutSession", date).some(r => r.data.done)) put(key, true);
             break;
+          case "gymDays_":
+            {
+              const wi = workoutIndex(ctx && ctx.workout);
+              const closed = onDate("workoutSession", date).filter(r => r.data.done);
+              if (!wi || !closed.length) break;
+              const local = ctx && typeof ctx.local === "function" ? ctx.local(key, null) : null;
+              const merged = isObj(local) ? {
+                ...local
+              } : {};
+              for (const r of closed) {
+                const n = wi.days.findIndex(d => d.id === r.data.dayId);
+                if (n >= 0 && merged[`Giorno ${n + 1}`] == null) merged[`Giorno ${n + 1}`] = r.data.startedAt ?? null;
+              }
+              put(key, merged);
+              break;
+            }
           case "gymStart_":
             {
-              const s = onDate("workoutSession", date).find(r => Number.isSafeInteger(r.data.startedAt) && r.data.startedAt > 0);
-              if (s) put(key, s.data.startedAt);
+              const starts = onDate("workoutSession", date).map(r => r.data.startedAt).filter(v => Number.isSafeInteger(v) && v > 0);
+              const local = ctx && typeof ctx.local === "function" ? Number(ctx.local(key, 0)) : 0;
+              if (starts.length && Math.max(...starts) > local) put(key, Math.max(...starts));
               break;
             }
           case "muscleSets_":
@@ -2773,6 +2808,7 @@ window.buildDefaultNotifConfig = function () {
     workout: S.get("plan_workout", null),
     diet: S.get("plan_diet", null),
     today: today(),
+    local: (k, d) => S.get(k, d),
     records: c => listEffective(c)
   });
   function canon(x) {
@@ -4445,6 +4481,9 @@ const I18N_DICT = {
   },
   "Sessione salvata": {
     en: "Session saved"
+  },
+  "Hai fatto {done} serie su {total}. Chiudere la sessione?": {
+    en: "You did {done} of {total} sets. Finish the session?"
   },
   "Errore salvataggio": {
     en: "Save error"
@@ -9207,7 +9246,7 @@ const Dashboard = ({
     for (let i = 0; i < 7; i++) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      if (window.storage.get(`gym_${_dayKey(d)}`, false)) count++;
+      if (window.storage.get(`gym_${_dayKey(d)}`, false)) count += Math.max(1, Object.keys(window.storage.get(`gymDays_${_dayKey(d)}`, null) || {}).length);
     }
     return count;
   }, [today, dataRev]);
@@ -11190,7 +11229,10 @@ const Scheda = ({
     }) : rawPatch;
     if (patch.completion && window.storage) {
       const k = `gymStart_${dayK}`;
-      if (!window.storage.get(k, null) && Object.values(patch.completion).some(arr => (arr || []).some(Boolean))) {
+      const cur = window.storage.get(k, null);
+      const closed = window.storage.get(`gymDays_${dayK}`, null) || {};
+      const fresh = !cur || !(scheda in closed) && Object.values(closed).includes(cur);
+      if (fresh && Object.values(patch.completion).some(arr => (arr || []).some(Boolean))) {
         window.storage.set(k, Date.now());
       }
     }
@@ -11324,7 +11366,9 @@ const Scheda = ({
   React.useEffect(() => {
     if (!saveRequested) return;
     setSaveRequested(false);
-    if (completedSets > 0) handleSaveSession();
+    if (completedSets === 0) return;
+    if (!allDone && !window.confirm(t("Hai fatto {done} serie su {total}. Chiudere la sessione?").replace("{done}", completedSets).replace("{total}", totalSets))) return;
+    handleSaveSession();
   }, [saveRequested]);
   const toggleSet = (exIdx, setIdx) => {
     if (navigator.vibrate) navigator.vibrate([100]);
@@ -11350,14 +11394,22 @@ const Scheda = ({
       const today = dayK;
       if (window.storage) window.storage.set(`notes_${today}`, notes);
       if (window.storage) {
+        const closedDays = {
+          ...(window.storage.get(`gymDays_${today}`, null) || {})
+        };
+        if (!(scheda in closedDays)) closedDays[scheda] = window.storage.get(`gymStart_${today}`, null);
+        window.storage.set(`gymDays_${today}`, closedDays);
         window.storage.set(`gym_${today}`, true);
         const GROUP = window.RecordMap.MUSCLE_GROUP;
         const daily = {};
-        exercises.forEach((ex, exIdx) => {
-          const done = (completion[window.exId(scheda, exIdx)] || []).filter(Boolean).length;
-          if (!done) return;
-          const g = GROUP[ex.muscles && ex.muscles[0] || ""] || "Altro";
-          daily[g] = (daily[g] || 0) + done;
+        Object.keys(closedDays).forEach(dayKey => {
+          const closedExercises = (days.find(d => d.key === dayKey) || {}).exercises || [];
+          closedExercises.forEach((ex, exIdx) => {
+            const done = (completion[window.exId(dayKey, exIdx)] || []).filter(Boolean).length;
+            if (!done) return;
+            const g = GROUP[ex.muscles && ex.muscles[0] || ""] || "Altro";
+            daily[g] = (daily[g] || 0) + done;
+          });
         });
         window.storage.set(`muscleSets_${today}`, daily);
         if (window.WorkoutProgress) {
@@ -19073,7 +19125,7 @@ function _cleanupOldDailyKeys() {
     const cut = new Date();
     cut.setDate(cut.getDate() - 90);
     const cutKey = `${cut.getFullYear()}-${String(cut.getMonth() + 1).padStart(2, "0")}-${String(cut.getDate()).padStart(2, "0")}`;
-    const re = /^(checkIn_|hydration_|notes_|gym_|integ_|coachChat_|schedaProg_|muscleSets_|dietaCheck_|dietaVariant_|gymStart_|gymSaved_|restDay_|nudgeDismissed_)(\d{4}-\d{2}-\d{2})$/;
+    const re = /^(checkIn_|hydration_|notes_|gym_|integ_|coachChat_|schedaProg_|muscleSets_|dietaCheck_|dietaVariant_|gymDays_|gymStart_|gymSaved_|restDay_|nudgeDismissed_)(\d{4}-\d{2}-\d{2})$/;
     window.storage.keys().forEach(k => {
       const m = k.match(re);
       if (m && m[2] < cutKey) window.storage.remove(k, {

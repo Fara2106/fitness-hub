@@ -1466,6 +1466,41 @@ await (async () => {
       ok("Ruling 64: nemmeno togliere tutto il blocco tombstona i setLog", !A.sent(n0).some(c => c.collection === "setLog" && c.deleted) && A.SV.listRecords("setLog").filter(r => !r.deleted && r.data.date === TODAY).length === 2);
     }
 
+    // ── Più allenamenti nella stessa data: ogni giorno di scheda chiuso è una sessione col suo inizio ──
+    {
+      const sessionsOf = async (env) => (await serverRecords(env)).filter(r => r.collection === "workoutSession" && r.id.startsWith(`${TODAY}:`) && !r.deleted);
+      const env = await backend();
+      const A = device(env), B = device(env, { t: T0 + 5 });
+      await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN); await A.sync(); await B.sync();
+      const W = A.sb.window, days = W.getSchedule().days, ids = wp.data.days.map(d => d.id);
+      const k = (n) => W.exId(`Giorno ${n}`, 0);
+      const meta = (n) => ({ names: { [k(n)]: W.schedaNameAt(days, k(n)).name }, sig: W.schedaPlanSig(days) });
+      // Primo allenamento: tre serie. Secondo: una sola, meno del primo.
+      W.writeSchedaProg(A.S, TODAY, { completion: { [k(1)]: [true, true, true] }, pesos: { [k(1)]: ["55", "55", "55"] } }, meta(1));
+      A.S.set(`gymStart_${TODAY}`, 1000); A.S.set(`gymDays_${TODAY}`, { "Giorno 1": 1000 }); A.S.set(`gym_${TODAY}`, true);
+      await tick(); A.clock.t += 1000; await A.sync();
+      ok("Più allenamenti: il primo è sul server", (await sessionsOf(env)).map(r => r.id).join() === `${TODAY}:${ids[0]}`);
+      // Una spunta su un altro giorno non chiude nulla.
+      W.writeSchedaProg(A.S, TODAY, { completion: { [k(2)]: [true] }, pesos: { [k(2)]: ["40"] } }, meta(2));
+      await tick(); A.clock.t += 1000; await A.sync();
+      ok("Più allenamenti: una spunta su un altro giorno non crea una sessione", (await sessionsOf(env)).length === 1);
+      A.S.set(`gymStart_${TODAY}`, 2000); A.S.set(`gymDays_${TODAY}`, { "Giorno 1": 1000, "Giorno 2": 2000 });
+      await tick(); A.clock.t += 1000; await A.sync();
+      const two = await sessionsOf(env);
+      const byId = Object.fromEntries(two.map(r => [r.id, r.data.startedAt]));
+      ok("Più allenamenti: due sessioni, anche se il secondo ha meno serie", two.length === 2, J(two.map(r => r.id)));
+      ok("Più allenamenti: ognuna col suo inizio", byId[`${TODAY}:${ids[0]}`] === 1000 && byId[`${TODAY}:${ids[1]}`] === 2000, J(byId));
+      B.clock.t += 3000; await B.sync();
+      ok("Più allenamenti: l'altro device vede i due giorni chiusi", J(B.S.get(`gymDays_${TODAY}`))["Giorno 1"] === 1000 && J(B.S.get(`gymDays_${TODAY}`))["Giorno 2"] === 2000, J(B.S.get(`gymDays_${TODAY}`)));
+      ok("Più allenamenti: l'inizio è l'ultimo, non il primo", B.S.get(`gymStart_${TODAY}`) === 2000);
+      // Sessione chiusa altrove mentre qui un giorno chiuso è ancora in coda: non si perde.
+      B.SV.putRecords([{ collection: "workoutSession", id: `${TODAY}:${ids[2]}`, data: { date: TODAY, dayId: ids[2], dayName: wp.data.days[2].name, startedAt: 3000, done: true } }]);
+      await tick(); B.clock.t += 1000; await B.sync();
+      A.S.set(`gymDays_${TODAY}`, { "Giorno 1": 1000, "Giorno 2": 2000, "Giorno 4": null });
+      A.clock.t += 5000; await A.sync();
+      ok("Più allenamenti: un pull unisce i giorni chiusi, non li sostituisce", Object.keys(A.S.get(`gymDays_${TODAY}`)).length >= 3 && "Giorno 3" in A.S.get(`gymDays_${TODAY}`), J(A.S.get(`gymDays_${TODAY}`)));
+    }
+
     // ── Ruling 65: un workoutSession chiuso non va in tombstone, né si duplica al cambio piano ──
     {
       const sessionsOn = async (env) => (await serverRecords(env)).filter(r => r.collection === "workoutSession" && r.id.startsWith(`${TODAY}:`));

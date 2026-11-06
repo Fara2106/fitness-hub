@@ -927,8 +927,11 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
     // (usato dal riepilogo di chiusura per la durata reale).
     if (patch.completion && window.storage) {
       const k = `gymStart_${dayK}`;
-      if (!window.storage.get(k, null) &&
-          Object.values(patch.completion).some(arr => (arr || []).some(Boolean))) {
+      const cur = window.storage.get(k, null);
+      // L'inizio di un allenamento già chiuso non vale per il prossimo della stessa data.
+      const closed = window.storage.get(`gymDays_${dayK}`, null) || {};
+      const fresh = !cur || (!(scheda in closed) && Object.values(closed).includes(cur));
+      if (fresh && Object.values(patch.completion).some(arr => (arr || []).some(Boolean))) {
         window.storage.set(k, Date.now());
       }
     }
@@ -1082,7 +1085,10 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
   React.useEffect(() => {
     if (!saveRequested) return;
     setSaveRequested(false);
-    if (completedSets > 0) handleSaveSession();
+    if (completedSets === 0) return;
+    // Alla fine del Player ci si arriva anche con le frecce: con serie da fare decide l'utente.
+    if (!allDone && !window.confirm(t("Hai fatto {done} serie su {total}. Chiudere la sessione?").replace("{done}", completedSets).replace("{total}", totalSets))) return;
+    handleSaveSession();
   }, [saveRequested]);
 
   const toggleSet = (exIdx, setIdx) => {
@@ -1111,15 +1117,22 @@ const Scheda = ({ device, scheda, setScheda, checkIn }) => {
       // Chiudere la sessione marca il giorno palestra e registra le serie per
       // gruppo muscolare (la card "Settimana" in Dashboard usa dati reali)
       if (window.storage) {
+        // Ogni giorno di scheda chiuso oggi è un allenamento, col suo inizio.
+        const closedDays = { ...(window.storage.get(`gymDays_${today}`, null) || {}) };
+        if (!(scheda in closedDays)) closedDays[scheda] = window.storage.get(`gymStart_${today}`, null);
+        window.storage.set(`gymDays_${today}`, closedDays);
         window.storage.set(`gym_${today}`, true);
         // Stessa tabella usata dal sync per ricostruire muscleSets_ (recordmap.jsx).
         const GROUP = window.RecordMap.MUSCLE_GROUP;
         const daily = {};
-        exercises.forEach((ex, exIdx) => {
-          const done = (completion[window.exId(scheda, exIdx)] || []).filter(Boolean).length;
-          if (!done) return;
-          const g = GROUP[(ex.muscles && ex.muscles[0]) || ""] || "Altro";
-          daily[g] = (daily[g] || 0) + done;
+        Object.keys(closedDays).forEach((dayKey) => {
+          const closedExercises = (days.find(d => d.key === dayKey) || {}).exercises || [];
+          closedExercises.forEach((ex, exIdx) => {
+            const done = (completion[window.exId(dayKey, exIdx)] || []).filter(Boolean).length;
+            if (!done) return;
+            const g = GROUP[(ex.muscles && ex.muscles[0]) || ""] || "Altro";
+            daily[g] = (daily[g] || 0) + done;
+          });
         });
         window.storage.set(`muscleSets_${today}`, daily);
 

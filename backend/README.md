@@ -104,7 +104,7 @@ Tabelle (`migrations/0003_accounts.sql`, incluse anche in `schema.sql`):
 
 Secret: `PASSWORD_PEPPER` (vedi sotto, `init-pepper`) e, durante il passaggio, `SYNC_TOKEN`.
 Variabili (`[vars]` di `wrangler.toml`): `LEGACY_TOKEN_ENABLED` (`"true"` durante il passaggio: `SYNC_TOKEN` →
-`PRIMARY_OWNER`), `REGISTRATION_OPEN` (`"false"`: `/v1/auth/register` → 403), `APPLE_SIGNIN_ENABLED` (`"false"`:
+`PRIMARY_OWNER`), `REGISTRATION_OPEN` (`"false"`: `/v1/auth/register` → 403), `APPLE_SIGNIN_ENABLED` (`"true"` dal 2026-11-06; con `"false"`:
 `/v1/auth/apple*` → 404), `APPLE_BUNDLE_ID` (`aud` atteso nel JWT di Apple). Con Apple acceso il Worker scarica le
 chiavi da `https://appleid.apple.com/auth/keys` (in cache 1 ora; un `kid` sconosciuto forza un nuovo download al massimo
 una volta al minuto) e verifica RS256, `iss`, `aud`, `exp`, `iat`, `sub` e `nonce` = SHA-256 del nonce inviato.
