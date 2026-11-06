@@ -1466,6 +1466,21 @@ await (async () => {
       ok("Ruling 64: nemmeno togliere tutto il blocco tombstona i setLog", !A.sent(n0).some(c => c.collection === "setLog" && c.deleted) && A.SV.listRecords("setLog").filter(r => !r.deleted && r.data.date === TODAY).length === 2);
     }
 
+    // ── Caffeina: la segna solo l'app, la PWA non la conosce e non la cancella ──
+    {
+      const env = await backend();
+      const A = device(env), B = device(env, { t: T0 + 5 });
+      await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN); await A.sync(); await B.sync();
+      const id = `${TODAY}:caffeine`;
+      B.SV.putRecords([{ collection: "dayState", id, data: { date: TODAY, field: "caffeine", value: 160 } }]);
+      await tick(); B.clock.t += 1000; await B.sync();
+      A.clock.t += 2000; await A.sync();
+      A.S.set(`hydration_${TODAY}`, 3);
+      await tick(); A.clock.t += 2000; await A.sync();
+      const rec = (await serverRecords(env)).find(r => r.collection === "dayState" && r.id === id);
+      ok("Caffeina: un gesto sul giorno nella PWA non tocca il record", !!rec && !rec.deleted && rec.data.value === 160, J(rec));
+    }
+
     // ── Più allenamenti nella stessa data: ogni giorno di scheda chiuso è una sessione col suo inizio ──
     {
       const sessionsOf = async (env) => (await serverRecords(env)).filter(r => r.collection === "workoutSession" && r.id.startsWith(`${TODAY}:`) && !r.deleted);
