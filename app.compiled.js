@@ -1631,6 +1631,7 @@ window.buildDefaultNotifConfig = function () {
     });
     const out = {};
     planData.variants.forEach(v => {
+      if (out[v.key]) return;
       const base = DEF[v.key] || [];
       const integratori = v.supplements && v.supplements.length ? v.supplements.map(s => {
         const known = base.find(b => b.type === s.key);
@@ -1653,7 +1654,51 @@ window.buildDefaultNotifConfig = function () {
         integratori: []
       };
     });
+    Object.defineProperty(out, "_variants", {
+      value: dietVariants(planData)
+    });
     return out;
+  }
+  function dietKind(v) {
+    if (v && v.training) return "training";
+    return v && v.dayKind === "any" ? "any" : "rest";
+  }
+  function dietVariants(planData) {
+    if (!planData || !Array.isArray(planData.variants)) return [];
+    return planData.variants.filter((v, i, a) => v && typeof v.key === "string" && a.findIndex(x => x && x.key === v.key) === i).map(v => ({
+      key: v.key,
+      name: v.name || v.key,
+      kind: dietKind(v),
+      time: v.training && v.training.time ? v.training.time : null
+    }));
+  }
+  function isCustomDiet(variants) {
+    return Array.isArray(variants) && variants.some(v => LEGACY_KEYS.indexOf(v.key) === -1);
+  }
+  function pickDietVariant(variants, opts) {
+    if (!Array.isArray(variants) || !variants.length) return null;
+    const date = opts.date,
+      st = opts.st;
+    const byKey = k => variants.find(v => v.key === k) || null;
+    const saved = st && st.get ? st.get(`dietaVariant_${date}`, null) : null;
+    if (typeof saved === "string" && byKey(saved)) return saved;
+    const bound = variants.find(v => v.kind !== "any" && v.kind === "training" === !!opts.training);
+    if (bound) return bound.key;
+    const anyV = variants.filter(v => v.kind === "any");
+    if (anyV.length && st && st.keys) {
+      let best = null;
+      st.keys().forEach(k => {
+        const m = /^dietaVariant_(\d{4}-\d{2}-\d{2})$/.exec(k);
+        if (!m || m[1] >= date) return;
+        const val = st.get(k, null);
+        if (anyV.some(v => v.key === val) && (!best || m[1] > best.d)) best = {
+          d: m[1],
+          key: val
+        };
+      });
+      if (best) return best.key;
+    }
+    return (anyV[0] || variants[0]).key;
   }
   const TEXT_MAX = 3000;
   const CUT = "\n[…troncato]";
@@ -1743,6 +1788,9 @@ window.buildDefaultNotifConfig = function () {
     dietPlanFromText,
     toLegacyScheda,
     toLegacyDieta,
+    dietVariants,
+    isCustomDiet,
+    pickDietVariant,
     planToText,
     activePlan
   };
@@ -4892,6 +4940,12 @@ const I18N_DICT = {
   },
   "Attività di oggi": {
     en: "Today's activity"
+  },
+  "Variante di oggi": {
+    en: "Today's variant"
+  },
+  "Qualsiasi giorno": {
+    en: "Any day"
   },
   "Allenamento:": {
     en: "Workout:"
@@ -8525,7 +8579,11 @@ function _nextMealHome() {
   const saved = window.storage ? window.storage.get(`dietaVariant_${today}`, null) : null;
   const sess = window.getTodaySession ? window.getTodaySession() : null;
   const has = k => dieta[k] && dieta[k].meals && dieta[k].meals.length;
-  const key = saved && has(saved) ? saved : sess && has("ore17") ? "ore17" : "riposo";
+  const key = dieta._fromPlan && window.PlanConv && window.PlanConv.isCustomDiet(dieta._variants) ? window.PlanConv.pickDietVariant(dieta._variants, {
+    date: today,
+    training: !!sess,
+    st: window.storage
+  }) : saved && has(saved) ? saved : sess && has("ore17") ? "ore17" : "riposo";
   const section = dieta[key];
   if (!section || !section.meals || !section.meals.length) return null;
   const now = new Date();
@@ -12498,7 +12556,18 @@ function _getDieta() {
     const fromPlan = !!parsed._fromPlan;
     const has = k => parsed[k] && parsed[k].meals && parsed[k].meals.length;
     const KEYS = ["riposo", "mattina", "ore17", "ore21", "ore22"];
-    if (!KEYS.some(has)) return _FALLBACK;
+    if (fromPlan && window.PlanConv && window.PlanConv.isCustomDiet(parsed._variants)) {
+      parsed._variants.forEach(v => {
+        (parsed[v.key].meals || []).forEach(m => {
+          if (!m.sortTime) m.sortTime = m.time;
+        });
+      });
+      Object.defineProperty(parsed, "_custom", {
+        value: true
+      });
+      return parsed;
+    }
+    if (!KEYS.some(has)) return fromPlan ? parsed : _FALLBACK;
     KEYS.filter(has).forEach(k => {
       if (!fromPlan && (!parsed[k].integratori || !parsed[k].integratori.length)) parsed[k].integratori = _SUPPS_MAP[k];
       parsed[k].meals.forEach(m => {
@@ -12527,6 +12596,14 @@ function _getDieta() {
 function _savedVariant(today) {
   const v = window.storage ? window.storage.get(`dietaVariant_${today}`, null) : null;
   return v === "riposo" || _DAY_TYPES.some(d => d.id === v) ? v : null;
+}
+function _customVariantKey(dieta, today) {
+  const training = !!(window.getTodaySession && window.getTodaySession());
+  return window.PlanConv.pickDietVariant(dieta._variants, {
+    date: today,
+    training,
+    st: window.storage
+  });
 }
 function _buildTimeline(meals, integratori) {
   const parseMinutes = t => {
@@ -13086,9 +13163,13 @@ const Dieta = ({
     setTrainTime(id);
     saveVariant(id);
   };
+  const pickCustom = key => {
+    saveVariant(key);
+    bump(n => n + 1);
+  };
   const [checked, setChecked] = React.useState(() => window.storage ? window.storage.get(`integ_${today}`, {}) : {});
   const toggleSupp = type => {
-    saveVariant(training ? trainTime : "riposo");
+    saveVariant(shownVariant);
     setChecked(c => {
       const next = {
         ...c,
@@ -13101,7 +13182,7 @@ const Dieta = ({
   };
   const [mealChecked, setMealChecked] = React.useState(() => window.storage ? window.storage.get(`dietaCheck_${today}`, {}) : {});
   const toggleMeal = key => {
-    saveVariant(training ? trainTime : "riposo");
+    saveVariant(shownVariant);
     setMealChecked(c => {
       const next = {
         ...c,
@@ -13123,13 +13204,21 @@ const Dieta = ({
         setTraining(v !== "riposo");
         if (v !== "riposo") setTrainTime(v);
       }
+      bump(n => n + 1);
     }
     if (keys.indexOf("plan_diet") !== -1) setDieta(_getDieta());
     if (keys.indexOf("plan_workout") !== -1) bump(n => n + 1);
   });
   const _mealKey = ml => `${ml.time}|${ml.title}`;
-  const dayType = training ? trainTime : "riposo";
-  const section = dieta[dayType] || dieta.riposo;
+  const custom = !!dieta._custom;
+  const customKey = custom ? _customVariantKey(dieta, today) : null;
+  const dayType = custom ? customKey : training ? trainTime : "riposo";
+  const shownVariant = custom ? customKey : training ? trainTime : "riposo";
+  const section = dieta[dayType] || dieta.riposo || {
+    meals: [],
+    integratori: []
+  };
+  const customInfo = custom ? dieta._variants.find(v => v.key === customKey) || null : null;
   const meals = section.meals || [];
   const supps = section.integratori && section.integratori.length ? section.integratori : dieta._fromPlan ? [] : _SUPPS_MAP[dayType] || _SUPPS_RIPOSO;
   const ct = _CARDIO_TYPES.find(c => c.id === cardioType) || _CARDIO_TYPES[0];
@@ -13198,12 +13287,54 @@ const Dieta = ({
       letterSpacing: 0.5,
       textTransform: "uppercase"
     }
-  }, t("Attività di oggi")), React.createElement("div", {
+  }, custom ? t("Variante di oggi") : t("Attività di oggi")), custom ? (customInfo && React.createElement("div", {
     className: "muted",
     style: {
       fontSize: 12
     }
-  }, !training && !cardio && "💤 " + t("Riposo"), training && !cardio && "💪 " + t("Solo pesi"), !training && cardio && "🔥 " + t("Solo cardio"), training && cardio && "🔥 " + t("Pesi + cardio"))), React.createElement("div", {
+  }, customInfo.kind === "any" && t("Qualsiasi giorno"), customInfo.kind === "training" && "💪 " + t("Allenamento") + (customInfo.time ? " · " + customInfo.time : ""), customInfo.kind === "rest" && "💤 " + t("Giorno di riposo"))) : React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 12
+    }
+  }, !training && !cardio && "💤 " + t("Riposo"), training && !cardio && "💪 " + t("Solo pesi"), !training && cardio && "🔥 " + t("Solo cardio"), training && cardio && "🔥 " + t("Pesi + cardio"))), custom && React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "hscroll",
+    style: {
+      marginLeft: 0,
+      marginRight: 0,
+      paddingLeft: 0,
+      paddingRight: 0
+    }
+  }, dieta._variants.map(v => {
+    const on = customKey === v.key;
+    return React.createElement("button", {
+      key: v.key,
+      onClick: () => pickCustom(v.key),
+      "aria-pressed": on,
+      style: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        padding: "7px 12px",
+        border: 0,
+        background: on ? "var(--accent)" : "var(--card-2)",
+        color: on ? "#fff" : "var(--text)",
+        borderRadius: 999,
+        fontSize: 12.5,
+        fontWeight: on ? 600 : 500,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        transition: "all 0.16s",
+        marginRight: 4
+      }
+    }, v.name);
+  })), React.createElement("div", {
+    style: {
+      height: 1,
+      background: "var(--border)",
+      margin: "10px 0"
+    }
+  })), !custom && React.createElement(React.Fragment, null, React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
@@ -13296,7 +13427,7 @@ const Dieta = ({
       background: "var(--border)",
       margin: "10px 0"
     }
-  }), React.createElement("div", {
+  })), React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",

@@ -207,6 +207,7 @@
     Object.keys(META).forEach((k) => { emojiByTitle[META[k].title] = META[k].emoji; });
     const out = {};
     planData.variants.forEach((v) => {
+      if (out[v.key]) return;   // chiave doppia: vale la prima, come la ricerca dei record di spunta (recordmap.dietIndex)
       const base = DEF[v.key] || [];
       // Gli integratori sono solo quelli del piano (nessuna lista fissa); la lista
       // curata serve solo da lookup del colore per i prodotti noti.
@@ -220,7 +221,53 @@
     });
     // Come parseDieta: le cinque sezioni esistono sempre.
     LEGACY_KEYS.forEach((k) => { if (!out[k]) out[k] = { meals: [], integratori: [] }; });
+    // Le varianti del piano, nell'ordine del piano (le cinque vuote sopra NON sono varianti):
+    // non enumerabile come _fromPlan, la schermata Dieta le legge da qui.
+    Object.defineProperty(out, "_variants", { value: dietVariants(planData) });
     return out;
+  }
+
+  // ── Varianti della dieta (chiavi qualsiasi: l'app ne crea come `base`, `altra`, `ore08`) ──
+  // Quando vale: stessa regola di DietVariant.dayKind dell'app. `training` presente → allenamento
+  // (vince su tutto), altrimenti dayKind "any" → qualsiasi giorno, altrimenti riposo.
+  function dietKind(v) {
+    if (v && v.training) return "training";
+    return v && v.dayKind === "any" ? "any" : "rest";
+  }
+  function dietVariants(planData) {
+    if (!planData || !Array.isArray(planData.variants)) return [];
+    return planData.variants.filter((v, i, a) => v && typeof v.key === "string" && a.findIndex((x) => x && x.key === v.key) === i)
+      .map((v) => ({ key: v.key, name: v.name || v.key, kind: dietKind(v), time: v.training && v.training.time ? v.training.time : null }));
+  }
+  // true se almeno una variante ha una chiave fuori dalle cinque di parseDieta: solo allora la
+  // schermata Dieta mostra il selettore delle varianti (altrimenti resta quella di sempre).
+  function isCustomDiet(variants) {
+    return Array.isArray(variants) && variants.some((v) => LEGACY_KEYS.indexOf(v.key) === -1);
+  }
+  // Variante del giorno, stessa regola di dietVariant(on:) dell'app: la salvata per quel giorno se è nel
+  // piano; poi la prima legata al giorno (allenamento/riposo, kind ≠ any); poi l'ultima dietVariant
+  // salvata con data precedente tra le "qualsiasi giorno"; poi la prima di queste; poi la prima del piano.
+  // st = window.storage (get/keys); training = oggi c'è un allenamento.
+  function pickDietVariant(variants, opts) {
+    if (!Array.isArray(variants) || !variants.length) return null;
+    const date = opts.date, st = opts.st;
+    const byKey = (k) => variants.find((v) => v.key === k) || null;
+    const saved = st && st.get ? st.get(`dietaVariant_${date}`, null) : null;
+    if (typeof saved === "string" && byKey(saved)) return saved;
+    const bound = variants.find((v) => v.kind !== "any" && (v.kind === "training") === !!opts.training);
+    if (bound) return bound.key;
+    const anyV = variants.filter((v) => v.kind === "any");
+    if (anyV.length && st && st.keys) {
+      let best = null;
+      st.keys().forEach((k) => {
+        const m = /^dietaVariant_(\d{4}-\d{2}-\d{2})$/.exec(k);
+        if (!m || m[1] >= date) return;
+        const val = st.get(k, null);
+        if (anyV.some((v) => v.key === val) && (!best || m[1] > best.d)) best = { d: m[1], key: val };
+      });
+      if (best) return best.key;
+    }
+    return (anyV[0] || variants[0]).key;
   }
 
   // ── Testo per il Coach ────────────────────────────────────────────────────
@@ -315,6 +362,6 @@
     return best ? { id: best.rec.id, data: best.rec.data } : null;
   }
 
-  const PlanConv = { workoutPlanFromText, dietPlanFromText, toLegacyScheda, toLegacyDieta, planToText, activePlan };
+  const PlanConv = { workoutPlanFromText, dietPlanFromText, toLegacyScheda, toLegacyDieta, dietVariants, isCustomDiet, pickDietVariant, planToText, activePlan };
   window.PlanConv = PlanConv;
 })();

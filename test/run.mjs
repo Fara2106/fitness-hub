@@ -553,6 +553,41 @@ console.log("\nSuite PlanConv — piani strutturati ⇄ parseScheda/parseDieta, 
     ok("toLegacyDieta: piano senza integratori → [] (niente lista fissa)", noSupp.riposo.integratori.length === 0);
     ok("toLegacyDieta: piano non valido → null", PC.toLegacyDieta(null) === null);
 
+    // Varianti con chiavi dell'app (`base`, `altra`, `ore08`) e dayKind "any"
+    const mkV = (key, name, extra, nMeals = 1) => ({ id: "v-" + key, key, name, training: null,
+      meals: Array.from({ length: nMeals }, (_, i) => ({ id: `m-${key}-${i}`, name: i ? "Cena" : "Pranzo", time: i ? "20:00" : "13:00", options: [{ id: `o-${key}-${i}`, text: `riso ${key}` }], lines: [] })),
+      supplements: [{ id: `s-${key}`, key: "vitac", name: "Vita C+", moment: "Mattina", time: "08:00" }], ...(extra || {}) });
+    const anyPlan = { status: "active", variants: [mkV("base", "Base", { dayKind: "any" }), mkV("altra", "Altra", { dayKind: "any" }, 2)] };
+    const anyL = PC.toLegacyDieta(anyPlan);
+    ok("toLegacyDieta: varianti `base`/`altra` leggibili per chiave, con i loro pasti", anyL.base.meals.length === 1 && anyL.altra.meals.length === 2 && anyL.altra.meals[0].title === "Pranzo");
+    ok("toLegacyDieta: _variants = varianti del piano nell'ordine (non le cinque vuote), non enumerabile",
+      JSON.stringify(J(anyL._variants)) === JSON.stringify([{ key: "base", name: "Base", kind: "any", time: null }, { key: "altra", name: "Altra", kind: "any", time: null }]) && !Object.keys(anyL).includes("_variants"));
+    ok("dietVariants: kind come DietVariant.dayKind (training vince su any; senza dayKind = riposo)", (() => {
+      const k = (v) => PC.dietVariants({ variants: [v] })[0].kind;
+      return k({ key: "a", training: { time: "08:00" }, dayKind: "any" }) === "training" && k({ key: "b", training: null }) === "rest" &&
+        k({ key: "c", dayKind: "any" }) === "any" && k({ key: "d", training: null, dayKind: "any" }) === "any" && k({ key: "e", dayKind: "training" }) === "rest";
+    })());
+    ok("isCustomDiet: solo con almeno una chiave fuori dalle cinque", !PC.isCustomDiet(PC.dietVariants(dp.data)) && PC.isCustomDiet(PC.dietVariants(anyPlan)) &&
+      PC.isCustomDiet(PC.dietVariants({ variants: [mkV("riposo", "R"), mkV("ore08", "Ore 8", { training: { time: "08:00" } })] })));
+    {
+      const mem = (o) => ({ get: (k, d = null) => (k in o ? o[k] : d), keys: () => Object.keys(o) });
+      const vs = PC.dietVariants({ variants: [mkV("base", "Base", { dayKind: "any" }), mkV("pesi", "Pesi", { training: { time: "17:00" } }), mkV("off", "Off"), mkV("altra", "Altra", { dayKind: "any" })] });
+      const pick = (o, training, date = "2026-11-06") => PC.pickDietVariant(vs, { date, training, st: mem(o) });
+      ok("pickDietVariant 1: la salvata per il giorno, se è nel piano", pick({ "dietaVariant_2026-11-06": "altra" }, true) === "altra");
+      ok("pickDietVariant 1: salvata che non è nel piano → ignorata", pick({ "dietaVariant_2026-11-06": "ore17" }, true) === "pesi");
+      ok("pickDietVariant 2: prima legata al giorno (allenamento / riposo)", pick({}, true) === "pesi" && pick({}, false) === "off");
+      const anyOnly = PC.dietVariants(anyPlan);
+      const pa = (o, date = "2026-11-06") => PC.pickDietVariant(anyOnly, { date, training: true, st: mem(o) });
+      ok("pickDietVariant 3: l'ultima salvata con data precedente tra le qualsiasi giorno",
+        pa({ "dietaVariant_2026-11-02": "altra", "dietaVariant_2026-11-04": "base", "dietaVariant_2026-11-01": "altra" }) === "base" &&
+        pa({ "dietaVariant_2026-11-05": "altra", "dietaVariant_2026-11-04": "base" }) === "altra");
+      ok("pickDietVariant 3: le date uguali o future e i valori fuori piano non contano",
+        pa({ "dietaVariant_2026-11-06": "x", "dietaVariant_2026-11-07": "altra", "dietaVariant_2026-11-03": "ore17" }) === "base");
+      ok("pickDietVariant 4: nessuna storia → prima qualsiasi giorno", pa({}) === "base");
+      ok("pickDietVariant 5: nessuna qualsiasi giorno né legata → prima del piano", PC.pickDietVariant(PC.dietVariants({ variants: [mkV("a", "A", { training: { time: "08:00" } }), mkV("b", "B", { training: { time: "09:00" } })] }), { date: "2026-11-06", training: false, st: mem({}) }) === "a");
+      ok("pickDietVariant: senza varianti → null", PC.pickDietVariant([], { date: "2026-11-06", training: false, st: mem({}) }) === null);
+    }
+
     // activePlan
     const rec = (id, status, validFrom, extra) => ({ collection: "workoutPlan", id, updatedAt: 1, deleted: false, data: { status, validFrom, days: [] }, ...(extra || {}) });
     const two = [rec("a", "active", "2026-01-01"), rec("b", "active", "2026-03-01"), rec("c", "archived", "2026-09-01")];
@@ -933,6 +968,47 @@ await (async () => {
   if (!SV0) return;
 
   try {
+    // ── Piano dieta con varianti "Qualsiasi giorno" scritto dall'app (chiavi `base`/`altra`, training null, dayKind any) ──
+    {
+      const meal = (v, i, time, name) => ({ id: `${v}/m${i}`, name, time, options: [{ id: `${v}/m${i}/o0`, text: `riso ${v}` }], lines: [] });
+      const variant = (key, name, meals) => ({ id: `diet-any/${key}`, key, name, training: null, dayKind: "any", meals,
+        supplements: [{ id: `diet-any/${key}/s0`, key: "vitac", name: "Vita C+", moment: "Mattina", time: "08:00" }] });
+      const anyPlan = { collection: "dietPlan", id: "diet-any", updatedAt: T0 - 86400000, data: { name: "Piano app", status: "active", validFrom: "2026-11-01",
+        variants: [variant("base", "Base", [meal("diet-any/base", 0, "13:00", "Pranzo")]), variant("altra", "Altra", [meal("diet-any/altra", 0, "13:00", "Pranzo"), meal("diet-any/altra", 1, "20:00", "Cena")])] } };
+      const env = await backend({ plans: false });
+      await call(env, { deviceId: "app", cursor: 0, changes: [anyPlan] });
+      const A = device(env), B = device(env, { t: T0 + 5 });
+      await A.SV.setToken(TOKEN); await B.SV.setToken(TOKEN);
+      const legacy = A.sb.window.getDieta();
+      ok("piano dell'app con varianti `base`/`altra` → plan_diet locale e _variants", (A.S.get("plan_diet") || {}).id === "diet-any" && J(legacy._variants).map(v => v.key).join() === "base,altra");
+      const key = "13:00|Pranzo";
+      A.S.set(`dietaVariant_${TODAY}`, "altra");          // gesto: scelta della variante
+      A.S.set(`dietaCheck_${TODAY}`, { [key]: true });    // gesto: spunta
+      A.S.set(`integ_${TODAY}`, { vitac: true });
+      await tick();
+      for (let i = 0; i < 2; i++) { await A.sync(); await B.sync(); }
+      const srv = await serverRecords(env);
+      ok("Qualsiasi giorno: dayState dietVariant = `altra`", ((find(srv, "dayState", `${TODAY}:dietVariant`) || {}).data || {}).value === "altra");
+      ok("Qualsiasi giorno: la spunta crea il mealCheck con l'id del pasto di `altra` (non di `base`, che ha lo stesso time|name)",
+        !!find(srv, "mealCheck", `${TODAY}:diet-any/altra/m0`) && !find(srv, "mealCheck", `${TODAY}:diet-any/base/m0`) && count(srv, "mealCheck") === 1);
+      ok("Qualsiasi giorno: la spunta dell'integratore usa l'id di `altra`", !!find(srv, "supplementCheck", `${TODAY}:diet-any/altra/s0`) && count(srv, "supplementCheck") === 1);
+      ok("Qualsiasi giorno: B riceve variante e spunte", B.S.get(`dietaVariant_${TODAY}`) === "altra" && (B.S.get(`dietaCheck_${TODAY}`) || {})[key] === true && (B.S.get(`integ_${TODAY}`) || {}).vitac === true);
+      ok("Qualsiasi giorno: B non riscrive la variante (nessun push di dayState/mealCheck da B)", !B.sent().some(c => c.collection === "dayState" || c.collection === "mealCheck" || c.collection === "supplementCheck") && B.outbox().length === 0);
+      // B cambia idea: gesto su B → arriva ad A con la nuova variante, la spunta di prima resta sull'`altra`
+      B.S.set(`dietaVariant_${TODAY}`, "base");
+      B.S.set(`dietaCheck_${TODAY}`, { [key]: true });
+      await tick();
+      for (let i = 0; i < 2; i++) { await B.sync(); await A.sync(); }
+      const srv2 = await serverRecords(env);
+      ok("Qualsiasi giorno: scelta di B → dietVariant `base`, spunta sul pasto di `base`", ((find(srv2, "dayState", `${TODAY}:dietVariant`) || {}).data || {}).value === "base" && !!find(srv2, "mealCheck", `${TODAY}:diet-any/base/m0`));
+      ok("Qualsiasi giorno: A vede la scelta di B", A.S.get(`dietaVariant_${TODAY}`) === "base");
+      // Un device che non ha mai scelto nulla non scrive la variante del giorno
+      const C = device(env, { t: T0 + 9 });
+      const before = (await serverRecords(env)).length;
+      await C.SV.setToken(TOKEN);
+      ok("Qualsiasi giorno: un device nuovo che sincronizza senza gesti non scrive niente sul server", C.sent().length === 0 && (await serverRecords(env)).length === before);
+    }
+
     // ── A spunta un pasto, B spunta la spesa ──────────────────────────────────
     {
       const env = await backend();
@@ -2357,6 +2433,87 @@ console.log("\nSuite App v2 — piani dal piano attivo, fallback embedded, vecch
   ok("schermate: i piani non si leggono più da schedaData/dietaData",
     !/get\(\s*"(schedaData|dietaData)"/.test(readFileSync(join(ROOT, "screens", "dieta.jsx"), "utf8") +
       readFileSync(join(ROOT, "screens", "dashboard.jsx"), "utf8") + readFileSync(join(ROOT, "screens", "coach.jsx"), "utf8")));
+}
+
+// ---- Suite Dieta varianti: chiavi qualsiasi (`base`, `altra`, `ore08`), dayKind "any", niente _FALLBACK ----
+console.log("\nSuite Dieta varianti — _getDieta/_customVariantKey (dieta.jsx) e prossimo pasto (dashboard.jsx) con varianti non standard");
+{
+  const sb = { window: {}, console, React: { createElement() {}, useState() {}, useEffect() {}, useRef() {}, useMemo() {}, useCallback() {}, memo: (x) => x, Fragment: 1 } };
+  vm.createContext(sb);
+  let loaded = true;
+  try {
+    const classic = (f) => babel.transformFileSync(join(ROOT, f), { presets: [["@babel/preset-react", { runtime: "classic", development: false }]] }).code;
+    for (const f of ["defaults.jsx", "parser.jsx", "planconv.jsx", "screens/dieta.jsx", "screens/dashboard.jsx"]) vm.runInContext(classic(f), sb, { filename: f });
+  } catch (e) { loaded = false; ok("dieta.jsx + dashboard.jsx si caricano sotto vm — " + e.message.split("\n")[0], false); }
+  const w = sb.window;
+  if (loaded) {
+    const J = (x) => JSON.parse(JSON.stringify(x));
+    const mem = {};
+    w.storage = { get: (k, d = null) => (k in mem ? mem[k] : d), keys: () => Object.keys(mem) };
+    let session = null;
+    w.getTodaySession = () => session;
+    w.todayKey = () => "2026-11-06";
+    const run = (src) => vm.runInContext(src, sb);
+    const FALLBACK = run("_FALLBACK");
+    const meal = (key, i, time, name) => ({ id: `m-${key}-${i}`, name, time, options: [{ id: `o-${key}-${i}`, text: `riso ${key}` }], lines: [] });
+    const V = (key, name, extra, meals) => ({ id: "v-" + key, key, name, training: null, meals: meals || [meal(key, 0, "13:00", "Pranzo"), meal(key, 1, "20:00", "Cena")],
+      supplements: [{ id: `s-${key}`, key: "vitac", name: "Vita C+", moment: "Mattina", time: "08:00" }], ...(extra || {}) });
+    const setPlan = (variants) => { mem.plan_diet = { id: "diet-x", data: { status: "active", validFrom: "2026-11-01", variants } }; };
+    const dayKey = "dietaVariant_2026-11-06";
+
+    // piano solo "qualsiasi giorno"
+    setPlan([V("base", "Base", { dayKind: "any" }), V("altra", "Altra", { dayKind: "any" }, [meal("altra", 0, "12:00", "Pranzo leggero")])]);
+    let d = run("_getDieta()");
+    ok("Dieta: piano solo `base`/`altra` → NON _FALLBACK", d !== FALLBACK);
+    ok("Dieta: piano non standard → selettore (_custom) con le varianti del piano, nell'ordine", d._custom === true && J(d._variants).map(v => v.key).join() === "base,altra");
+    ok("Dieta: i pasti sono quelli del piano, per chiave", d.base.meals.length === 2 && d.altra.meals[0].title === "Pranzo leggero" && d.base.meals[0].primary[0].food === "riso base");
+    ok("Dieta: integratori solo quelli del piano", d.base.integratori.length === 1 && d.base.integratori[0].type === "vitac");
+    ok("Dieta: `_custom` non enumerabile (la forma resta quella del parser)", !Object.keys(d).includes("_custom"));
+
+    // variante del giorno (_customVariantKey) = stessa regola dell'app
+    const key = () => run("_customVariantKey(_getDieta(), '2026-11-06')");
+    session = null; delete mem[dayKey];
+    ok("Dieta: nessuna salvata né legata → prima qualsiasi giorno", key() === "base");
+    mem["dietaVariant_2026-11-03"] = "altra";
+    ok("Dieta: ultima scelta di un giorno precedente tra le qualsiasi giorno", key() === "altra");
+    mem[dayKey] = "base";
+    ok("Dieta: la scelta salvata oggi vince", key() === "base");
+    mem[dayKey] = "ore17";
+    ok("Dieta: salvata non nel piano → si ricade sulla regola", key() === "altra");
+    delete mem[dayKey]; delete mem["dietaVariant_2026-11-03"];
+
+    // piano misto: standard + app
+    setPlan([V("riposo", "Giorno senza allenamento"), V("ore17", "Allenamento ore 17", { training: { time: "17:00" } }), V("ore08", "Allenamento ore 8", { training: { time: "08:00" } }), V("base", "Base", { dayKind: "any" })]);
+    d = run("_getDieta()");
+    ok("Dieta: piano misto → selettore con tutte le varianti (anche `ore08`)", d._custom === true && J(d._variants).map(v => v.key).join() === "riposo,ore17,ore08,base" && d.ore08.meals.length === 2);
+    session = null; ok("Dieta: misto, giorno senza allenamento → prima di riposo", key() === "riposo");
+    session = { name: "PUSH" }; ok("Dieta: misto, giorno di allenamento → prima di allenamento", key() === "ore17");
+
+    // piano solo standard → come prima
+    setPlan(["riposo", "mattina", "ore17", "ore21", "ore22"].map(k => V(k, k)));
+    d = run("_getDieta()");
+    ok("Dieta: piano con le sole chiavi standard → nessun selettore, forma di sempre", !d._custom && ["riposo", "mattina", "ore17", "ore21", "ore22"].every(k => d[k].meals.length === 2) && d !== FALLBACK);
+    setPlan([V("riposo", "R"), V("ore17", "O17", { training: { time: "17:00" } })]);
+    d = run("_getDieta()");
+    ok("Dieta: standard con varianti mancanti → avviso _fallbackFrom come prima", !d._custom && d.ore21._fallbackFrom === "ore17");
+
+    // varianti senza pasti: mai _FALLBACK
+    setPlan([V("base", "Base", { dayKind: "any" }, []), V("altra", "Altra", { dayKind: "any" }, [])]);
+    d = run("_getDieta()");
+    ok("Dieta: piano non standard con varianti senza pasti → NON _FALLBACK, varianti presenti e vuote", d !== FALLBACK && d._custom === true && d.base.meals.length === 0 && d.altra.meals.length === 0);
+    setPlan([V("riposo", "R", {}, []), V("ore17", "O", { training: { time: "17:00" } }, [])]);
+    d = run("_getDieta()");
+    ok("Dieta: piano standard con varianti senza pasti → NON _FALLBACK", d !== FALLBACK && d.riposo.meals.length === 0);
+    delete mem.plan_diet;
+    ok("Dieta: senza piano → testo embedded, nessun selettore", !run("_getDieta()")._custom);
+
+    // Home: prossimo pasto dalla variante di oggi
+    setPlan([V("base", "Base", { dayKind: "any" }, [meal("base", 0, "00:30", "Colazione base")]), V("altra", "Altra", { dayKind: "any" }, [meal("altra", 0, "00:30", "Colazione altra")])]);
+    delete mem[dayKey]; mem["dietaVariant_2026-11-03"] = "altra";
+    ok("Home: piano non standard → il pasto della variante del giorno (regola dell'app)", run("_nextMealHome()").title === "Colazione altra");
+    mem[dayKey] = "base";
+    ok("Home: la variante scelta oggi vince", run("_nextMealHome()").title === "Colazione base");
+  }
 }
 
 // ---- Suite Impostazioni v2: link #sync=, import .txt temporaneo, backup senza dati del device, export completo, CSP ----

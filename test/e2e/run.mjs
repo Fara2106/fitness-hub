@@ -389,6 +389,62 @@ await scenario("Dieta — variante Ore 21 e spunte su un altro device", async ()
   await A.ctx.close(); await B.ctx.close();
 });
 
+// ── Piano dieta dell'app con sole varianti "Qualsiasi giorno" (chiavi `base`/`altra`) ──
+await scenario("Dieta — piano solo Qualsiasi giorno: selettore, scelta, spunte su un altro device", async () => {
+  const be = await newBackend();
+  const SHOTS = join(ROOT, ".superpowers", "sdd", "2026-11-03-fase3-app-swift-iphone");
+  try { mkdirSync(SHOTS, { recursive: true }); } catch (_) {}
+  const meal = (v, i, time, name, text) => ({ id: `app-any/${v}/m${i}`, name, time, options: [{ id: `app-any/${v}/m${i}/o0`, text }], lines: [] });
+  const variant = (key, name, meals) => ({ id: `app-any/${key}`, key, name, training: null, dayKind: "any", meals,
+    supplements: [{ id: `app-any/${key}/s0`, key: "vitac", name: "Vita C+ Slow Release", moment: "Colazione", time: "08:00" }] });
+  const plan = { name: "Piano dall'app", status: "active", validFrom: "2026-11-01", validTo: null, variants: [
+    variant("base", "Base", [meal("base", 0, "08:00", "Colazione base", "50g fiocchi d'avena + 150g yogurt greco"), meal("base", 1, "13:00", "Pranzo base", "80g riso basmati + 150g petto di pollo"), meal("base", 2, "20:00", "Cena base", "200g merluzzo + 300g verdure")]),
+    variant("altra", "Altra", [meal("altra", 0, "13:00", "Pranzo leggero", "70g pasta di farro + 100g tonno"), meal("altra", 1, "20:00", "Cena leggera", "150g salmone + 200g verdure")]),
+  ] };
+  await pushRecords(be, [{ collection: "dietPlan", id: "app-any", data: plan }]);
+  const A = await openApp(IPHONE, be, { seed: SEED_FIRST });
+  const B = await openApp(IPAD, be);
+  const d = await today(A.page);
+  await nav(A.page, "Dieta"); await A.page.waitForTimeout(700);
+  let txt = await bodyText(A.page);
+  ok("piano solo Qualsiasi giorno: i pasti sono quelli del piano (mai il vecchio piano nel codice)", txt.includes("Colazione base") && txt.includes("Cena base") && !txt.includes("Spuntino mattina"), txt.slice(0, 300));
+  ok("selettore delle varianti con i nomi del piano", (await A.page.getByRole("button", { name: "Base", exact: true }).count()) === 1 && (await A.page.getByRole("button", { name: "Altra", exact: true }).count()) === 1);
+  ok("niente interruttore allenamento né orari", (await A.page.locator(".ios-toggle.blue").count()) === 0 && !/Ore 17|Ore 21|Orario sessione|Allenamento pesi/.test(txt));
+  ok("una variante Qualsiasi giorno non dice «riposo»", txt.includes("Qualsiasi giorno") && !/riposo/i.test(txt), txt.slice(0, 200));
+  ok("nessun salvataggio senza gesto (dietaVariant_ vuoto, coda vuota)", (await store(A.page, `dietaVariant_${d}`)) === null && (await pending(A.page)) === 0);
+  await A.page.screenshot({ path: join(SHOTS, "pwa-qualsiasi-giorno.png") });
+  await A.page.emulateMedia({ colorScheme: "dark" }); await A.page.waitForTimeout(400);
+  await A.page.screenshot({ path: join(SHOTS, "pwa-qualsiasi-giorno-scuro.png") });
+  await A.page.emulateMedia({ colorScheme: "light" });
+
+  await A.page.getByRole("button", { name: "Altra", exact: true }).click(); await A.page.waitForTimeout(300);
+  txt = await bodyText(A.page);
+  ok("scelta «Altra»: pasti di Altra, salvata come variante del giorno", txt.includes("Pranzo leggero") && !txt.includes("Colazione base") && (await store(A.page, `dietaVariant_${d}`)) === "altra");
+  await A.page.locator('button[aria-label="Pasto fatto"]').nth(0).click(); await A.page.waitForTimeout(200);
+  await A.page.locator("button", { hasText: "💊" }).first().click(); await A.page.waitForTimeout(300);
+  await sync(A.page);
+  const dv = await getRecord(be, "dayState", `${d}:dietVariant`);
+  ok("backend: dietVariant = altra", dv && dv.data.value === "altra", JSON.stringify(dv && dv.data));
+  ok("backend: mealCheck e supplementCheck con gli id di Altra",
+    !!(await getRecord(be, "mealCheck", `${d}:app-any/altra/m0`)) && !!(await getRecord(be, "supplementCheck", `${d}:app-any/altra/s0`)) &&
+    (await records(be, "mealCheck")).length === 1 && (await records(be, "supplementCheck")).length === 1);
+
+  await sync(B.page);
+  await nav(B.page, "Dieta"); await B.page.waitForTimeout(700);
+  const snap = (p) => p.evaluate(() => ({
+    meals: [...document.querySelectorAll('button[aria-label="Pasto fatto"]')].map(b => (b.parentElement.firstChild.innerText || "").replace(/\s+/g, " ").trim() + (b.classList.contains("on") ? " ✓" : "")),
+    altra: (() => { const b = [...document.querySelectorAll("button")].find(x => x.textContent.trim() === "Altra"); return b ? getComputedStyle(b).fontWeight : null; })(),
+  }));
+  const sa = await snap(A.page), sb = await snap(B.page);
+  ok("B salva la variante del giorno e mostra «Altra» selezionata", (await store(B.page, `dietaVariant_${d}`)) === "altra" && (sb.altra === "600" || sb.altra === "bold"), String(sb.altra));
+  ok("B mostra gli stessi pasti con le stesse spunte", sb.meals.length === 2 && JSON.stringify(sb.meals) === JSON.stringify(sa.meals) && sb.meals.filter(x => x.endsWith("✓")).length === 1, JSON.stringify(sb.meals));
+  ok("B non ha scritto niente sul backend (nessun gesto)", (await records(be, "dayState")).filter(r => r.data.field === "dietVariant").length === 1 && (await records(be, "mealCheck")).length === 1);
+  await nav(B.page, "Home"); await B.page.waitForTimeout(500);
+  ok("Home: prossimo pasto dalla variante scelta (niente pasti del vecchio piano)", !(await bodyText(B.page)).includes("Colazione base"));
+  ok("nessun errore JS", A.page._errors.length === 0 && B.page._errors.length === 0, [...A.page._errors, ...B.page._errors].join(" | "));
+  await A.ctx.close(); await B.ctx.close();
+});
+
 // ── 3c. Import con giorno rinominato: spunte di B ai posti giusti ──────────
 await scenario("Piano cambiato su A — le spunte di oggi su B restano sugli esercizi giusti", async () => {
   const repo = await readFile(join(ROOT, "scheda.txt"), "utf8");

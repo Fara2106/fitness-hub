@@ -185,7 +185,17 @@ function _getDieta() {
     const fromPlan = !!parsed._fromPlan;
     const has = (k) => parsed[k] && parsed[k].meals && parsed[k].meals.length;
     const KEYS = ["riposo","mattina","ore17","ore21","ore22"];
-    if (!KEYS.some(has)) return _FALLBACK;
+    // Piano con almeno una variante fuori dalle cinque (l'app ne crea come `base`, `altra`, `ore08`):
+    // si mostrano TUTTE le varianti del piano, ciascuna con la sua chiave e i suoi pasti, e la
+    // schermata usa il selettore. Mai _FALLBACK (pasti di un vecchio piano scritti nel codice),
+    // nemmeno se le varianti non hanno pasti.
+    if (fromPlan && window.PlanConv && window.PlanConv.isCustomDiet(parsed._variants)) {
+      parsed._variants.forEach(v => { (parsed[v.key].meals || []).forEach(m => { if (!m.sortTime) m.sortTime = m.time; }); });
+      Object.defineProperty(parsed, "_custom", { value: true });
+      return parsed;
+    }
+    // Piano vero ma senza pasti in nessuna delle cinque: sezioni vuote ("Nessun pasto"), non _FALLBACK.
+    if (!KEYS.some(has)) return fromPlan ? parsed : _FALLBACK;
     // Prima normalizza le varianti presenti nel TUO piano.
     KEYS.filter(has).forEach(k => {
       // Integratori: dal piano strutturato SOLO quelli previsti (anche nessuno);
@@ -214,6 +224,15 @@ function _getDieta() {
 function _savedVariant(today) {
   const v = window.storage ? window.storage.get(`dietaVariant_${today}`, null) : null;
   return (v === "riposo" || _DAY_TYPES.some(d => d.id === v)) ? v : null;
+}
+
+// Variante mostrata oggi col selettore (piano con chiavi non standard): stessa regola dell'app
+// (PlanConv.pickDietVariant): quella scelta oggi se è nel piano, poi la prima legata al giorno
+// (allenamento/riposo), poi l'ultima scelta tra le "qualsiasi giorno", poi la prima di queste.
+// Solo lettura: scrive dietaVariant_ soltanto il gesto dell'utente (scelta o spunta).
+function _customVariantKey(dieta, today) {
+  const training = !!(window.getTodaySession && window.getTodaySession());
+  return window.PlanConv.pickDietVariant(dieta._variants, { date: today, training, st: window.storage });
 }
 
 // ── Build chronological timeline (meals + supplements) ────────────────────
@@ -601,6 +620,8 @@ const Dieta = ({ device, onNav }) => {
     setTrainTime(id);
     saveVariant(id);
   };
+  // Selettore delle varianti del piano (chiavi non standard): la scelta è un gesto → dietaVariant_.
+  const pickCustom = (key) => { saveVariant(key); bump(n => n + 1); };
 
   // Supplement check state — keyed by today
   const [checked, setChecked] = React.useState(() =>
@@ -608,7 +629,7 @@ const Dieta = ({ device, onNav }) => {
   );
 
   const toggleSupp = (type) => {
-    saveVariant(training ? trainTime : "riposo");
+    saveVariant(shownVariant);
     setChecked(c => {
       const next = { ...c, [type]: !c[type] };
       if (window.storage) window.storage.set(`integ_${today}`, next);
@@ -622,7 +643,7 @@ const Dieta = ({ device, onNav }) => {
     window.storage ? window.storage.get(`dietaCheck_${today}`, {}) : {}
   );
   const toggleMeal = (key) => {
-    saveVariant(training ? trainTime : "riposo");
+    saveVariant(shownVariant);
     setMealChecked(c => {
       const next = { ...c, [key]: !c[key] };
       if (window.storage) window.storage.set(`dietaCheck_${today}`, next);
@@ -640,14 +661,19 @@ const Dieta = ({ device, onNav }) => {
     if (keys.indexOf(`dietaVariant_${today}`) !== -1) {
       const v = _savedVariant(today);
       if (v) { setTraining(v !== "riposo"); if (v !== "riposo") setTrainTime(v); }
+      bump(n => n + 1);   // selettore: la variante del giorno si rilegge dallo storage
     }
     if (keys.indexOf("plan_diet") !== -1) setDieta(_getDieta());
     if (keys.indexOf("plan_workout") !== -1) bump(n => n + 1);  // etichetta della sessione di oggi
   });
   const _mealKey = (ml) => `${ml.time}|${ml.title}`;
 
-  const dayType    = training ? trainTime : "riposo";
-  const section    = dieta[dayType] || dieta.riposo;
+  const custom     = !!dieta._custom;
+  const customKey  = custom ? _customVariantKey(dieta, today) : null;
+  const dayType    = custom ? customKey : (training ? trainTime : "riposo");
+  const shownVariant = custom ? customKey : (training ? trainTime : "riposo");
+  const section    = dieta[dayType] || dieta.riposo || { meals: [], integratori: [] };
+  const customInfo = custom ? (dieta._variants.find(v => v.key === customKey) || null) : null;
   const meals      = section.meals || [];
   // Piano strutturato: solo gli integratori previsti dal piano (anche nessuno).
   const supps      = (section.integratori && section.integratori.length) ? section.integratori
@@ -691,15 +717,47 @@ const Dieta = ({ device, onNav }) => {
       {/* Activity card */}
       <div className="card" style={{ padding: isDesktop ? 18 : 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)", letterSpacing: 0.5, textTransform: "uppercase" }}>{t("Attività di oggi")}</div>
-          <div className="muted" style={{ fontSize: 12 }}>
-            {!training && !cardio && "💤 " + t("Riposo")}
-            {training && !cardio && "💪 " + t("Solo pesi")}
-            {!training && cardio && "🔥 " + t("Solo cardio")}
-            {training && cardio && "🔥 " + t("Pesi + cardio")}
-          </div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)", letterSpacing: 0.5, textTransform: "uppercase" }}>{custom ? t("Variante di oggi") : t("Attività di oggi")}</div>
+          {custom ? (
+            /* Piano con varianti non standard: il tipo di giorno è quello della variante scelta,
+               mai «riposo» per una variante valida in qualsiasi giorno. */
+            customInfo && <div className="muted" style={{ fontSize: 12 }}>
+              {customInfo.kind === "any" && t("Qualsiasi giorno")}
+              {customInfo.kind === "training" && "💪 " + t("Allenamento") + (customInfo.time ? " · " + customInfo.time : "")}
+              {customInfo.kind === "rest" && "💤 " + t("Giorno di riposo")}
+            </div>
+          ) : (
+            <div className="muted" style={{ fontSize: 12 }}>
+              {!training && !cardio && "💤 " + t("Riposo")}
+              {training && !cardio && "💪 " + t("Solo pesi")}
+              {!training && cardio && "🔥 " + t("Solo cardio")}
+              {training && cardio && "🔥 " + t("Pesi + cardio")}
+            </div>
+          )}
         </div>
 
+        {custom && (
+          <>
+            <div className="hscroll" style={{ marginLeft: 0, marginRight: 0, paddingLeft: 0, paddingRight: 0 }}>
+              {dieta._variants.map(v => {
+                const on = customKey === v.key;
+                return (
+                  <button key={v.key} onClick={() => pickCustom(v.key)} aria-pressed={on} style={{
+                    display: "inline-flex", alignItems: "center", gap: 5,
+                    padding: "7px 12px", border: 0,
+                    background: on ? "var(--accent)" : "var(--card-2)",
+                    color: on ? "#fff" : "var(--text)",
+                    borderRadius: 999, fontSize: 12.5, fontWeight: on ? 600 : 500,
+                    cursor: "pointer", whiteSpace: "nowrap", transition: "all 0.16s", marginRight: 4,
+                  }}>{v.name}</button>
+                );
+              })}
+            </div>
+            <div style={{ height: 1, background: "var(--border)", margin: "10px 0" }} />
+          </>
+        )}
+
+        {!custom && (<>
         {/* Allenamento row */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
           <div style={{ width: 34, height: 34, borderRadius: 9, background: training ? "rgba(10,132,255,0.2)" : "var(--card-2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "background 0.18s" }}>
@@ -740,6 +798,7 @@ const Dieta = ({ device, onNav }) => {
         )}
 
         <div style={{ height: 1, background: "var(--border)", margin: "10px 0" }} />
+        </>)}
 
         {/* Cardio row */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>

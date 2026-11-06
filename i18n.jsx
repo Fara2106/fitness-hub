@@ -282,6 +282,8 @@ const I18N_DICT = {
   // Dieta
   "Piano alimentare": { en: "Meal plan" },
   "Attività di oggi": { en: "Today's activity" },
+  "Variante di oggi": { en: "Today's variant" },
+  "Qualsiasi giorno": { en: "Any day" },
   "Allenamento:": { en: "Workout:" },
   "Allenamento pesi": { en: "Weight training" },
   "pesi": { en: "weights" },

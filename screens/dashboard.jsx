@@ -29,7 +29,10 @@ function _nextMealHome() {
   const saved = window.storage ? window.storage.get(`dietaVariant_${today}`, null) : null;
   const sess = window.getTodaySession ? window.getTodaySession() : null;
   const has = (k) => dieta[k] && dieta[k].meals && dieta[k].meals.length;
-  const key = (saved && has(saved)) ? saved : (sess && has("ore17") ? "ore17" : "riposo");
+  // Piano con varianti non standard (`base`, `altra`…): la regola dell'app, come nel selettore della Dieta.
+  const key = (dieta._fromPlan && window.PlanConv && window.PlanConv.isCustomDiet(dieta._variants))
+    ? window.PlanConv.pickDietVariant(dieta._variants, { date: today, training: !!sess, st: window.storage })
+    : (saved && has(saved)) ? saved : (sess && has("ore17") ? "ore17" : "riposo");
   const section = dieta[key];
   if (!section || !section.meals || !section.meals.length) return null;
   const now = new Date();
