@@ -2,7 +2,7 @@
 export const COLLECTIONS = new Set([
   "workoutPlan", "dietPlan", "dayState", "setLog", "workoutSession", "mealCheck",
   "supplementCheck", "bodyWeight", "bodyMeasure", "shoppingCheck", "shoppingExtra",
-  "exerciseNote", "personalRecord", "coachMessage", "settings",
+  "exerciseNote", "personalRecord", "coachMessage", "settings", "customExercise",
 ]);
 export const MAX_FUTURE_MS = 300000;
 

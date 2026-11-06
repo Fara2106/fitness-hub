@@ -66,6 +66,7 @@ Il client Swift conserva le chiavi che non conosce (round-trip): aggiungere camp
 | `exerciseNote` | nome esercizio minuscolo | `{ exerciseName, text }` |
 | `personalRecord` | nome esercizio minuscolo | `{ exerciseName, … }` |
 | `coachMessage` | `${date}:${index}` | `{ date, index, role, text }` |
+| `customExercise` | UUID | `{ name, muscles: string[], levels: { zona: "principale"\|"secondario" }, equipment: string\|null, notes, hasImage: boolean }` — esercizio creato dall'app iOS, tombstone alla cancellazione; la PWA lo ignora |
 | `settings` | chiave | `{ value }` — chiavi: `excludedFoods` (string[]), `spesaFreq`, `weightGoal`, `bodyWeight` (peso profilo), `lang`, `theme` |
 
 ## Forme osservate nelle fixture della PWA

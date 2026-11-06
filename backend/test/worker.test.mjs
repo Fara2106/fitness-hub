@@ -76,6 +76,20 @@ test("due device: le spunte si sommano", async () => {
   assert.deepEqual(j.changes.map((c) => c.id).sort(), ["2026-11-03:m1", "2026-11-03:m2"]);
 });
 
+test("customExercise: push e pull di un esercizio personalizzato, poi tombstone", async () => {
+  const env = await newEnv();
+  const data = { name: "Curl al cavo", muscles: ["Bicipiti"], levels: { Bicipiti: "principale" }, equipment: null, notes: "", hasImage: false };
+  const r1 = await (await sync(env, { deviceId: "app", cursor: 0, changes: [{ collection: "customExercise", id: "c1", data, updatedAt: NOW }] })).json();
+  assert.equal(r1.applied, 1);
+  const j = await (await sync(env, { deviceId: "other", cursor: 0, changes: [] })).json();
+  const rec = j.changes.find((c) => c.collection === "customExercise" && c.id === "c1");
+  assert.deepEqual(rec.data, data);
+  const r2 = await (await sync(env, { deviceId: "app", cursor: j.cursor, changes: [{ collection: "customExercise", id: "c1", data: null, deleted: true, updatedAt: NOW + 1 }] })).json();
+  assert.equal(r2.applied, 1);
+  const j2 = await (await sync(env, { deviceId: "other", cursor: j.cursor, changes: [] })).json();
+  assert.equal(j2.changes.find((c) => c.id === "c1").deleted, true);
+});
+
 test("input non valido: 400 e nessun record scritto (tutto o niente)", async () => {
   const env = await newEnv();
   const bad = (change, re) => async () => {

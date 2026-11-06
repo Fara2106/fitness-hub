@@ -1009,6 +1009,23 @@ await (async () => {
       ok("Qualsiasi giorno: un device nuovo che sincronizza senza gesti non scrive niente sul server", C.sent().length === 0 && (await serverRecords(env)).length === before);
     }
 
+    // ── Collezione `customExercise` (scritta dall'app iOS): la PWA la ignora senza errori e il cursore avanza ──
+    {
+      const env = await backend({ plans: false });
+      const ce = { collection: "customExercise", id: "11111111-2222-3333-4444-555555555555", updatedAt: T0 - 1000,
+        data: { name: "Curl al cavo", muscles: ["Bicipiti"], levels: { Bicipiti: "principale" }, equipment: null, notes: "", hasImage: false } };
+      const wgt = { collection: "bodyWeight", id: daysAgo(1), updatedAt: T0 - 500, data: { date: daysAgo(1), kg: 80 } };
+      const pr = await (await call(env, { deviceId: "app", cursor: 0, changes: [ce, wgt] })).json();
+      const srvCursor = Math.max(...(await serverRecords(env)).map(r => r.seq));
+      const P = device(env);
+      let r, threw = null;
+      try { r = await P.SV.setToken(TOKEN); } catch (e) { threw = e; }
+      ok("customExercise sul server: il server l'ha accettata", pr.applied === 2 && count(await serverRecords(env), "customExercise") === 1);
+      ok("customExercise ignorata dalla PWA: nessuna eccezione e sync riuscito", !threw && !!r && r.ok !== false && P.logs.length === 0);
+      ok("customExercise ignorata: nessun record in cache, gli altri record arrivano", !P.SV.getRecord("customExercise", ce.id) && P.SV.listRecords("customExercise").length === 0 && !!P.SV.getRecord("bodyWeight", wgt.id));
+      ok("customExercise ignorata: il cursore avanza oltre il record", P.S.get("v2cursor") === srvCursor && P.outbox().length === 0);
+    }
+
     // ── A spunta un pasto, B spunta la spesa ──────────────────────────────────
     {
       const env = await backend();
