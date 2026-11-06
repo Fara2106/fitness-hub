@@ -114,7 +114,7 @@ e appartiene a un **account**: l'id dell'account È l'`ownerId` dei record (l'ac
   mette il suo SHA-256 esadecimale minuscolo (il server confronta il claim `nonce` con SHA-256(nonce inviato)).
   Con la registrazione chiusa un Apple ID non collegato dà `401` (nessun account creato); `link` → `409` se l'Apple ID è
   già di un altro account.
-- `GET /v1/me` → `{ ownerId, email, epoch }`.
+- `GET /v1/me` → `{ ownerId, email, hasPassword, epoch }`.
 - Durante il passaggio (`LEGACY_TOKEN_ENABLED = "true"`) il vecchio `SYNC_TOKEN` vale ancora per `PRIMARY_OWNER` su
   `/v1/sync`, `/v1/me` e `/v1/auth/claim` (non sulle altre `/v1/auth/*`). Poi si spegne (Task 9C).
 - CORS come `/v1/sync`: la PWA (`https://fara2106.github.io`) può chiamare tutte le rotte `/v1/auth/*`.

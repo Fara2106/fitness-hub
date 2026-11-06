@@ -8,7 +8,7 @@ e tombstone per le eliminazioni. Zero dipendenze runtime.
 ## Endpoint
 
 - `GET /v1/health` → `{ ok: true, version: "1" }` (senza token)
-- `GET /v1/me` con `Authorization: Bearer <sessione>` → `{ ownerId, email, epoch }` (401 senza token o con token
+- `GET /v1/me` con `Authorization: Bearer <sessione>` → `{ ownerId, email, hasPassword, epoch }` (401 senza token o con token
   sbagliato, scaduto o revocato). Con `LEGACY_TOKEN_ENABLED = "true"` anche il token `SYNC_TOKEN` vale, per il
   proprietario `PRIMARY_OWNER` (variabile in `wrangler.toml`, un UUID: è un identificatore, non un segreto). Se in quel
   caso `PRIMARY_OWNER` manca, `/v1/me` e `/v1/sync` rispondono 500 "configurazione mancante" senza scrivere nulla.

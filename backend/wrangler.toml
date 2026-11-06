@@ -20,5 +20,7 @@ REGISTRATION_OPEN = "false"
 # Accedi con Apple: acceso dal 2026-11-06 (entra solo chi ha collegato l'Apple ID al suo account: la registrazione resta chiusa).
 APPLE_SIGNIN_ENABLED = "true"
 APPLE_BUNDLE_ID = "it.faraoni.fitnesshub"
+# Email del proprietario: se Apple la conferma, Accedi con Apple entra sui dati di PRIMARY_OWNER (e crea l'account se manca).
+OWNER_EMAIL = "lorefara97@gmail.com"
 # Secret (non qui): SYNC_TOKEN (solo durante il passaggio) e PASSWORD_PEPPER (pepper delle password, creato con
 # `node admin/account.mjs init-pepper` e caricato con `npx wrangler secret put PASSWORD_PEPPER < ~/.config/fitness-hub/pepper`).

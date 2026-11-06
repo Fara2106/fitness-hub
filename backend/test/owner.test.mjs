@@ -64,7 +64,7 @@ test("GET /v1/me: ownerId ed epoch; 401 senza token o con token sbagliato; 405 s
   const env = { DB: db, SYNC_TOKEN: TOKEN, PRIMARY_OWNER: A, LEGACY_TOKEN_ENABLED: "true" };
   const res = await worker.fetch(req("/v1/me"), env);
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { ownerId: A, email: null, epoch: (await readMeta(db)).epoch });
+  assert.deepEqual(await res.json(), { ownerId: A, email: null, hasPassword: false, epoch: (await readMeta(db)).epoch });
   assert.equal((await worker.fetch(req("/v1/me", { token: null }), env)).status, 401);
   assert.equal((await worker.fetch(req("/v1/me", { token: "x".repeat(64) }), env)).status, 401);
   assert.equal((await worker.fetch(req("/v1/me", { method: "POST", body: {} }), env)).status, 405);

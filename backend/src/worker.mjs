@@ -272,15 +272,17 @@ async function handlePassword(request, env, cors) {
   if (a instanceof Response) return a;
   const body = await readAuthBody(request, cors);
   if (body instanceof Response) return body;
-  if (typeof body.current !== "string") return json({ error: "password attuale obbligatoria" }, 400, cors);
+  const account = await env.DB.prepare("SELECT * FROM accounts WHERE id = ?").bind(a.owner).first();
+  // Account nato con Apple: la prima password non ne ha una da confermare.
+  const firstPassword = !!account && !account.pw_hash;
+  if (!firstPassword && typeof body.current !== "string") return json({ error: "password attuale obbligatoria" }, 400, cors);
   const problem = passwordProblem(body.next);
   if (problem) return json({ error: problem }, 400, cors);
   const pepper = requirePepper(env);
   const now = Date.now();
-  const account = await env.DB.prepare("SELECT * FROM accounts WHERE id = ?").bind(a.owner).first();
   const keys = [emailKey(account && account.email ? account.email : a.owner), ipKey(clientIp(request))];
   if ((await chargeAttempt(env.DB, keys, now)).limited) return tooMany(cors);
-  if (!(await verifyPassword(body.current, account, pepper))) return json(BAD_CREDENTIALS, 401, cors);
+  if (!firstPassword && !(await verifyPassword(body.current, account, pepper))) return json(BAD_CREDENTIALS, 401, cors);
   const h = await hashPassword(body.next, pepper);
   await env.DB.batch([
     env.DB.prepare("UPDATE accounts SET pw_hash = ?, pw_salt = ?, pw_iter = ?, pw_ver = ? WHERE id = ?").bind(h.hash, h.salt, h.iter, h.ver, a.owner),
@@ -301,8 +303,37 @@ async function appleClaims(request, env, cors, body, keys, now) {
   return claims;
 }
 
+// L'Apple ID del proprietario: Apple conferma OWNER_EMAIL. È l'unico caso in cui l'email di Apple porta a dati esistenti:
+// nessun altro può far confermare ad Apple quell'indirizzo, che con «Nascondi la mia email» non arriva.
+function isOwnerAppleId(env, claims) {
+  const owner = normalizeEmail(env.OWNER_EMAIL);
+  const verified = claims.email_verified === true || claims.email_verified === "true";
+  return isValidEmail(owner) && verified && normalizeEmail(claims.email) === owner
+    && typeof env.PRIMARY_OWNER === "string" && env.PRIMARY_OWNER !== "";
+}
+
+// L'account del proprietario per il suo Apple ID: lo crea se non esiste, lo collega se non ha un Apple ID. null se
+// è disattivato o già legato a un altro Apple ID.
+async function ownerAccountForApple(env, claims, now) {
+  const row = await env.DB.prepare("SELECT * FROM accounts WHERE id = ?").bind(env.PRIMARY_OWNER).first();
+  if (row) {
+    if (row.disabled || row.apple_sub) return null;
+    await env.DB.prepare("UPDATE accounts SET apple_sub = ? WHERE id = ?").bind(claims.sub, row.id).run();
+    return row;
+  }
+  const account = { id: env.PRIMARY_OWNER, email: normalizeEmail(env.OWNER_EMAIL) };
+  try {
+    await env.DB.prepare("INSERT INTO accounts (id, email, apple_sub, created_at, disabled) VALUES (?, ?, ?, ?, 0)")
+      .bind(account.id, account.email, claims.sub, now).run();
+  } catch (e) {
+    if (isUniqueViolation(e)) return null;
+    throw e;
+  }
+  return account;
+}
+
 // POST /v1/auth/apple {identityToken, nonce, deviceName}: accede all'account con quell'apple_sub.
-// Account inesistente: lo crea solo con la registrazione aperta.
+// Account inesistente: l'Apple ID del proprietario entra sui suoi dati; gli altri solo con la registrazione aperta.
 async function handleApple(request, env, cors) {
   const body = await readAuthBody(request, cors);
   if (body instanceof Response) return body;
@@ -312,6 +343,7 @@ async function handleApple(request, env, cors) {
   if (claims instanceof Response) return claims;
   let account = await env.DB.prepare("SELECT * FROM accounts WHERE apple_sub = ?").bind(claims.sub).first();
   if (account && account.disabled) return json(BAD_CREDENTIALS, 401, cors);
+  if (!account && isOwnerAppleId(env, claims)) account = await ownerAccountForApple(env, claims, now);
   if (!account) {
     if (env.REGISTRATION_OPEN !== "true") return json({ error: "nessun account collegato a questo Apple ID" }, 401, cors);
     // l'email di Apple non collega account esistenti: solo se libera diventa l'email del nuovo account
@@ -385,14 +417,11 @@ export default {
         if (request.method !== "GET") return json({ error: "metodo non consentito" }, 405, cors);
         const a = await authenticate(request, env);
         if (a === null) return json({ error: "non autorizzato" }, 401, cors);
-        let email = a.email;
-        if (email === undefined) {
-          // token legacy: l'email dell'account di PRIMARY_OWNER, se esiste già
-          const row = await env.DB.prepare("SELECT email FROM accounts WHERE id = ?").bind(a.owner).first().catch(() => null);
-          email = row ? row.email : null;
-        }
+        // col token legacy `a.email` manca: l'email è quella dell'account di PRIMARY_OWNER, se esiste già
+        const row = await env.DB.prepare("SELECT email, pw_hash FROM accounts WHERE id = ?").bind(a.owner).first().catch(() => null);
+        const email = a.email === undefined ? (row ? row.email : null) : a.email;
         const { epoch } = await readMeta(env.DB);
-        return json({ ownerId: a.owner, email: email ?? null, epoch }, 200, cors);
+        return json({ ownerId: a.owner, email: email ?? null, hasPassword: !!(row && row.pw_hash), epoch }, 200, cors);
       }
       if (Object.hasOwn(AUTH_ROUTES, pathname)) {
         // Accedi con Apple è spento finché APPLE_SIGNIN_ENABLED !== "true": le rotte non esistono.

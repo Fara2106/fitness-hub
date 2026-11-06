@@ -388,6 +388,76 @@ test("Apple con flag acceso: JWT valido entra; aud/iss/exp/nonce/firma/alg sbagl
   assert.equal(await env.DB.prepare("SELECT COUNT(*) AS n FROM accounts").first("n"), n);
 });
 
+test("Apple del proprietario: senza account lo crea sui dati di PRIMARY_OWNER, senza password; poi la imposta", async () => {
+  const kit = await appleKit();
+  const env = await newEnv({ APPLE_SIGNIN_ENABLED: "true", OWNER_EMAIL: "Proprietario@Example.com" });
+  await env.DB.prepare("DELETE FROM accounts").run();
+  const nonceHash = sha256Hex(NONCE);
+  const signIn = (claims) => kit.sign({ nonce: nonceHash, email: "proprietario@example.com", email_verified: "true", ...claims })
+    .then((identityToken) => call(env, "/v1/auth/apple", { body: { identityToken, nonce: NONCE, deviceName: "iPhone" } }));
+  const r = await signIn({});
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ownerId, OWNER);
+  assert.equal(r.body.email, "proprietario@example.com");
+  assert.equal((await signIn({})).body.ownerId, OWNER, "la seconda volta entra per apple_sub");
+
+  const me = await call(env, "/v1/me", { token: r.body.session, method: "GET" });
+  assert.equal(me.body.hasPassword, false);
+  const set = await call(env, "/v1/auth/password", { token: r.body.session, body: { next: "prima-password-ok" } });
+  assert.equal(set.status, 200);
+  assert.equal((await call(env, "/v1/me", { token: r.body.session, method: "GET" })).body.hasPassword, true);
+  assert.equal((await call(env, "/v1/auth/password", { token: r.body.session, body: { next: "seconda-password-ok" } })).status, 400,
+    "con una password serve quella attuale");
+  const viaEmail = await call(env, "/v1/auth/login", { body: { email: "proprietario@example.com", password: "prima-password-ok" } });
+  assert.equal(viaEmail.status, 200);
+});
+
+test("Apple del proprietario: un account già esistente senza Apple ID si collega, con le sue credenziali intatte", async () => {
+  const kit = await appleKit();
+  const env = await newEnv({ APPLE_SIGNIN_ENABLED: "true", OWNER_EMAIL: "proprietario@example.com" });
+  const identityToken = await kit.sign({ nonce: sha256Hex(NONCE), email: "proprietario@example.com", email_verified: true });
+  const r = await call(env, "/v1/auth/apple", { body: { identityToken, nonce: NONCE, deviceName: "iPhone" } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ownerId, OWNER);
+  assert.equal(await env.DB.prepare("SELECT apple_sub FROM accounts WHERE id = ?").bind(OWNER).first("apple_sub"), "apple-sub-1");
+  assert.equal((await login(env)).status, 200, "la password di prima vale ancora");
+  const me = await call(env, "/v1/me", { token: r.body.session, method: "GET" });
+  assert.equal(me.body.hasPassword, true);
+});
+
+test("Apple: chi non è il proprietario non arriva ai suoi dati", async () => {
+  const kit = await appleKit();
+  const env = await newEnv({ APPLE_SIGNIN_ENABLED: "true", OWNER_EMAIL: "proprietario@example.com" });
+  await env.DB.prepare("DELETE FROM accounts").run();
+  const nonceHash = sha256Hex(NONCE);
+  const attempt = (claims, ip) => kit.sign({ nonce: nonceHash, ...claims })
+    .then((identityToken) => call(env, "/v1/auth/apple", { body: { identityToken, nonce: NONCE }, ip }));
+  const refused = async (claims, ip) => {
+    const r = await attempt(claims, ip);
+    assert.equal(r.status, 401, JSON.stringify(claims));
+    assert.equal(r.body.error, "nessun account collegato a questo Apple ID");
+  };
+  await refused({ email: "altro@example.com", email_verified: "true" }, "10.8.0.1");
+  await refused({ email: "proprietario@example.com" }, "10.8.0.2");                                    // non confermata
+  await refused({ email: "proprietario@example.com", email_verified: "false" }, "10.8.0.3");
+  await refused({ email: "abc123@privaterelay.appleid.com", email_verified: "true" }, "10.8.0.4");     // Nascondi la mia email
+  await refused({}, "10.8.0.5");
+  assert.equal(await env.DB.prepare("SELECT COUNT(*) AS n FROM accounts").first("n"), 0);
+  // Il proprietario ha già un altro Apple ID: un secondo non lo sostituisce, anche con la stessa email.
+  const r = await attempt({ sub: "sub-primo", email: "proprietario@example.com", email_verified: "true" }, "10.8.0.6");
+  assert.equal(r.status, 200);
+  await refused({ sub: "sub-secondo", email: "proprietario@example.com", email_verified: "true" }, "10.8.0.7");
+  assert.equal(await env.DB.prepare("SELECT apple_sub FROM accounts WHERE id = ?").bind(OWNER).first("apple_sub"), "sub-primo");
+});
+
+test("Apple senza OWNER_EMAIL: nessun Apple ID arriva ai dati del proprietario", async () => {
+  const kit = await appleKit();
+  const env = await newEnv({ APPLE_SIGNIN_ENABLED: "true" });
+  await env.DB.prepare("DELETE FROM accounts").run();
+  const identityToken = await kit.sign({ nonce: sha256Hex(NONCE), email: "proprietario@example.com", email_verified: "true" });
+  assert.equal((await call(env, "/v1/auth/apple", { body: { identityToken, nonce: NONCE } })).status, 401);
+});
+
 test("Apple: /apple/link collega l'Apple ID all'account della sessione; già collegato altrove → 409", async () => {
   const kit = await appleKit();
   const env = await newEnv({ APPLE_SIGNIN_ENABLED: "true" });
